@@ -1,0 +1,20 @@
+# World Sim — files to ignore
+.env
+.env.local
+.env.production
+*.key
+*.pem
+*.secret
+secrets/
+data/private/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+data/*.json
+data/*.jsonl

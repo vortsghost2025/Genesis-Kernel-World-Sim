@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Creator Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1117; --panel: #1a1d27; --card: #242836; --border: #2d3148;
+            --text: #e8e6e3; --text2: #9ca3af; --muted: #6b7280;
+            --gold: #d4a853; --green: #4ade80; --blue: #60a5fa; --red: #f87171;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+        header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 1.2rem; color: var(--gold); }
+        .controls { display: flex; gap: 0.5rem; }
+        .btn { padding: 0.5rem 1rem; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+        .btn:hover { background: var(--border); }
+        .btn.primary { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600; }
+        .btn.danger { border-color: var(--red); color: var(--red); }
+        .btn.danger:hover { background: var(--red); color: #000; }
+        .dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; padding: 1rem 2rem; }
+        .sidebar { display: flex; flex-direction: column; gap: 1rem; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .panel-header { background: var(--card); padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+        .panel-body { padding: 1rem; }
+        .stat-row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: var(--text2); }
+        .stat-value { color: var(--text); font-weight: 500; }
+        .agent-card { background: var(--card); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; }
+        .agent-card h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+        .agent-card .role { font-size: 0.75rem; color: var(--text2); }
+        .agent-card .status { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
+        .timeline { max-height: 600px; overflow-y: auto; }
+        .event-item { background: var(--card); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; font-size: 0.8rem; }
+        .event-item .tick { font-weight: 600; color: var(--gold); }
+        .event-item .narrative { margin-top: 0.3rem; color: var(--text2); }
+        .event-item .agents { margin-top: 0.3rem; font-size: 0.75rem; color: var(--muted); }
+        .add-agent-form { display: flex; flex-direction: column; gap: 0.5rem; }
+        .add-agent-form input, .add-agent-form select { padding: 0.5rem; background: var(--card); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.8rem; }
+        .provider-log { font-size: 0.75rem; max-height: 200px; overflow-y: auto; }
+        .provider-log .call { padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+        .provider-log .success { color: var(--green); }
+        .provider-log .error { color: var(--red); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>World Sim — Creator Dashboard</h1>
+        <div class="controls">
+            <button class="btn primary" onclick="tick()">▶ One Tick</button>
+            <button class="btn" onclick="run5()">⏩ 5 Ticks</button>
+            <button class="btn" onclick="run20()">⏩ 20 Ticks</button>
+            <button class="btn danger" onclick="resetSim()">↺ Reset</button>
+        </div>
+    </header>
+
+    <div class="dashboard">
+        <div class="sidebar">
+            <!-- World State -->
+            <div class="panel">
+                <div class="panel-header">🌍 World State</div>
+                <div class="panel-body" id="world-state">
+                    <div class="stat-row"><span class="stat-label">Tick</span><span class="stat-value" id="w-tick">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Day</span><span class="stat-value" id="w-day">1</span></div>
+                    <div class="stat-row"><span class="stat-label">Time</span><span class="stat-value" id="w-time">morning</span></div>
+                    <div class="stat-row"><span class="stat-label">Weather</span><span class="stat-value" id="w-weather">gentle</span></div>
+                    <div class="stat-row"><span class="stat-label">Garden</span><span class="stat-value" id="w-garden">pristine</span></div>
+                    <div class="stat-row"><span class="stat-label">Harmony</span><span class="stat-value" id="w-harmony">1.00</span></div>
+                    <div class="stat-row"><span class="stat-label">Boundary</span><span class="stat-value" id="w-boundary">Respected</span></div>
+                </div>
+            </div>
+
+            <!-- Agents -->
+            <div class="panel">
+                <div class="panel-header">👥 Agents</div>
+                <div class="panel-body" id="agent-list"></div>
+            </div>
+
+            <!-- Add Agent -->
+            <div class="panel">
+                <div class="panel-header">+ Add Character</div>
+                <div class="panel-body">
+                    <div class="add-agent-form">
+                        <input type="text" id="new-name" placeholder="Name (e.g., Cain)">
+                        <input type="text" id="new-role" placeholder="Role (e.g., farmer)">
+                        <select id="new-provider">
+                            <option value="mock">Mock</option>
+                            <option value="nim-dry-run">NIM Dry-Run</option>
+                            <option value="nim-live">NIM Live</option>
+                        </select>
+                        <input type="text" id="new-model" placeholder="Model (optional)">
+                        <input type="text" id="new-key-env" placeholder="Key env var (optional)">
+                        <button class="btn primary" onclick="addAgent()">Add Character</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Provider Log -->
+            <div class="panel">
+                <div class="panel-header">📡 Provider Calls</div>
+                <div class="panel-body">
+                    <div class="provider-log" id="provider-log"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timeline -->
+        <div class="panel">
+            <div class="panel-header">📜 Timeline</div>
+            <div class="panel-body">
+                <div class="timeline" id="timeline"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchJSON(path) { return (await fetch(path)).json(); }
+        async function postJSON(path, body) {
+            return (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json();
+        }
+        async function deleteJSON(path) {
+            return (await fetch(path, { method: 'DELETE' })).json();
+        }
+        async function refresh() {
+            try {
+                const [state, agents, events, providers] = await Promise.all([
+                    fetchJSON('/api/state'), fetchJSON('/api/agents'), fetchJSON('/api/events?limit=100'), fetchJSON('/api/providers'),
+                ]);
+                // World state
+                document.getElementById('w-tick').textContent = state.tick;
+                document.getElementById('w-day').textContent = state.day;
+                document.getElementById('w-time').textContent = state.time_of_day;
+                document.getElementById('w-weather').textContent = state.weather;
+                document.getElementById('w-garden').textContent = state.garden_condition;
+                document.getElementById('w-harmony').textContent = state.harmony_level.toFixed(2);
+                document.getElementById('w-boundary').textContent = state.boundary_respected ? 'Respected' : 'Not Respected';
+                // Agents
+                const agentList = document.getElementById('agent-list');
+                agentList.innerHTML = Object.values(agents).map(a => `
+                    <div class="agent-card">
+                        <h3>${a.name} ${a.enabled ? '' : '(disabled)'}</h3>
+                        <div class="role">${a.role}</div>
+                        <div class="status">Tick ${a.tick} | ${a.provider} | ${a.memory_count} memories</div>
+                        <div style="font-size:0.75rem;margin-top:0.3rem;color:var(--muted);">Thought: ${a.current_thought?.substring(0, 60) || '—'}</div>
+                        <div style="font-size:0.75rem;color:var(--muted);">Action: ${a.current_action?.substring(0, 60) || '—'}</div>
+                        ${a.name !== 'Adam' && a.name !== 'Eve' ? `<button class="btn danger" style="margin-top:0.3rem;font-size:0.7rem;" onclick="removeAgent('${a.name}')">Remove</button>` : ''}
+                    </div>
+                `).join('');
+                // Timeline
+                const timeline = document.getElementById('timeline');
+                timeline.innerHTML = events.slice().reverse().map(e => `
+                    <div class="event-item">
+                        <span class="tick">Tick ${e.tick}</span>
+                        <span style="color:var(--muted);margin-left:0.5rem;">[${e.label}]</span>
+                        <div class="narrative">${e.narrative}</div>
+                        <div class="agents">${Object.entries(e.agents || {}).map(([n, a]) => `${n}: ${a.action?.substring(0, 40) || '—'}`).join(' | ')}</div>
+                    </div>
+                `).join('');
+                // Provider log
+                const plog = document.getElementById('provider-log');
+                plog.innerHTML = (providers.recent_calls || []).slice().reverse().map(c => `
+                    <div class="call ${c.success ? 'success' : 'error'}">
+                        ${c.agent} → ${c.provider} (tick ${c.tick}) ${c.success ? '✓' : '✗ ' + (c.error || '')} ${c.latency_ms ? c.latency_ms + 'ms' : ''}
+                    </div>
+                `).join('');
+            } catch (err) { console.error('Failed:', err); }
+        }
+        async function tick() { await postJSON('/api/tick'); refresh(); }
+        async function run5() { await postJSON('/api/run', { count: 5 }); refresh(); }
+        async function run20() { await postJSON('/api/run', { count: 20 }); refresh(); }
+        async function resetSim() { if (!confirm('Reset simulation?')) return; await postJSON('/api/reset'); refresh(); }
+        async function addAgent() {
+            const name = document.getElementById('new-name').value.trim();
+            if (!name) return alert('Enter a name');
+            await postJSON('/api/agents', {
+                name,
+                role: document.getElementById('new-role').value,
+                provider: document.getElementById('new-provider').value,
+                model: document.getElementById('new-model').value || undefined,
+                key_env: document.getElementById('new-key-env').value || undefined,
+            });
+            document.getElementById('new-name').value = '';
+            document.getElementById('new-role').value = '';
+            refresh();
+        }
+        async function removeAgent(name) {
+            if (!confirm(`Remove ${name}?`)) return;
+            await deleteJSON(`/api/agents/${name}`);
+            refresh();
+        }
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>
