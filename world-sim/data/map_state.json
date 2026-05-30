@@ -1,0 +1,198 @@
+{
+  "disclaimer": "This is a real-time world simulation. Watch Adam and Eve explore their worlds and interact in real-time.",
+  "regions": {
+    "east": {
+      "discovered": true,
+      "exploration_level": 0
+    },
+    "west": {
+      "discovered": true,
+      "exploration_level": 0
+    }
+  },
+  "entities": [
+    {
+      "id": "east_adam",
+      "name": "East Adam",
+      "type": "character",
+      "region": "east",
+      "x": 0.32,
+      "y": 0.45,
+      "discovered": true,
+      "icon": "👨",
+      "color": "#4488ff",
+      "description": "Smart, thoughtful builder. The first man of the East, exploring his environment.",
+      "source_type": "Simulation",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "east_eve",
+      "name": "East Eve",
+      "type": "character",
+      "region": "east",
+      "x": 0.36,
+      "y": 0.48,
+      "discovered": true,
+      "icon": "👩",
+      "color": "#ff88dd",
+      "description": "Very smart, relational. The first woman of the East, seeking connection and deep understanding.",
+      "source_type": "Simulation",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "west_adam",
+      "name": "West Adam",
+      "type": "character",
+      "region": "west",
+      "x": 0.48,
+      "y": 0.52,
+      "discovered": true,
+      "icon": "🤠",
+      "color": "#ff8844",
+      "description": "Creative explorer. The first human of the West, fascinated by construction and discovery.",
+      "source_type": "Simulation",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "west_eve",
+      "name": "West Eve",
+      "type": "character",
+      "region": "west",
+      "x": 0.54,
+      "y": 0.56,
+      "discovered": true,
+      "icon": "👩‍🌾",
+      "color": "#44ff88",
+      "description": "Fast, curious discoverer. The first woman of the West, seeking out the hidden secrets of the frontier.",
+      "source_type": "Simulation",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "east_eden",
+      "name": "The Garden of Eden",
+      "type": "settlement",
+      "region": "east",
+      "x": 0.34,
+      "y": 0.42,
+      "discovered": true,
+      "icon": "🏡",
+      "color": "#ffd700",
+      "description": "The beautiful, pristine garden of creation, filled with abundant fruit and perfect harmony.",
+      "source_type": "Bible source",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "east_tree_of_knowledge",
+      "name": "The Tree of Knowledge",
+      "type": "settlement",
+      "region": "east",
+      "x": 0.42,
+      "y": 0.40,
+      "discovered": true,
+      "icon": "🍎",
+      "color": "#ff4444",
+      "description": "The mysterious tree standing at the center of the garden. A boundary lines this place: 'Do not eat from it.'",
+      "source_type": "Bible source",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "east_serpent_cave",
+      "name": "Whispering Serpent's Hollow",
+      "type": "settlement",
+      "region": "east",
+      "x": 0.58,
+      "y": 0.25,
+      "discovered": false,
+      "icon": "🐍",
+      "color": "#9400d3",
+      "description": "A dark, shaded cavern from which low, tempting whispers are sometimes carried on the wind.",
+      "source_type": "Interpretation",
+      "confidence": "Speculative",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "west_valley",
+      "name": "The Valley of Dawn",
+      "type": "settlement",
+      "region": "west",
+      "x": 0.50,
+      "y": 0.54,
+      "discovered": true,
+      "icon": "🏕️",
+      "color": "#00ff88",
+      "description": "The home base of the Western pioneers, set in a fertile valley surrounded by wild highlands.",
+      "source_type": "Simulation",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "west_crystal_caves",
+      "name": "The Obsidian Caves",
+      "type": "settlement",
+      "region": "west",
+      "x": 0.28,
+      "y": 0.32,
+      "discovered": false,
+      "icon": "💎",
+      "color": "#44ff88",
+      "description": "A cave network glittering with rich ores and obsidian, ideal for building advanced tools.",
+      "source_type": "Simulation",
+      "confidence": "Medium",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "west_tree_of_life",
+      "name": "The Hidden Oasis",
+      "type": "settlement",
+      "region": "west",
+      "x": 0.72,
+      "y": 0.45,
+      "discovered": false,
+      "icon": "🌴",
+      "color": "#00ffff",
+      "description": "A radiant, shimmering pool surrounded by glowing flowers, rumoured to restore vitality.",
+      "source_type": "Simulation",
+      "confidence": "Medium",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "river_gihon",
+      "name": "The Gihon River",
+      "type": "river",
+      "region": "east",
+      "path": [
+        [0.15, 0.2],
+        [0.25, 0.35],
+        [0.34, 0.42],
+        [0.45, 0.6]
+      ],
+      "discovered": true,
+      "description": "One of the four rivers flowing out of Eden to water the garden.",
+      "source_type": "Bible source",
+      "confidence": "High",
+      "first_seen_tick": 0
+    },
+    {
+      "id": "river_pishon",
+      "name": "The Pishon River",
+      "type": "river",
+      "region": "west",
+      "path": [
+        [0.3, 0.8],
+        [0.5, 0.54],
+        [0.7, 0.3]
+      ],
+      "discovered": true,
+      "description": "The river winding through the Western lands, rich in natural elements and gold.",
+      "source_type": "Bible source",
+      "confidence": "High",
+      "first_seen_tick": 0
+    }
+  ]
+}

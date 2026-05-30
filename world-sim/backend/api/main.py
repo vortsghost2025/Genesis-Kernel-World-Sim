@@ -85,6 +85,13 @@ class AddAgentRequest(BaseModel):
     traits: dict[str, float] = {}
 
 
+class InterventionRequest(BaseModel):
+    hemisphere: str  # "east", "west", or "both"
+    type: str  # "lightning", "rain", "blessing", "trial", "whisper"
+    agent: str | None = None
+    details: str | None = None
+
+
 # --- Routes ---
 
 @app.get("/sim")
@@ -348,3 +355,17 @@ def get_providers():
         "call_log": call_log.summary(),
         "recent_calls": call_log.recent(20),
     }
+
+
+@app.post("/api/intervention")
+def post_intervention(req: InterventionRequest):
+    """Trigger a divine intervention in the simulation."""
+    success = dual_sim.trigger_intervention(
+        hemisphere=req.hemisphere,
+        type=req.type,
+        agent_name=req.agent,
+        details=req.details,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to trigger intervention")
+    return {"status": "ok", "message": f"Intervention {req.type} triggered successfully"}

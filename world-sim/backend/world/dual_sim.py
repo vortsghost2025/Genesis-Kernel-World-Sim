@@ -260,6 +260,9 @@ class DualHemisphereSim:
                 "tick_east": self.east.tick,
                 "tick_west": self.west.tick,
             }
+
+        # Update physical map positions & process landmark exploration
+        self._update_map_positions(results)
         
         # Save state periodically
         if self.east.tick % 10 == 0 or self.west.tick % 10 == 0:
@@ -267,6 +270,202 @@ class DualHemisphereSim:
             self.west.save_state(self.data_dir)
         
         return results
+
+    def _update_map_positions(self, results: dict[str, Any]) -> None:
+        """Update agent positions and discover landmarks on the map based on simulation results."""
+        import json
+        import random
+        
+        map_path = self.data_dir / "map_state.json"
+        if not map_path.exists():
+            return
+            
+        try:
+            map_state = json.loads(map_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error("Failed to load map state for update: %s", e)
+            return
+
+        # Create a mapping of agent keys to their action
+        agent_actions = {}
+        for hemis in ["east", "west"]:
+            if hemis in results and results[hemis].get("status") == "ok":
+                event = results[hemis].get("event", {})
+                for name, data in event.get("agents", {}).items():
+                    # Map e.g. "Adam" or "West Adam" -> "east_adam" or "west_adam"
+                    clean_name = name.lower().replace("west ", "").replace("east ", "")
+                    key = f"{hemis}_{clean_name}"
+                    agent_actions[key] = data.get("action", "").lower()
+
+        # Update coordinates and check discoveries
+        for entity in map_state.get("entities", []):
+            eid = entity.get("id")
+            if eid in agent_actions:
+                action = agent_actions[eid]
+                x, y = entity.get("x", 0.5), entity.get("y", 0.5)
+                
+                # Check for exploration keywords
+                is_exploring = any(w in action for w in ["explore", "discover", "wander", "walk", "travel", "climb", "search", "hunt", "go ", "move", "run", "seek", "survey", "scout"])
+                
+                if is_exploring:
+                    dx = random.uniform(-0.06, 0.06)
+                    dy = random.uniform(-0.06, 0.06)
+                else:
+                    # Minor drift
+                    dx = random.uniform(-0.015, 0.015)
+                    dy = random.uniform(-0.015, 0.015)
+                    
+                new_x = max(0.05, min(0.95, x + dx))
+                new_y = max(0.05, min(0.95, y + dy))
+                
+                entity["x"] = round(new_x, 3)
+                entity["y"] = round(new_y, 3)
+                
+                # Proximity to undiscovered locations in the same region
+                for loc in map_state.get("entities", []):
+                    if loc.get("region") == entity.get("region") and not loc.get("discovered") and loc.get("type") == "settlement":
+                        lx, ly = loc.get("x", 0.5), loc.get("y", 0.5)
+                        distance = ((new_x - lx) ** 2 + (new_y - ly) ** 2) ** 0.5
+                        if distance < 0.15:  # Within discovery distance
+                            loc["discovered"] = True
+                            h_sim = self.east if entity.get("region") == "east" else self.west
+                            loc["first_seen_tick"] = h_sim.tick
+                            
+                            # Increment exploration level
+                            h_sim.exploration_level = min(5, h_sim.exploration_level + 1)
+                            
+                            # Log discovery event
+                            discovery_msg = f"🌟 DISCOVERY: {entity.get('name')} has discovered {loc.get('name')}!"
+                            h_sim.event_log.append({
+                                "tick": h_sim.tick,
+                                "hemisphere": h_sim.name,
+                                "label": "DISCOVERY_EVENT",
+                                "narrative": discovery_msg,
+                                "agents": {},
+                                "world_changes": {}
+                            })
+                            logger.info(discovery_msg)
+
+        # Sync exploration level back to map_state regions
+        if "regions" in map_state:
+            if "east" in map_state["regions"]:
+                map_state["regions"]["east"]["exploration_level"] = self.east.exploration_level
+            if "west" in map_state["regions"]:
+                map_state["regions"]["west"]["exploration_level"] = self.west.exploration_level
+
+        # Save back
+        try:
+            map_path.write_text(json.dumps(map_state, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error("Failed to save updated map state: %s", e)
+
+    def trigger_intervention(
+        self,
+        hemisphere: str,
+        type: str,
+        agent_name: str | None = None,
+        details: str | None = None
+    ) -> bool:
+        """Trigger a divine creator intervention in one or both hemispheres."""
+        hemispheres_to_affect = []
+        if hemisphere == "both":
+            hemispheres_to_affect = [self.east, self.west]
+        elif hemisphere == "east":
+            hemispheres_to_affect = [self.east]
+        elif hemisphere == "west":
+            hemispheres_to_affect = [self.west]
+        else:
+            return False
+
+        for h_sim in hemispheres_to_affect:
+            tick = h_sim.tick
+            narrative = ""
+            world_changes = {}
+            label = "DIVINE_INTERVENTION"
+
+            if type == "lightning":
+                narrative = "⚡ A blazing bolt of lightning tears through the heavens! The sky darkens, thunder roars, and the earth trembles."
+                world_changes = {
+                    "weather": "storm",
+                    "garden_condition": "wild",
+                    "harmony_level": max(0.0, h_sim.world.harmony_level - 0.15)
+                }
+                # Apply directly
+                h_sim.world.weather = "storm"
+                h_sim.world.harmony_level = max(0.0, h_sim.world.harmony_level - 0.15)
+                # Inject memories
+                for agent in h_sim.agents.values():
+                    agent.remember_event("⚡ [Divine Revelation] A powerful bolt of lightning struck nearby. The sky turned dark with thunderous clouds, leaving you in awe of the creator's power.")
+
+            elif type == "rain":
+                narrative = "🌧️ A gentle, life-giving rain begins to fall from the heavens, watering the soil and refreshing the garden."
+                world_changes = {
+                    "weather": "cool",
+                    "garden_condition": "tended"
+                }
+                h_sim.world.weather = "cool"
+                # Inject memories
+                for agent in h_sim.agents.values():
+                    agent.remember_event("🌧️ [Divine Blessing] A gentle, refreshing rain fell from the sky, feeding the plants and filling the water sources.")
+
+            elif type == "blessing":
+                narrative = "✨ A glorious golden light shines down from above. A feeling of divine peace, harmony, and abundance fills the atmosphere."
+                world_changes = {
+                    "harmony_level": min(1.0, h_sim.world.harmony_level + 0.2),
+                    "garden_condition": "pristine"
+                }
+                h_sim.world.harmony_level = min(1.0, h_sim.world.harmony_level + 0.2)
+                h_sim.world.garden_condition = "pristine"
+                # Inject memories
+                for agent in h_sim.agents.values():
+                    agent.remember_event("✨ [Divine Blessing] You felt an overwhelming sense of warmth, peace, and abundance from the heavens. The land itself seems to glow with vitality.")
+
+            elif type == "trial":
+                narrative = "🔥 A severe trial is placed upon the land. Resources grow scarce, and the air grows hot and dry, testing the inhabitants' resilience."
+                world_changes = {
+                    "weather": "warm",
+                    "garden_condition": "wild",
+                }
+                h_sim.world.weather = "warm"
+                # Reduce resources
+                for k in h_sim.world.resources:
+                    h_sim.world.resources[k] = max(0.1, h_sim.world.resources[k] - 0.2)
+                # Inject memories
+                for agent in h_sim.agents.values():
+                    agent.remember_event("🔥 [Divine Trial] The climate suddenly turned harsh, hot, and dry. Food and materials became harder to find. It is a time of testing.")
+
+            elif type == "whisper":
+                whisper_msg = details or "Walk uprightly and tend the garden."
+                narrative = f"💭 A quiet, celestial whisper echoes directly into the mind."
+                
+                # If specific agent is specified
+                if agent_name:
+                    target_agent = None
+                    for name, agent in h_sim.agents.items():
+                        if name.lower() == agent_name.lower() or agent.name.lower() == agent_name.lower():
+                            target_agent = agent
+                            break
+                    if target_agent:
+                        target_agent.remember_event(f"💭 [Divine Whisper] You heard a soft, sacred voice whisper in your thoughts: '{whisper_msg}'")
+                        narrative = f"💭 A quiet, celestial whisper from the Creator echoes in the mind of {target_agent.name}: '{whisper_msg}'"
+                else:
+                    # Whisper to everyone in the hemisphere
+                    for agent in h_sim.agents.values():
+                        agent.remember_event(f"💭 [Divine Whisper] You heard a soft, sacred voice whisper in your thoughts: '{whisper_msg}'")
+                    narrative = f"💭 A quiet, celestial whisper echoes to all in the {h_sim.name.title()} Hemisphere: '{whisper_msg}'"
+
+            # Log to event log
+            event = {
+                "tick": tick,
+                "hemisphere": h_sim.name,
+                "label": label,
+                "narrative": narrative,
+                "agents": {},
+                "world_changes": world_changes,
+            }
+            h_sim.event_log.append(event)
+
+        return True
 
     def _check_discovery(self) -> bool:
         """Check if the two hemispheres have discovered each other."""

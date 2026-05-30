@@ -77,6 +77,8 @@
         
         /* Entity styles */
         .entity-marker { cursor: pointer; }
+        .entity-marker circle { transition: cx 2s ease-in-out, cy 2s ease-in-out, fill 0.5s; }
+        .entity-marker text { transition: x 2s ease-in-out, y 2s ease-in-out; }
         .entity-marker:hover circle, .entity-marker:focus circle { stroke-width: 3; stroke: var(--gold); }
         .entity-label { font-size: 14px; font-weight: 700; fill: #fff; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
         .river-path { stroke: #4a90d9; stroke-width: 5; fill: none; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(74,144,217,0.5)); }
@@ -381,6 +383,7 @@
         });
 
         loadMapState();
+        setInterval(loadMapState, 4000);
     </script>
 </body>
 </html>
