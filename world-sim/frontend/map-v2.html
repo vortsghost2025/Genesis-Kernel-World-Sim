@@ -3,107 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Sim — Map</title>
+    <title>World Sim — Dual Hemisphere Map</title>
     <style>
         :root {
             --bg: #0a0a0a; --panel: #1a1a1a; --card: #2a2a2a; --border: #444;
             --text: #ffffff; --text2: #cccccc; --muted: #888888;
             --gold: #ffd700; --green: #00ff88; --blue: #4488ff; --red: #ff4444;
-            --water: #0a2a4a; --land: #1a3a1a; --land-light: #2a4a2a;
+            --east-color: #4488ff; --west-color: #ff8844;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 18px; }
         
-        /* ACCESSIBLE HEADER */
         header { background: var(--panel); border-bottom: 3px solid var(--gold); padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
         header h1 { font-size: 2rem; color: var(--gold); }
         .nav-links a { color: var(--blue); text-decoration: underline; font-size: 1.2rem; padding: 0.5rem 1rem; }
         .nav-links a:hover { background: var(--card); border-radius: 6px; }
         
-        /* ACCESSIBLE CONTROLS */
         .map-controls { display: flex; gap: 1rem; flex-wrap: wrap; padding: 1rem 2rem; background: var(--panel); }
         .map-controls button { 
-            padding: 1rem 2rem; 
-            background: var(--card); 
-            border: 3px solid var(--border); 
-            color: var(--text); 
-            border-radius: 10px; 
-            cursor: pointer; 
-            font-size: 1.2rem; 
-            font-weight: 600;
-            min-height: 60px;
+            padding: 1rem 2rem; background: var(--card); border: 3px solid var(--border); color: var(--text); border-radius: 10px; cursor: pointer; font-size: 1.2rem; font-weight: 600; min-height: 60px;
         }
-        .map-controls button:hover, .map-controls button:focus { 
-            background: var(--gold); 
-            color: #000; 
-            border-color: var(--gold);
-            outline: 3px solid var(--gold);
-            outline-offset: 2px;
-        }
-        .map-controls button.active { 
-            background: var(--gold); 
-            color: #000; 
-            border-color: var(--gold);
-        }
+        .map-controls button:hover, .map-controls button:focus { background: var(--gold); color: #000; border-color: var(--gold); outline: 3px solid var(--gold); outline-offset: 2px; }
+        .map-controls button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+        .map-controls button.east-active { background: var(--east-color); color: #000; border-color: var(--east-color); }
+        .map-controls button.west-active { background: var(--west-color); color: #000; border-color: var(--west-color); }
         
-        /* MAP */
-        .map-container { max-width: 1600px; margin: 0 auto; padding: 1rem; }
+        .map-container { max-width: 1800px; margin: 0 auto; padding: 1rem; }
+        
+        /* Dual hemisphere layout */
+        .hemispheres { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .hemisphere { position: relative; }
+        .hemisphere-label { 
+            position: absolute; top: 0.5rem; left: 50%; transform: translateX(-50%); 
+            background: rgba(10,10,10,0.9); border: 2px solid var(--border); border-radius: 8px; 
+            padding: 0.5rem 1.5rem; font-size: 1.2rem; font-weight: 700; z-index: 5;
+        }
+        .hemisphere-label.east { border-color: var(--east-color); color: var(--east-color); }
+        .hemisphere-label.west { border-color: var(--west-color); color: var(--west-color); }
+        
         .map-wrapper { 
-            position: relative; 
-            width: 100%; 
-            aspect-ratio: 16 / 9; 
-            background: var(--water); 
-            border: 3px solid var(--border); 
-            border-radius: 12px; 
-            overflow: hidden;
+            position: relative; width: 100%; aspect-ratio: 16 / 9; background: #1a2a3a; border: 3px solid var(--border); border-radius: 12px; overflow: hidden;
+        }
+        .map-wrapper.locked { opacity: 0.3; pointer-events: none; }
+        .map-wrapper.locked::after {
+            content: "🔒 Undiscovered — explore to reveal";
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(10,10,10,0.9); border: 2px solid var(--gold); border-radius: 12px;
+            padding: 1rem 2rem; font-size: 1.2rem; color: var(--gold); text-align: center;
         }
         .map-svg { width: 100%; height: 100%; }
         
-        /* ACCESSIBLE INFO PANEL */
         .info-panel { 
-            position: absolute; 
-            top: 1rem; 
-            right: 1rem; 
-            background: rgba(10, 10, 10, 0.95); 
-            border: 3px solid var(--gold); 
-            border-radius: 12px; 
-            padding: 1.5rem; 
-            min-width: 300px; 
-            max-width: 400px; 
-            display: none; 
-            z-index: 10;
+            position: absolute; top: 1rem; right: 1rem; background: rgba(10, 10, 10, 0.95); border: 3px solid var(--gold); border-radius: 12px; padding: 1.5rem; min-width: 300px; max-width: 400px; display: none; z-index: 10;
         }
         .info-panel.visible { display: block; }
         .info-panel h3 { font-size: 1.5rem; color: var(--gold); margin-bottom: 0.8rem; }
         .info-panel p { font-size: 1.1rem; color: var(--text2); line-height: 1.5; }
         .info-panel .meta { font-size: 0.9rem; color: var(--muted); margin-top: 0.8rem; padding-top: 0.8rem; border-top: 2px solid var(--border); }
-        .info-panel .close-btn { 
-            position: absolute; 
-            top: 0.5rem; 
-            right: 0.5rem; 
-            background: var(--card); 
-            border: 2px solid var(--border); 
-            color: var(--text); 
-            width: 40px; 
-            height: 40px; 
-            border-radius: 50%; 
-            cursor: pointer; 
-            font-size: 1.2rem;
-        }
+        .info-panel .close-btn { position: absolute; top: 0.5rem; right: 0.5rem; background: var(--card); border: 2px solid var(--border); color: var(--text); width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; }
         
-        /* ACCESSIBLE LEGEND */
         .legend { display: flex; gap: 2rem; flex-wrap: wrap; padding: 1.5rem 2rem; background: var(--panel); border-radius: 8px; margin-top: 1rem; }
         .legend-item { display: flex; align-items: center; gap: 0.8rem; font-size: 1.1rem; }
         .legend-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; }
-        .legend-dot.eden { background: var(--green); }
+        .legend-dot.east { background: var(--east-color); }
+        .legend-dot.west { background: var(--west-color); }
         .legend-dot.settlement { background: var(--gold); }
         .legend-dot.character { background: var(--blue); }
         .legend-dot.river { background: #4a90d9; width: 30px; height: 6px; border-radius: 3px; border: none; }
         .legend-dot.locked { background: var(--muted); opacity: 0.5; }
         
         .disclaimer { text-align: center; padding: 1rem; font-size: 1rem; color: var(--muted); font-style: italic; }
+        .keyboard-hint { text-align: center; padding: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+        .keyboard-hint kbd { background: var(--card); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
         
-        /* MAP ENTITY STYLES */
         .entity-marker { cursor: pointer; }
         .entity-marker:hover circle, .entity-marker:focus circle { stroke-width: 3; stroke: var(--gold); }
         .entity-label { font-size: 14px; font-weight: 700; fill: #fff; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
@@ -112,14 +84,18 @@
         .locked-entity { opacity: 0.25; }
         .locked-label { fill: #666; font-size: 12px; }
         
-        /* KEYBOARD NAV HINT */
-        .keyboard-hint { text-align: center; padding: 0.5rem; font-size: 0.9rem; color: var(--muted); }
-        .keyboard-hint kbd { background: var(--card); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
+        /* Single hemisphere mode */
+        .hemispheres.single .hemisphere.west { display: none; }
+        .hemispheres.single .hemisphere.east { grid-column: 1 / -1; max-width: 800px; margin: 0 auto; }
+        
+        @media (max-width: 900px) {
+            .hemispheres { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <header>
-        <h1>🗺️ World Map</h1>
+        <h1>🗺️ World Map — East & West</h1>
         <div class="nav-links">
             <a href="/sim">← Back to Dashboard</a>
         </div>
@@ -127,6 +103,8 @@
 
     <div class="map-controls" id="layer-controls" role="toolbar" aria-label="Map layer controls">
         <button class="active" data-layer="all" aria-pressed="true">Show All</button>
+        <button data-layer="east" aria-pressed="false">East Hemisphere</button>
+        <button data-layer="west" aria-pressed="false">West Hemisphere</button>
         <button data-layer="discovered" aria-pressed="false">Discovered</button>
         <button data-layer="rivers" aria-pressed="false">Rivers</button>
         <button data-layer="characters" aria-pressed="false">Characters</button>
@@ -135,81 +113,59 @@
     </div>
 
     <div class="map-container">
-        <div class="map-wrapper" id="map-wrapper">
-            <svg class="map-svg" id="map-svg" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                    <!-- Water gradient -->
-                    <radialGradient id="waterGrad" cx="50%" cy="50%" r="70%">
-                        <stop offset="0%" stop-color="#0a2a4a"/>
-                        <stop offset="100%" stop-color="#051525"/>
-                    </radialGradient>
-                    <!-- Land gradient -->
-                    <linearGradient id="landGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stop-color="#1a3a1a"/>
-                        <stop offset="50%" stop-color="#2a4a2a"/>
-                        <stop offset="100%" stop-color="#1a3a1a"/>
-                    </linearGradient>
-                    <!-- Desert gradient -->
-                    <linearGradient id="desertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stop-color="#3a3a2a"/>
-                        <stop offset="100%" stop-color="#2a2a1a"/>
-                    </linearGradient>
-                    <!-- Glow filter -->
-                    <filter id="glow">
-                        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                        <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                    </filter>
-                </defs>
+        <div class="hemispheres" id="hemispheres">
+            <!-- EAST HEMISPHERE -->
+            <div class="hemisphere east">
+                <div class="hemisphere-label east">🌍 Eastern Hemisphere</div>
+                <div class="map-wrapper" id="map-east">
+                    <svg class="map-svg" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                        </defs>
+                        <image href="/data/base_map.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <g id="east-rivers-layer"></g>
+                        <g id="east-discovered-layer"></g>
+                        <g id="east-characters-layer"></g>
+                        <g id="east-settlements-layer"></g>
+                        <g id="east-future-locked-layer"></g>
+                    </svg>
+                    <div class="info-panel" id="info-east">
+                        <button class="close-btn" onclick="closeInfo('east')" aria-label="Close">✕</button>
+                        <h3 id="info-east-title">Location</h3>
+                        <p id="info-east-desc">Description</p>
+                        <div class="meta" id="info-east-meta"></div>
+                    </div>
+                </div>
+            </div>
 
-                <!-- Base map from Azgaar Fantasy Map Generator -->
-                <image href="/data/base_map.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
-
-                <!-- Rivers -->
-                <g id="rivers-layer"></g>
-
-                <!-- Discovered locations -->
-                <g id="discovered-layer"></g>
-
-                <!-- Characters -->
-                <g id="characters-layer"></g>
-
-                <!-- Settlements -->
-                <g id="settlements-layer"></g>
-
-                <!-- Future locked -->
-                <g id="future-locked-layer"></g>
-
-                <!-- Compass Rose -->
-                <g transform="translate(100, 100)">
-                    <circle r="40" fill="rgba(26, 26, 26, 0.9)" stroke="#444" stroke-width="2"/>
-                    <text x="0" y="-18" fill="var(--gold)" font-size="18" font-weight="bold" text-anchor="middle">N</text>
-                    <text x="0" y="28" fill="#888" font-size="16" text-anchor="middle">S</text>
-                    <text x="-22" y="6" fill="#888" font-size="16" text-anchor="middle">W</text>
-                    <text x="22" y="6" fill="#888" font-size="16" text-anchor="middle">E</text>
-                    <line x1="0" y1="-12" x2="0" y2="12" stroke="var(--gold)" stroke-width="2"/>
-                    <line x1="-12" y1="0" x2="12" y2="0" stroke="var(--gold)" stroke-width="2"/>
-                </g>
-
-                <!-- Scale bar -->
-                <g transform="translate(100, 600)">
-                    <line x1="0" y1="0" x2="150" y2="0" stroke="#888" stroke-width="3"/>
-                    <line x1="0" y1="-8" x2="0" y2="8" stroke="#888" stroke-width="3"/>
-                    <line x1="150" y1="-8" x2="150" y2="8" stroke="#888" stroke-width="3"/>
-                    <text x="75" y="22" fill="#888" font-size="14" text-anchor="middle">~500 miles</text>
-                </g>
-            </svg>
-
-            <!-- Info panel -->
-            <div class="info-panel" id="info-panel" role="dialog" aria-label="Location information">
-                <button class="close-btn" onclick="closeInfo()" aria-label="Close info panel">✕</button>
-                <h3 id="info-title">Location</h3>
-                <p id="info-desc">Description</p>
-                <div class="meta" id="info-meta"></div>
+            <!-- WEST HEMISPHERE -->
+            <div class="hemisphere west">
+                <div class="hemisphere-label west">🌎 Western Hemisphere</div>
+                <div class="map-wrapper locked" id="map-west">
+                    <svg class="map-svg" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <filter id="glow-west"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                        </defs>
+                        <image href="/data/base_map_west.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <g id="west-rivers-layer"></g>
+                        <g id="west-discovered-layer"></g>
+                        <g id="west-characters-layer"></g>
+                        <g id="west-settlements-layer"></g>
+                        <g id="west-future-locked-layer"></g>
+                    </svg>
+                    <div class="info-panel" id="info-west">
+                        <button class="close-btn" onclick="closeInfo('west')" aria-label="Close">✕</button>
+                        <h3 id="info-west-title">Location</h3>
+                        <p id="info-west-desc">Description</p>
+                        <div class="meta" id="info-west-meta"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div class="legend" role="list" aria-label="Map legend">
-            <div class="legend-item" role="listitem"><span class="legend-dot eden"></span> Eden / Discovered</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot east"></span> East Hemisphere</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot west"></span> West Hemisphere</div>
             <div class="legend-item" role="listitem"><span class="legend-dot character"></span> Characters</div>
             <div class="legend-item" role="listitem"><span class="legend-dot settlement"></span> Settlements</div>
             <div class="legend-item" role="listitem"><span class="legend-dot river"></span> Rivers</div>
@@ -218,37 +174,50 @@
 
         <div class="disclaimer" id="disclaimer"></div>
         <div class="keyboard-hint">
-            <kbd>Tab</kbd> to navigate controls · <kbd>Enter</kbd> to select · <kbd>Esc</kbd> to close info panel · Click markers for details
+            <kbd>Tab</kbd> to navigate · <kbd>Enter</kbd> to select · <kbd>Esc</kbd> to close info · Click markers for details
         </div>
     </div>
 
     <script>
         let mapState = null;
         let currentLayer = 'all';
+        let westDiscovered = false;
 
         async function loadMapState() {
             try {
                 const res = await fetch('/api/map-state');
                 mapState = await res.json();
                 document.getElementById('disclaimer').textContent = mapState.disclaimer || '';
-                renderMap();
+                
+                // Check if west is discovered
+                if (mapState.regions && mapState.regions.west) {
+                    westDiscovered = mapState.regions.west.discovered || false;
+                    if (westDiscovered) {
+                        document.getElementById('map-west').classList.remove('locked');
+                    }
+                }
+                
+                renderMap('east');
+                renderMap('west');
             } catch (err) {
                 console.error('Failed to load map state:', err);
             }
         }
 
-        function renderMap() {
+        function renderMap(region) {
             if (!mapState) return;
 
-            const riversLayer = document.getElementById('rivers-layer');
-            const discoveredLayer = document.getElementById('discovered-layer');
-            const charactersLayer = document.getElementById('characters-layer');
-            const settlementsLayer = document.getElementById('settlements-layer');
-            const futureLockedLayer = document.getElementById('future-locked-layer');
+            const riversLayer = document.getElementById(`${region}-rivers-layer`);
+            const discoveredLayer = document.getElementById(`${region}-discovered-layer`);
+            const charactersLayer = document.getElementById(`${region}-characters-layer`);
+            const settlementsLayer = document.getElementById(`${region}-settlements-layer`);
+            const futureLockedLayer = document.getElementById(`${region}-future-locked-layer`);
 
             [riversLayer, discoveredLayer, charactersLayer, settlementsLayer, futureLockedLayer].forEach(l => l.innerHTML = '');
 
-            mapState.entities.forEach(entity => {
+            const regionEntities = mapState.entities.filter(e => e.region === region);
+
+            regionEntities.forEach(entity => {
                 const layer = getLayerForEntity(entity);
                 if (!layer) return;
 
@@ -258,11 +227,12 @@
                     pathEl.setAttribute('d', pathD);
                     pathEl.setAttribute('class', 'river-path');
                     pathEl.setAttribute('data-layer', 'rivers');
+                    pathEl.setAttribute('data-region', region);
                     pathEl.setAttribute('tabindex', '0');
                     pathEl.setAttribute('role', 'button');
                     pathEl.setAttribute('aria-label', entity.name + ' river');
-                    pathEl.addEventListener('click', () => showInfo(entity));
-                    pathEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity); });
+                    pathEl.addEventListener('click', () => showInfo(entity, region));
+                    pathEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity, region); });
                     riversLayer.appendChild(pathEl);
 
                     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -278,6 +248,7 @@
                     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                     g.setAttribute('class', `entity-marker ${entity.discovered ? '' : 'locked-entity'}`);
                     g.setAttribute('data-layer', layer);
+                    g.setAttribute('data-region', region);
                     g.setAttribute('data-id', entity.id);
                     g.setAttribute('tabindex', '0');
                     g.setAttribute('role', 'button');
@@ -287,10 +258,11 @@
                     circle.setAttribute('cx', x);
                     circle.setAttribute('cy', y);
                     circle.setAttribute('r', entity.type === 'character' ? 12 : 14);
-                    circle.setAttribute('fill', entity.color || (entity.discovered ? '#00ff88' : '#666666'));
+                    const color = entity.color || (region === 'east' ? '#4488ff' : '#ff8844');
+                    circle.setAttribute('fill', entity.discovered ? color : '#666666');
                     circle.setAttribute('stroke', '#fff');
                     circle.setAttribute('stroke-width', '2');
-                    if (entity.discovered) circle.setAttribute('filter', 'url(#glow)');
+                    if (entity.discovered) circle.setAttribute('filter', `url(#${region === 'east' ? 'glow' : 'glow-west'})`);
                     g.appendChild(circle);
 
                     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -306,11 +278,12 @@
                     label.setAttribute('y', y + 28);
                     label.setAttribute('text-anchor', 'middle');
                     label.setAttribute('class', entity.discovered ? 'entity-label' : 'locked-label');
+                    label.setAttribute('fill', entity.discovered ? (entity.color || '#e8e6e3') : '#6b7280');
                     label.textContent = entity.name + (entity.discovered ? '' : ' (locked)');
                     g.appendChild(label);
 
-                    g.addEventListener('click', () => showInfo(entity));
-                    g.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity); });
+                    g.addEventListener('click', () => showInfo(entity, region));
+                    g.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity, region); });
 
                     if (layer === 'discovered') discoveredLayer.appendChild(g);
                     else if (layer === 'characters') charactersLayer.appendChild(g);
@@ -333,7 +306,13 @@
         function applyLayerFilter() {
             document.querySelectorAll('.entity-marker, .river-path, .river-label').forEach(el => {
                 const layer = el.getAttribute('data-layer');
-                if (currentLayer === 'all' || layer === currentLayer) {
+                const region = el.getAttribute('data-region');
+                
+                if (currentLayer === 'all') {
+                    el.style.opacity = '1';
+                } else if (currentLayer === 'east' || currentLayer === 'west') {
+                    el.style.opacity = region === currentLayer ? '1' : '0.1';
+                } else if (layer === currentLayer) {
                     el.style.opacity = '1';
                 } else {
                     el.style.opacity = '0.15';
@@ -341,11 +320,12 @@
             });
         }
 
-        function showInfo(entity) {
-            const panel = document.getElementById('info-panel');
-            document.getElementById('info-title').textContent = `${entity.icon || '📍'} ${entity.name}`;
-            document.getElementById('info-desc').textContent = entity.description || '';
-            document.getElementById('info-meta').innerHTML = `
+        function showInfo(entity, region) {
+            const panel = document.getElementById(`info-${region}`);
+            document.getElementById(`info-${region}-title`).textContent = `${entity.icon || '📍'} ${entity.name}`;
+            document.getElementById(`info-${region}-desc`).textContent = entity.description || '';
+            document.getElementById(`info-${region}-meta`).innerHTML = `
+                Region: ${region === 'east' ? '🌍 East' : '🌎 West'}<br>
                 Source: ${entity.source_type} | Confidence: ${entity.confidence}<br>
                 Discovered: ${entity.discovered ? 'Yes' : 'No'} | Tick: ${entity.first_seen_tick || '—'}
             `;
@@ -353,32 +333,48 @@
             panel.querySelector('.close-btn').focus();
         }
 
-        function closeInfo() {
-            document.getElementById('info-panel').classList.remove('visible');
+        function closeInfo(region) {
+            document.getElementById(`info-${region}`).classList.remove('visible');
         }
 
         // Layer controls
         document.getElementById('layer-controls').addEventListener('click', (e) => {
             if (e.target.tagName === 'BUTTON') {
                 document.querySelectorAll('.map-controls button').forEach(b => {
-                    b.classList.remove('active');
+                    b.classList.remove('active', 'east-active', 'west-active');
                     b.setAttribute('aria-pressed', 'false');
                 });
                 e.target.classList.add('active');
+                if (e.target.dataset.layer === 'east') e.target.classList.add('east-active');
+                if (e.target.dataset.layer === 'west') e.target.classList.add('west-active');
                 e.target.setAttribute('aria-pressed', 'true');
                 currentLayer = e.target.dataset.layer;
                 applyLayerFilter();
+                
+                // Toggle hemisphere visibility
+                const hemispheres = document.getElementById('hemispheres');
+                if (currentLayer === 'east') {
+                    hemispheres.classList.add('single');
+                } else if (currentLayer === 'west') {
+                    hemispheres.classList.add('single');
+                } else {
+                    hemispheres.classList.remove('single');
+                }
             }
         });
 
         // Close info panel on outside click or Escape
-        document.getElementById('map-wrapper').addEventListener('click', (e) => {
-            if (!e.target.closest('.entity-marker') && !e.target.closest('.info-panel')) {
-                closeInfo();
-            }
+        document.querySelectorAll('.map-wrapper').forEach(wrapper => {
+            wrapper.addEventListener('click', (e) => {
+                if (!e.target.closest('.entity-marker') && !e.target.closest('.info-panel')) {
+                    wrapper.querySelector('.info-panel').classList.remove('visible');
+                }
+            });
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeInfo();
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.info-panel').forEach(p => p.classList.remove('visible'));
+            }
         });
 
         loadMapState();
