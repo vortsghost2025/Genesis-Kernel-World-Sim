@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Map</title>
+    <style>
+        :root {
+            --bg: #0f1117; --panel: #1a1d27; --card: #242836; --border: #2d3148;
+            --text: #e8e6e3; --text2: #9ca3af; --muted: #6b7280;
+            --gold: #d4a853; --green: #4ade80; --blue: #60a5fa; --red: #f87171;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 1.2rem; color: var(--gold); }
+        .nav-links { display: flex; gap: 1rem; align-items: center; }
+        .nav-links a { color: var(--blue); text-decoration: none; font-size: 0.85rem; }
+        .nav-links a:hover { text-decoration: underline; }
+        .map-container { max-width: 1400px; margin: 1rem auto; padding: 0 1rem; }
+        .map-wrapper { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #1a2a3a; border: 2px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .map-svg { width: 100%; height: 100%; }
+        .map-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0.5rem 1rem; background: var(--panel); border-radius: 8px; margin-bottom: 1rem; }
+        .map-controls button { padding: 0.5rem 1rem; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+        .map-controls button:hover { background: var(--border); }
+        .map-controls button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+        .legend { display: flex; gap: 1rem; flex-wrap: wrap; padding: 1rem; background: var(--panel); border-radius: 8px; margin-top: 1rem; }
+        .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .legend-dot.eden { background: var(--green); }
+        .legend-dot.settlement { background: var(--gold); }
+        .legend-dot.character { background: var(--blue); }
+        .legend-dot.river { background: #4a90d9; width: 20px; height: 4px; border-radius: 2px; }
+        .legend-dot.locked { background: var(--muted); opacity: 0.5; }
+        .info-panel { position: absolute; top: 1rem; right: 1rem; background: rgba(26, 29, 39, 0.95); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; min-width: 250px; max-width: 350px; display: none; z-index: 10; }
+        .info-panel.visible { display: block; }
+        .info-panel h3 { font-size: 1rem; color: var(--gold); margin-bottom: 0.5rem; }
+        .info-panel p { font-size: 0.8rem; color: var(--text2); line-height: 1.4; }
+        .info-panel .meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.5rem; }
+        .disclaimer { text-align: center; padding: 0.5rem; font-size: 0.75rem; color: var(--muted); font-style: italic; }
+        .fog-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
+        .fog-circle { fill: rgba(15, 17, 23, 0.85); }
+        .entity-marker { cursor: pointer; transition: transform 0.2s; }
+        .entity-marker:hover { transform: scale(1.2); }
+        .entity-label { font-size: 10px; font-weight: 600; pointer-events: none; }
+        .river-path { stroke: #4a90d9; stroke-width: 3; fill: none; stroke-linecap: round; }
+        .river-label { fill: #4a90d9; font-size: 10px; font-style: italic; }
+        .locked-entity { opacity: 0.3; }
+        .locked-label { fill: var(--muted); font-size: 9px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🗺️ World Map</h1>
+        <div class="nav-links">
+            <a href="/sim">← Back to Dashboard</a>
+        </div>
+    </header>
+
+    <div class="map-container">
+        <div class="map-controls" id="layer-controls">
+            <button class="active" data-layer="all">All</button>
+            <button data-layer="discovered">Discovered</button>
+            <button data-layer="rivers">Rivers</button>
+            <button data-layer="characters">Characters</button>
+            <button data-layer="settlements">Settlements</button>
+            <button data-layer="future_locked">Future (Locked)</button>
+        </div>
+
+        <div class="map-wrapper" id="map-wrapper">
+            <svg class="map-svg" id="map-svg" viewBox="0 0 1000 562" xmlns="http://www.w3.org/2000/svg">
+                <!-- Base map placeholder -->
+                <rect width="1000" height="562" fill="#1a2a3a"/>
+                <text x="500" y="281" fill="#6b7280" font-size="16" text-anchor="middle" font-style="italic">
+                    Base map placeholder — replace with Azgaar export
+                </text>
+
+                <!-- Rivers layer -->
+                <g id="rivers-layer"></g>
+
+                <!-- Discovered locations layer -->
+                <g id="discovered-layer"></g>
+
+                <!-- Characters layer -->
+                <g id="characters-layer"></g>
+
+                <!-- Settlements layer -->
+                <g id="settlements-layer"></g>
+
+                <!-- Future locked layer -->
+                <g id="future-locked-layer"></g>
+
+                <!-- Fog of war -->
+                <g id="fog-layer"></g>
+            </svg>
+
+            <!-- Info panel -->
+            <div class="info-panel" id="info-panel">
+                <h3 id="info-title">Location</h3>
+                <p id="info-desc">Description</p>
+                <div class="meta" id="info-meta"></div>
+            </div>
+        </div>
+
+        <div class="disclaimer" id="disclaimer"></div>
+
+        <div class="legend">
+            <div class="legend-item"><span class="legend-dot eden"></span> Eden / Discovered</div>
+            <div class="legend-item"><span class="legend-dot character"></span> Characters</div>
+            <div class="legend-item"><span class="legend-dot settlement"></span> Settlements</div>
+            <div class="legend-item"><span class="legend-dot river"></span> Rivers</div>
+            <div class="legend-item"><span class="legend-dot locked"></span> Future (Locked)</div>
+        </div>
+    </div>
+
+    <script>
+        let mapState = null;
+        let currentLayer = 'all';
+
+        async function loadMapState() {
+            try {
+                const res = await fetch('/api/map-state');
+                mapState = await res.json();
+                document.getElementById('disclaimer').textContent = mapState.disclaimer || '';
+                renderMap();
+            } catch (err) {
+                console.error('Failed to load map state:', err);
+            }
+        }
+
+        function renderMap() {
+            if (!mapState) return;
+
+            const riversLayer = document.getElementById('rivers-layer');
+            const discoveredLayer = document.getElementById('discovered-layer');
+            const charactersLayer = document.getElementById('characters-layer');
+            const settlementsLayer = document.getElementById('settlements-layer');
+            const futureLockedLayer = document.getElementById('future-locked-layer');
+
+            riversLayer.innerHTML = '';
+            discoveredLayer.innerHTML = '';
+            charactersLayer.innerHTML = '';
+            settlementsLayer.innerHTML = '';
+            futureLockedLayer.innerHTML = '';
+
+            mapState.entities.forEach(entity => {
+                const layer = getLayerForEntity(entity);
+                if (!layer) return;
+
+                if (entity.type === 'river' && entity.path) {
+                    const pathD = entity.path.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0] * 1000} ${p[1] * 562}`).join(' ');
+                    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    pathEl.setAttribute('d', pathD);
+                    pathEl.setAttribute('class', 'river-path');
+                    pathEl.setAttribute('data-layer', 'rivers');
+                    riversLayer.appendChild(pathEl);
+
+                    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    label.setAttribute('x', entity.path[0][0] * 1000 + 10);
+                    label.setAttribute('y', entity.path[0][1] * 562);
+                    label.setAttribute('class', 'river-label');
+                    label.textContent = entity.name;
+                    riversLayer.appendChild(label);
+                } else if (entity.x !== undefined && entity.y !== undefined) {
+                    const x = entity.x * 1000;
+                    const y = entity.y * 562;
+
+                    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    g.setAttribute('class', `entity-marker ${entity.discovered ? '' : 'locked-entity'}`);
+                    g.setAttribute('data-layer', layer);
+                    g.setAttribute('data-id', entity.id);
+
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', x);
+                    circle.setAttribute('cy', y);
+                    circle.setAttribute('r', entity.type === 'character' ? 8 : 10);
+                    circle.setAttribute('fill', entity.color || (entity.discovered ? '#4ade80' : '#6b7280'));
+                    circle.setAttribute('stroke', '#fff');
+                    circle.setAttribute('stroke-width', '1.5');
+                    g.appendChild(circle);
+
+                    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    icon.setAttribute('x', x);
+                    icon.setAttribute('y', y - 15);
+                    icon.setAttribute('text-anchor', 'middle');
+                    icon.setAttribute('font-size', '14');
+                    icon.textContent = entity.icon || '📍';
+                    g.appendChild(icon);
+
+                    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    label.setAttribute('x', x);
+                    label.setAttribute('y', y + 20);
+                    label.setAttribute('text-anchor', 'middle');
+                    label.setAttribute('class', entity.discovered ? 'entity-label' : 'locked-label');
+                    label.setAttribute('fill', entity.discovered ? (entity.color || '#e8e6e3') : '#6b7280');
+                    label.textContent = entity.name + (entity.discovered ? '' : ' (locked)');
+                    g.appendChild(label);
+
+                    g.addEventListener('click', () => showInfo(entity));
+
+                    if (layer === 'discovered') discoveredLayer.appendChild(g);
+                    else if (layer === 'characters') charactersLayer.appendChild(g);
+                    else if (layer === 'settlements') settlementsLayer.appendChild(g);
+                    else if (layer === 'future_locked') futureLockedLayer.appendChild(g);
+                }
+            });
+
+            applyLayerFilter();
+        }
+
+        function getLayerForEntity(entity) {
+            if (!entity.discovered) return 'future_locked';
+            if (entity.type === 'character') return 'characters';
+            if (entity.type === 'settlement') return 'settlements';
+            if (entity.type === 'river') return 'rivers';
+            return 'discovered';
+        }
+
+        function applyLayerFilter() {
+            document.querySelectorAll('.entity-marker, .river-path, .river-label').forEach(el => {
+                const layer = el.getAttribute('data-layer');
+                if (currentLayer === 'all' || layer === currentLayer) {
+                    el.style.opacity = '1';
+                } else {
+                    el.style.opacity = '0.15';
+                }
+            });
+        }
+
+        function showInfo(entity) {
+            const panel = document.getElementById('info-panel');
+            document.getElementById('info-title').textContent = `${entity.icon || '📍'} ${entity.name}`;
+            document.getElementById('info-desc').textContent = entity.description || '';
+            document.getElementById('info-meta').innerHTML = `
+                Source: ${entity.source_type} | Confidence: ${entity.confidence}<br>
+                Discovered: ${entity.discovered ? 'Yes' : 'No'} | Tick: ${entity.first_seen_tick || '—'}
+            `;
+            panel.classList.add('visible');
+        }
+
+        // Layer controls
+        document.getElementById('layer-controls').addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                document.querySelectorAll('.map-controls button').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentLayer = e.target.dataset.layer;
+                applyLayerFilter();
+            }
+        });
+
+        // Close info panel on outside click
+        document.getElementById('map-wrapper').addEventListener('click', (e) => {
+            if (!e.target.closest('.entity-marker')) {
+                document.getElementById('info-panel').classList.remove('visible');
+            }
+        });
+
+        loadMapState();
+    </script>
+</body>
+</html>

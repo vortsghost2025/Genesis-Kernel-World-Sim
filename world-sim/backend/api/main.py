@@ -163,8 +163,18 @@ def serve_sim():
 @app.get("/map")
 def serve_map():
     """Serve the ancient world map."""
-    ui_path = PROJECT_ROOT / "frontend" / "map.html"
+    ui_path = PROJECT_ROOT / "frontend" / "map-v2.html"
     return FileResponse(ui_path)
+
+
+@app.get("/api/map-state")
+def get_map_state():
+    """Return map state JSON."""
+    map_path = PROJECT_ROOT / "data" / "map_state.json"
+    if map_path.exists():
+        import json
+        return json.loads(map_path.read_text(encoding="utf-8"))
+    return {"entities": [], "disclaimer": "No map data available."}
 
 
 @app.get("/api/state")
