@@ -6,47 +6,115 @@
     <title>World Sim — Map</title>
     <style>
         :root {
-            --bg: #0f1117; --panel: #1a1d27; --card: #242836; --border: #2d3148;
-            --text: #e8e6e3; --text2: #9ca3af; --muted: #6b7280;
-            --gold: #d4a853; --green: #4ade80; --blue: #60a5fa; --red: #f87171;
+            --bg: #0a0a0a; --panel: #1a1a1a; --card: #2a2a2a; --border: #444;
+            --text: #ffffff; --text2: #cccccc; --muted: #888888;
+            --gold: #ffd700; --green: #00ff88; --blue: #4488ff; --red: #ff4444;
+            --water: #0a2a4a; --land: #1a3a1a; --land-light: #2a4a2a;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-        header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
-        header h1 { font-size: 1.2rem; color: var(--gold); }
-        .nav-links { display: flex; gap: 1rem; align-items: center; }
-        .nav-links a { color: var(--blue); text-decoration: none; font-size: 0.85rem; }
-        .nav-links a:hover { text-decoration: underline; }
-        .map-container { max-width: 1400px; margin: 1rem auto; padding: 0 1rem; }
-        .map-wrapper { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #1a2a3a; border: 2px solid var(--border); border-radius: 12px; overflow: hidden; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 18px; }
+        
+        /* ACCESSIBLE HEADER */
+        header { background: var(--panel); border-bottom: 3px solid var(--gold); padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+        header h1 { font-size: 2rem; color: var(--gold); }
+        .nav-links a { color: var(--blue); text-decoration: underline; font-size: 1.2rem; padding: 0.5rem 1rem; }
+        .nav-links a:hover { background: var(--card); border-radius: 6px; }
+        
+        /* ACCESSIBLE CONTROLS */
+        .map-controls { display: flex; gap: 1rem; flex-wrap: wrap; padding: 1rem 2rem; background: var(--panel); }
+        .map-controls button { 
+            padding: 1rem 2rem; 
+            background: var(--card); 
+            border: 3px solid var(--border); 
+            color: var(--text); 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-size: 1.2rem; 
+            font-weight: 600;
+            min-height: 60px;
+        }
+        .map-controls button:hover, .map-controls button:focus { 
+            background: var(--gold); 
+            color: #000; 
+            border-color: var(--gold);
+            outline: 3px solid var(--gold);
+            outline-offset: 2px;
+        }
+        .map-controls button.active { 
+            background: var(--gold); 
+            color: #000; 
+            border-color: var(--gold);
+        }
+        
+        /* MAP */
+        .map-container { max-width: 1600px; margin: 0 auto; padding: 1rem; }
+        .map-wrapper { 
+            position: relative; 
+            width: 100%; 
+            aspect-ratio: 16 / 9; 
+            background: var(--water); 
+            border: 3px solid var(--border); 
+            border-radius: 12px; 
+            overflow: hidden;
+        }
         .map-svg { width: 100%; height: 100%; }
-        .map-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0.5rem 1rem; background: var(--panel); border-radius: 8px; margin-bottom: 1rem; }
-        .map-controls button { padding: 0.5rem 1rem; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
-        .map-controls button:hover { background: var(--border); }
-        .map-controls button.active { background: var(--gold); color: #000; border-color: var(--gold); }
-        .legend { display: flex; gap: 1rem; flex-wrap: wrap; padding: 1rem; background: var(--panel); border-radius: 8px; margin-top: 1rem; }
-        .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
-        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+        
+        /* ACCESSIBLE INFO PANEL */
+        .info-panel { 
+            position: absolute; 
+            top: 1rem; 
+            right: 1rem; 
+            background: rgba(10, 10, 10, 0.95); 
+            border: 3px solid var(--gold); 
+            border-radius: 12px; 
+            padding: 1.5rem; 
+            min-width: 300px; 
+            max-width: 400px; 
+            display: none; 
+            z-index: 10;
+        }
+        .info-panel.visible { display: block; }
+        .info-panel h3 { font-size: 1.5rem; color: var(--gold); margin-bottom: 0.8rem; }
+        .info-panel p { font-size: 1.1rem; color: var(--text2); line-height: 1.5; }
+        .info-panel .meta { font-size: 0.9rem; color: var(--muted); margin-top: 0.8rem; padding-top: 0.8rem; border-top: 2px solid var(--border); }
+        .info-panel .close-btn { 
+            position: absolute; 
+            top: 0.5rem; 
+            right: 0.5rem; 
+            background: var(--card); 
+            border: 2px solid var(--border); 
+            color: var(--text); 
+            width: 40px; 
+            height: 40px; 
+            border-radius: 50%; 
+            cursor: pointer; 
+            font-size: 1.2rem;
+        }
+        
+        /* ACCESSIBLE LEGEND */
+        .legend { display: flex; gap: 2rem; flex-wrap: wrap; padding: 1.5rem 2rem; background: var(--panel); border-radius: 8px; margin-top: 1rem; }
+        .legend-item { display: flex; align-items: center; gap: 0.8rem; font-size: 1.1rem; }
+        .legend-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; }
         .legend-dot.eden { background: var(--green); }
         .legend-dot.settlement { background: var(--gold); }
         .legend-dot.character { background: var(--blue); }
-        .legend-dot.river { background: #4a90d9; width: 20px; height: 4px; border-radius: 2px; }
+        .legend-dot.river { background: #4a90d9; width: 30px; height: 6px; border-radius: 3px; border: none; }
         .legend-dot.locked { background: var(--muted); opacity: 0.5; }
-        .info-panel { position: absolute; top: 1rem; right: 1rem; background: rgba(26, 29, 39, 0.95); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; min-width: 250px; max-width: 350px; display: none; z-index: 10; }
-        .info-panel.visible { display: block; }
-        .info-panel h3 { font-size: 1rem; color: var(--gold); margin-bottom: 0.5rem; }
-        .info-panel p { font-size: 0.8rem; color: var(--text2); line-height: 1.4; }
-        .info-panel .meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.5rem; }
-        .disclaimer { text-align: center; padding: 0.5rem; font-size: 0.75rem; color: var(--muted); font-style: italic; }
-        .fog-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
-        .fog-circle { fill: rgba(15, 17, 23, 0.85); }
-        .entity-marker { cursor: pointer; transition: transform 0.2s; }
-        .entity-marker:hover { transform: scale(1.2); }
-        .entity-label { font-size: 10px; font-weight: 600; pointer-events: none; }
-        .river-path { stroke: #4a90d9; stroke-width: 3; fill: none; stroke-linecap: round; }
-        .river-label { fill: #4a90d9; font-size: 10px; font-style: italic; }
-        .locked-entity { opacity: 0.3; }
-        .locked-label { fill: var(--muted); font-size: 9px; }
+        
+        .disclaimer { text-align: center; padding: 1rem; font-size: 1rem; color: var(--muted); font-style: italic; }
+        
+        /* MAP ENTITY STYLES */
+        .entity-marker { cursor: pointer; }
+        .entity-marker:hover circle, .entity-marker:focus circle { stroke-width: 3; stroke: var(--gold); }
+        .entity-label { font-size: 14px; font-weight: 700; fill: #fff; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
+        .river-path { stroke: #4a90d9; stroke-width: 5; fill: none; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(74,144,217,0.5)); }
+        .river-label { fill: #4a90d9; font-size: 14px; font-style: italic; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); }
+        .locked-entity { opacity: 0.25; }
+        .locked-label { fill: #666; font-size: 12px; }
+        
+        /* KEYBOARD NAV HINT */
+        .keyboard-hint { text-align: center; padding: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+        .keyboard-hint kbd { background: var(--card); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
     </style>
 </head>
 <body>
@@ -57,59 +125,100 @@
         </div>
     </header>
 
+    <div class="map-controls" id="layer-controls" role="toolbar" aria-label="Map layer controls">
+        <button class="active" data-layer="all" aria-pressed="true">Show All</button>
+        <button data-layer="discovered" aria-pressed="false">Discovered</button>
+        <button data-layer="rivers" aria-pressed="false">Rivers</button>
+        <button data-layer="characters" aria-pressed="false">Characters</button>
+        <button data-layer="settlements" aria-pressed="false">Settlements</button>
+        <button data-layer="future_locked" aria-pressed="false">Future (Locked)</button>
+    </div>
+
     <div class="map-container">
-        <div class="map-controls" id="layer-controls">
-            <button class="active" data-layer="all">All</button>
-            <button data-layer="discovered">Discovered</button>
-            <button data-layer="rivers">Rivers</button>
-            <button data-layer="characters">Characters</button>
-            <button data-layer="settlements">Settlements</button>
-            <button data-layer="future_locked">Future (Locked)</button>
-        </div>
-
         <div class="map-wrapper" id="map-wrapper">
-            <svg class="map-svg" id="map-svg" viewBox="0 0 1000 562" xmlns="http://www.w3.org/2000/svg">
-                <!-- Base map placeholder -->
-                <rect width="1000" height="562" fill="#1a2a3a"/>
-                <text x="500" y="281" fill="#6b7280" font-size="16" text-anchor="middle" font-style="italic">
-                    Base map placeholder — replace with Azgaar export
-                </text>
+            <svg class="map-svg" id="map-svg" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <!-- Water gradient -->
+                    <radialGradient id="waterGrad" cx="50%" cy="50%" r="70%">
+                        <stop offset="0%" stop-color="#0a2a4a"/>
+                        <stop offset="100%" stop-color="#051525"/>
+                    </radialGradient>
+                    <!-- Land gradient -->
+                    <linearGradient id="landGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#1a3a1a"/>
+                        <stop offset="50%" stop-color="#2a4a2a"/>
+                        <stop offset="100%" stop-color="#1a3a1a"/>
+                    </linearGradient>
+                    <!-- Desert gradient -->
+                    <linearGradient id="desertGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#3a3a2a"/>
+                        <stop offset="100%" stop-color="#2a2a1a"/>
+                    </linearGradient>
+                    <!-- Glow filter -->
+                    <filter id="glow">
+                        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                        <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                </defs>
 
-                <!-- Rivers layer -->
+                <!-- Base map from Azgaar Fantasy Map Generator -->
+                <image href="/data/base_map.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+
+                <!-- Rivers -->
                 <g id="rivers-layer"></g>
 
-                <!-- Discovered locations layer -->
+                <!-- Discovered locations -->
                 <g id="discovered-layer"></g>
 
-                <!-- Characters layer -->
+                <!-- Characters -->
                 <g id="characters-layer"></g>
 
-                <!-- Settlements layer -->
+                <!-- Settlements -->
                 <g id="settlements-layer"></g>
 
-                <!-- Future locked layer -->
+                <!-- Future locked -->
                 <g id="future-locked-layer"></g>
 
-                <!-- Fog of war -->
-                <g id="fog-layer"></g>
+                <!-- Compass Rose -->
+                <g transform="translate(100, 100)">
+                    <circle r="40" fill="rgba(26, 26, 26, 0.9)" stroke="#444" stroke-width="2"/>
+                    <text x="0" y="-18" fill="var(--gold)" font-size="18" font-weight="bold" text-anchor="middle">N</text>
+                    <text x="0" y="28" fill="#888" font-size="16" text-anchor="middle">S</text>
+                    <text x="-22" y="6" fill="#888" font-size="16" text-anchor="middle">W</text>
+                    <text x="22" y="6" fill="#888" font-size="16" text-anchor="middle">E</text>
+                    <line x1="0" y1="-12" x2="0" y2="12" stroke="var(--gold)" stroke-width="2"/>
+                    <line x1="-12" y1="0" x2="12" y2="0" stroke="var(--gold)" stroke-width="2"/>
+                </g>
+
+                <!-- Scale bar -->
+                <g transform="translate(100, 600)">
+                    <line x1="0" y1="0" x2="150" y2="0" stroke="#888" stroke-width="3"/>
+                    <line x1="0" y1="-8" x2="0" y2="8" stroke="#888" stroke-width="3"/>
+                    <line x1="150" y1="-8" x2="150" y2="8" stroke="#888" stroke-width="3"/>
+                    <text x="75" y="22" fill="#888" font-size="14" text-anchor="middle">~500 miles</text>
+                </g>
             </svg>
 
             <!-- Info panel -->
-            <div class="info-panel" id="info-panel">
+            <div class="info-panel" id="info-panel" role="dialog" aria-label="Location information">
+                <button class="close-btn" onclick="closeInfo()" aria-label="Close info panel">✕</button>
                 <h3 id="info-title">Location</h3>
                 <p id="info-desc">Description</p>
                 <div class="meta" id="info-meta"></div>
             </div>
         </div>
 
-        <div class="disclaimer" id="disclaimer"></div>
+        <div class="legend" role="list" aria-label="Map legend">
+            <div class="legend-item" role="listitem"><span class="legend-dot eden"></span> Eden / Discovered</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot character"></span> Characters</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot settlement"></span> Settlements</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot river"></span> Rivers</div>
+            <div class="legend-item" role="listitem"><span class="legend-dot locked"></span> Future (Locked)</div>
+        </div>
 
-        <div class="legend">
-            <div class="legend-item"><span class="legend-dot eden"></span> Eden / Discovered</div>
-            <div class="legend-item"><span class="legend-dot character"></span> Characters</div>
-            <div class="legend-item"><span class="legend-dot settlement"></span> Settlements</div>
-            <div class="legend-item"><span class="legend-dot river"></span> Rivers</div>
-            <div class="legend-item"><span class="legend-dot locked"></span> Future (Locked)</div>
+        <div class="disclaimer" id="disclaimer"></div>
+        <div class="keyboard-hint">
+            <kbd>Tab</kbd> to navigate controls · <kbd>Enter</kbd> to select · <kbd>Esc</kbd> to close info panel · Click markers for details
         </div>
     </div>
 
@@ -137,66 +246,71 @@
             const settlementsLayer = document.getElementById('settlements-layer');
             const futureLockedLayer = document.getElementById('future-locked-layer');
 
-            riversLayer.innerHTML = '';
-            discoveredLayer.innerHTML = '';
-            charactersLayer.innerHTML = '';
-            settlementsLayer.innerHTML = '';
-            futureLockedLayer.innerHTML = '';
+            [riversLayer, discoveredLayer, charactersLayer, settlementsLayer, futureLockedLayer].forEach(l => l.innerHTML = '');
 
             mapState.entities.forEach(entity => {
                 const layer = getLayerForEntity(entity);
                 if (!layer) return;
 
                 if (entity.type === 'river' && entity.path) {
-                    const pathD = entity.path.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0] * 1000} ${p[1] * 562}`).join(' ');
+                    const pathD = entity.path.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0] * 1200} ${p[1] * 675}`).join(' ');
                     const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                     pathEl.setAttribute('d', pathD);
                     pathEl.setAttribute('class', 'river-path');
                     pathEl.setAttribute('data-layer', 'rivers');
+                    pathEl.setAttribute('tabindex', '0');
+                    pathEl.setAttribute('role', 'button');
+                    pathEl.setAttribute('aria-label', entity.name + ' river');
+                    pathEl.addEventListener('click', () => showInfo(entity));
+                    pathEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity); });
                     riversLayer.appendChild(pathEl);
 
                     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    label.setAttribute('x', entity.path[0][0] * 1000 + 10);
-                    label.setAttribute('y', entity.path[0][1] * 562);
+                    label.setAttribute('x', entity.path[0][0] * 1200 + 15);
+                    label.setAttribute('y', entity.path[0][1] * 675);
                     label.setAttribute('class', 'river-label');
                     label.textContent = entity.name;
                     riversLayer.appendChild(label);
                 } else if (entity.x !== undefined && entity.y !== undefined) {
-                    const x = entity.x * 1000;
-                    const y = entity.y * 562;
+                    const x = entity.x * 1200;
+                    const y = entity.y * 675;
 
                     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                     g.setAttribute('class', `entity-marker ${entity.discovered ? '' : 'locked-entity'}`);
                     g.setAttribute('data-layer', layer);
                     g.setAttribute('data-id', entity.id);
+                    g.setAttribute('tabindex', '0');
+                    g.setAttribute('role', 'button');
+                    g.setAttribute('aria-label', entity.name + (entity.discovered ? '' : ' (locked)'));
 
                     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                     circle.setAttribute('cx', x);
                     circle.setAttribute('cy', y);
-                    circle.setAttribute('r', entity.type === 'character' ? 8 : 10);
-                    circle.setAttribute('fill', entity.color || (entity.discovered ? '#4ade80' : '#6b7280'));
+                    circle.setAttribute('r', entity.type === 'character' ? 12 : 14);
+                    circle.setAttribute('fill', entity.color || (entity.discovered ? '#00ff88' : '#666666'));
                     circle.setAttribute('stroke', '#fff');
-                    circle.setAttribute('stroke-width', '1.5');
+                    circle.setAttribute('stroke-width', '2');
+                    if (entity.discovered) circle.setAttribute('filter', 'url(#glow)');
                     g.appendChild(circle);
 
                     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                     icon.setAttribute('x', x);
-                    icon.setAttribute('y', y - 15);
+                    icon.setAttribute('y', y - 20);
                     icon.setAttribute('text-anchor', 'middle');
-                    icon.setAttribute('font-size', '14');
+                    icon.setAttribute('font-size', '18');
                     icon.textContent = entity.icon || '📍';
                     g.appendChild(icon);
 
                     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                     label.setAttribute('x', x);
-                    label.setAttribute('y', y + 20);
+                    label.setAttribute('y', y + 28);
                     label.setAttribute('text-anchor', 'middle');
                     label.setAttribute('class', entity.discovered ? 'entity-label' : 'locked-label');
-                    label.setAttribute('fill', entity.discovered ? (entity.color || '#e8e6e3') : '#6b7280');
                     label.textContent = entity.name + (entity.discovered ? '' : ' (locked)');
                     g.appendChild(label);
 
                     g.addEventListener('click', () => showInfo(entity));
+                    g.addEventListener('keydown', (e) => { if (e.key === 'Enter') showInfo(entity); });
 
                     if (layer === 'discovered') discoveredLayer.appendChild(g);
                     else if (layer === 'characters') charactersLayer.appendChild(g);
@@ -236,23 +350,35 @@
                 Discovered: ${entity.discovered ? 'Yes' : 'No'} | Tick: ${entity.first_seen_tick || '—'}
             `;
             panel.classList.add('visible');
+            panel.querySelector('.close-btn').focus();
+        }
+
+        function closeInfo() {
+            document.getElementById('info-panel').classList.remove('visible');
         }
 
         // Layer controls
         document.getElementById('layer-controls').addEventListener('click', (e) => {
             if (e.target.tagName === 'BUTTON') {
-                document.querySelectorAll('.map-controls button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.map-controls button').forEach(b => {
+                    b.classList.remove('active');
+                    b.setAttribute('aria-pressed', 'false');
+                });
                 e.target.classList.add('active');
+                e.target.setAttribute('aria-pressed', 'true');
                 currentLayer = e.target.dataset.layer;
                 applyLayerFilter();
             }
         });
 
-        // Close info panel on outside click
+        // Close info panel on outside click or Escape
         document.getElementById('map-wrapper').addEventListener('click', (e) => {
-            if (!e.target.closest('.entity-marker')) {
-                document.getElementById('info-panel').classList.remove('visible');
+            if (!e.target.closest('.entity-marker') && !e.target.closest('.info-panel')) {
+                closeInfo();
             }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeInfo();
         });
 
         loadMapState();

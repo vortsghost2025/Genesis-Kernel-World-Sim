@@ -167,6 +167,16 @@ def serve_map():
     return FileResponse(ui_path)
 
 
+@app.get("/data/base_map.png")
+def serve_base_map():
+    """Serve the Azgaar-generated base map."""
+    map_path = PROJECT_ROOT / "data" / "base_map.png"
+    if map_path.exists():
+        from fastapi.responses import FileResponse as FR
+        return FR(map_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Base map not found")
+
+
 @app.get("/api/map-state")
 def get_map_state():
     """Return map state JSON."""
