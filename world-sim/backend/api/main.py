@@ -40,6 +40,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from backend.config import WorldSimConfig, config
 from backend.world.dual_sim import DualHemisphereSim
 from backend.providers.base import call_log
+from backend.key_management import save_keys, clear_keys, get_key_status, test_dry_run
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +127,39 @@ def get_map_state():
         import json
         return json.loads(map_path.read_text(encoding="utf-8"))
     return {"entities": [], "disclaimer": "No map data available."}
+
+
+# --- Key Management Endpoints ---
+
+@app.get("/setup-keys")
+def serve_setup_keys():
+    """Serve the accessible key setup page."""
+    ui_path = PROJECT_ROOT / "frontend" / "setup-keys.html"
+    return FileResponse(ui_path)
+
+
+@app.get("/api/setup-keys")
+def get_setup_keys_status():
+    """Return key presence status only — never key values."""
+    return get_key_status()
+
+
+@app.post("/api/setup-keys")
+def post_setup_keys(body: dict):
+    """Save keys to local .env only. Does NOT enable live mode."""
+    return save_keys(body)
+
+
+@app.post("/api/setup-keys/clear")
+def post_clear_keys():
+    """Clear keys from local .env and environment."""
+    return clear_keys()
+
+
+@app.get("/api/setup-keys/test")
+def get_setup_keys_test():
+    """Test dry-run for all agents."""
+    return test_dry_run()
 
 
 @app.get("/api/state")

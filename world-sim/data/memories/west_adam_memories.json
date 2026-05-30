@@ -1,0 +1,150 @@
+{
+  "agent_name": "west_adam",
+  "next_id": 12,
+  "memories": [
+    {
+      "id": "west_adam_0",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:1] Processing world state...",
+      "tick": 1,
+      "timestamp": 1780170599.2627716,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_1",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 1,
+      "timestamp": 1780170599.2644236,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_2",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:2] Processing world state...",
+      "tick": 2,
+      "timestamp": 1780170621.8310544,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_3",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 2,
+      "timestamp": 1780170621.8322148,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_4",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:3] Processing world state...",
+      "tick": 3,
+      "timestamp": 1780170621.8365273,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_5",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 3,
+      "timestamp": 1780170621.8464053,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_6",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:4] Processing world state...",
+      "tick": 4,
+      "timestamp": 1780170621.852114,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_7",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 4,
+      "timestamp": 1780170621.8540993,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_8",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:5] Processing world state...",
+      "tick": 5,
+      "timestamp": 1780170621.8587234,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_9",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 5,
+      "timestamp": 1780170621.8599539,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_10",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "[mock:West Adam:6] Processing world state...",
+      "tick": 6,
+      "timestamp": 1780170621.8643932,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_11",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 6,
+      "timestamp": 1780170621.866244,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    }
+  ]
+}

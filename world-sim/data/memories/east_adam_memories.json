@@ -1,0 +1,150 @@
+{
+  "agent_name": "east_adam",
+  "next_id": 12,
+  "memories": [
+    {
+      "id": "east_adam_0",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:1] Processing world state...",
+      "tick": 1,
+      "timestamp": 1780170599.2550948,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_1",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 1,
+      "timestamp": 1780170599.2613018,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_2",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:2] Processing world state...",
+      "tick": 2,
+      "timestamp": 1780170621.8229673,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_3",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 2,
+      "timestamp": 1780170621.8295043,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_4",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:3] Processing world state...",
+      "tick": 3,
+      "timestamp": 1780170621.8331728,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_5",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 3,
+      "timestamp": 1780170621.8345623,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_6",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:4] Processing world state...",
+      "tick": 4,
+      "timestamp": 1780170621.8482935,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_7",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 4,
+      "timestamp": 1780170621.8499172,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_8",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:5] Processing world state...",
+      "tick": 5,
+      "timestamp": 1780170621.8554335,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_9",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 5,
+      "timestamp": 1780170621.8569345,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_10",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "[mock:Adam:6] Processing world state...",
+      "tick": 6,
+      "timestamp": 1780170621.861004,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_11",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam acts.",
+      "tick": 6,
+      "timestamp": 1780170621.8623314,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    }
+  ]
+}

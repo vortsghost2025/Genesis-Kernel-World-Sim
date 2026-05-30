@@ -1,0 +1,150 @@
+{
+  "agent_name": "east_eve",
+  "next_id": 12,
+  "memories": [
+    {
+      "id": "east_eve_0",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:1] Processing world state...",
+      "tick": 1,
+      "timestamp": 1780170599.2607281,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_1",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 1,
+      "timestamp": 1780170599.2616093,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_2",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:2] Processing world state...",
+      "tick": 2,
+      "timestamp": 1780170621.828732,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_3",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 2,
+      "timestamp": 1780170621.8300202,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_4",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:3] Processing world state...",
+      "tick": 3,
+      "timestamp": 1780170621.8341284,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_5",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 3,
+      "timestamp": 1780170621.8348587,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_6",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:4] Processing world state...",
+      "tick": 4,
+      "timestamp": 1780170621.8493412,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_7",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 4,
+      "timestamp": 1780170621.8504643,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_8",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:5] Processing world state...",
+      "tick": 5,
+      "timestamp": 1780170621.8563151,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_9",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 5,
+      "timestamp": 1780170621.8575282,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_10",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "[mock:Eve:6] Processing world state...",
+      "tick": 6,
+      "timestamp": 1780170621.861866,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_11",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve acts.",
+      "tick": 6,
+      "timestamp": 1780170621.8630426,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    }
+  ]
+}
