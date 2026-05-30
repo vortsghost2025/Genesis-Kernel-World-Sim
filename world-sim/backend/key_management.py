@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-ENV_PATH = PROJECT_ROOT / ".env"
+ENV_PATH = PROJECT_ROOT / "world-sim" / ".env"
 
 # Key environment variables
 KEY_VARS = {
