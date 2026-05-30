@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Ancient World Map</title>
+    <style>
+        :root {
+            --bg: #0f1117; --panel: #1a1d27; --card: #242836; --border: #2d3148;
+            --text: #e8e6e3; --text2: #9ca3af; --muted: #6b7280;
+            --gold: #d4a853; --green: #4ade80; --blue: #60a5fa; --red: #f87171;
+            --water: #1e3a5f; --land: #2d4a2d; --desert: #4a3d2d;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 1.2rem; color: var(--gold); }
+        .back-link { color: var(--blue); text-decoration: none; font-size: 0.9rem; }
+        .back-link:hover { text-decoration: underline; }
+        .map-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 1rem auto;
+            padding: 0 1rem;
+        }
+        .map-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: var(--water);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .map-svg { width: 100%; height: 100%; }
+        .legend {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            padding: 1rem;
+            background: var(--panel);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .legend-dot.eden { background: var(--green); }
+        .legend-dot.settlement { background: var(--gold); }
+        .legend-dot.character { background: var(--blue); }
+        .legend-dot.river { background: #4a90d9; width: 20px; height: 4px; border-radius: 2px; }
+        .info-panel {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(26, 29, 39, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            min-width: 200px;
+            display: none;
+        }
+        .info-panel.visible { display: block; }
+        .info-panel h3 { font-size: 1rem; color: var(--gold); margin-bottom: 0.5rem; }
+        .info-panel p { font-size: 0.8rem; color: var(--text2); }
+        .map-controls {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--panel);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .map-controls button {
+            padding: 0.5rem 1rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .map-controls button:hover { background: var(--border); }
+        .map-controls button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🗺️ Ancient World Map</h1>
+        <a href="/sim" class="back-link">← Back to Dashboard</a>
+    </header>
+
+    <div class="map-container">
+        <div class="map-controls">
+            <button class="active" onclick="showLayer('all')">All</button>
+            <button onclick="showLayer('eden')">Eden</button>
+            <button onclick="showLayer('rivers')">Rivers</button>
+            <button onclick="showLayer('settlements')">Settlements</button>
+            <button onclick="showLayer('characters')">Characters</button>
+        </div>
+
+        <div class="map-wrapper">
+            <svg class="map-svg" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
+                <!-- Background - Water -->
+                <rect width="1200" height="675" fill="#1e3a5f"/>
+
+                <!-- Land masses -->
+                <!-- Mesopotamia / Fertile Crescent -->
+                <path d="M 400 200 Q 500 150 600 180 Q 700 200 750 280 Q 780 350 720 420 Q 650 480 550 450 Q 450 420 400 350 Q 370 280 400 200 Z" fill="#2d4a2d" stroke="#3d5a3d" stroke-width="2"/>
+
+                <!-- Egypt / Nile Valley -->
+                <path d="M 200 250 Q 250 200 300 220 Q 320 300 310 400 Q 300 480 250 500 Q 200 480 180 400 Q 170 320 200 250 Z" fill="#4a3d2d" stroke="#5a4d3d" stroke-width="2"/>
+
+                <!-- Arabian Peninsula -->
+                <path d="M 600 400 Q 700 380 800 420 Q 850 480 820 550 Q 750 600 650 580 Q 580 550 560 480 Q 550 430 600 400 Z" fill="#4a3d2d" stroke="#5a4d3d" stroke-width="2"/>
+
+                <!-- Anatolia / Turkey -->
+                <path d="M 350 100 Q 450 80 550 100 Q 600 120 580 180 Q 550 200 480 190 Q 400 180 350 150 Q 330 120 350 100 Z" fill="#2d4a2d" stroke="#3d5a3d" stroke-width="2"/>
+
+                <!-- Persia / Iran -->
+                <path d="M 750 200 Q 850 180 950 220 Q 1000 280 980 350 Q 950 400 880 380 Q 800 360 760 300 Q 730 250 750 200 Z" fill="#3d4a3d" stroke="#4d5a4d" stroke-width="2"/>
+
+                <!-- Rivers -->
+                <g id="rivers-layer">
+                    <!-- Tigris -->
+                    <path d="M 480 120 Q 500 180 520 250 Q 540 320 560 380 Q 580 420 600 450" stroke="#4a90d9" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <text x="530" y="200" fill="#4a90d9" font-size="12" font-style="italic">Tigris</text>
+
+                    <!-- Euphrates -->
+                    <path d="M 420 130 Q 440 200 460 280 Q 480 350 500 400 Q 520 440 550 460" stroke="#4a90d9" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <text x="400" y="250" fill="#4a90d9" font-size="12" font-style="italic">Euphrates</text>
+
+                    <!-- Pishon (mythical river of Eden) -->
+                    <path d="M 550 280 Q 600 260 650 280 Q 700 300 720 340" stroke="#4a90d9" stroke-width="3" fill="none" stroke-dasharray="8,4" stroke-linecap="round"/>
+                    <text x="620" y="270" fill="#4a90d9" font-size="10" font-style="italic">Pishon</text>
+
+                    <!-- Gihon (mythical river of Eden) -->
+                    <path d="M 550 300 Q 580 340 600 380 Q 620 420 640 450" stroke="#4a90d9" stroke-width="3" fill="none" stroke-dasharray="8,4" stroke-linecap="round"/>
+                    <text x="580" y="380" fill="#4a90d9" font-size="10" font-style="italic">Gihon</text>
+
+                    <!-- Nile -->
+                    <path d="M 280 200 Q 290 280 300 350 Q 310 420 300 480" stroke="#4a90d9" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <text x="260" y="350" fill="#4a90d9" font-size="12" font-style="italic">Nile</text>
+                </g>
+
+                <!-- Eden -->
+                <g id="eden-layer">
+                    <circle cx="550" cy="300" r="40" fill="rgba(74, 222, 128, 0.2)" stroke="#4ade80" stroke-width="2"/>
+                    <circle cx="550" cy="300" r="25" fill="rgba(74, 222, 128, 0.3)"/>
+                    <text x="550" y="295" fill="#4ade80" font-size="16" font-weight="bold" text-anchor="middle">🌿 Eden</text>
+                    <text x="550" y="315" fill="#4ade80" font-size="10" text-anchor="middle">Garden of God</text>
+                </g>
+
+                <!-- Settlements -->
+                <g id="settlements-layer">
+                    <!-- Nod (East of Eden) -->
+                    <circle cx="650" cy="320" r="12" fill="rgba(212, 168, 83, 0.3)" stroke="#d4a853" stroke-width="2"/>
+                    <text x="650" y="325" fill="#d4a853" font-size="11" font-weight="bold" text-anchor="middle">Nod</text>
+                    <text x="650" y="340" fill="#d4a853" font-size="8" text-anchor="middle">East of Eden</text>
+
+                    <!-- Ur (future) -->
+                    <circle cx="580" cy="440" r="10" fill="rgba(212, 168, 83, 0.2)" stroke="#d4a853" stroke-width="1.5" stroke-dasharray="4,2"/>
+                    <text x="580" y="445" fill="#d4a853" font-size="10" text-anchor="middle">Ur</text>
+                    <text x="580" y="458" fill="#d4a853" font-size="7" text-anchor="middle">(future)</text>
+
+                    <!-- Babylon (future) -->
+                    <circle cx="540" cy="380" r="10" fill="rgba(212, 168, 83, 0.2)" stroke="#d4a853" stroke-width="1.5" stroke-dasharray="4,2"/>
+                    <text x="540" y="385" fill="#d4a853" font-size="10" text-anchor="middle">Babel</text>
+                    <text x="540" y="398" fill="#d4a853" font-size="7" text-anchor="middle">(future)</text>
+                </g>
+
+                <!-- Characters -->
+                <g id="characters-layer">
+                    <!-- Adam -->
+                    <circle cx="540" cy="290" r="8" fill="#60a5fa" stroke="#fff" stroke-width="1.5"/>
+                    <text x="540" y="275" fill="#60a5fa" font-size="10" font-weight="bold" text-anchor="middle">Adam</text>
+
+                    <!-- Eve -->
+                    <circle cx="560" cy="310" r="8" fill="#f87171" stroke="#fff" stroke-width="1.5"/>
+                    <text x="560" y="330" fill="#f87171" font-size="10" font-weight="bold" text-anchor="middle">Eve</text>
+                </g>
+
+                <!-- Region Labels -->
+                <text x="500" y="250" fill="#5a7a5a" font-size="14" font-weight="bold" opacity="0.6">MESOPOTAMIA</text>
+                <text x="240" y="350" fill="#7a6a5a" font-size="14" font-weight="bold" opacity="0.6">EGYPT</text>
+                <text x="700" y="500" fill="#7a6a5a" font-size="14" font-weight="bold" opacity="0.6">ARABIA</text>
+                <text x="450" y="140" fill="#5a7a5a" font-size="12" font-weight="bold" opacity="0.6">ANATOLIA</text>
+                <text x="850" y="300" fill="#5a7a5a" font-size="14" font-weight="bold" opacity="0.6">PERSIA</text>
+
+                <!-- Compass Rose -->
+                <g transform="translate(100, 100)">
+                    <circle r="30" fill="rgba(26, 29, 39, 0.8)" stroke="#2d3148" stroke-width="1"/>
+                    <text x="0" y="-15" fill="#d4a853" font-size="14" font-weight="bold" text-anchor="middle">N</text>
+                    <text x="0" y="22" fill="#9ca3af" font-size="12" text-anchor="middle">S</text>
+                    <text x="-18" y="5" fill="#9ca3af" font-size="12" text-anchor="middle">W</text>
+                    <text x="18" y="5" fill="#9ca3af" font-size="12" text-anchor="middle">E</text>
+                    <line x1="0" y1="-10" x2="0" y2="10" stroke="#d4a853" stroke-width="1"/>
+                    <line x1="-10" y1="0" x2="10" y2="0" stroke="#d4a853" stroke-width="1"/>
+                </g>
+
+                <!-- Scale bar -->
+                <g transform="translate(100, 600)">
+                    <line x1="0" y1="0" x2="100" y2="0" stroke="#9ca3af" stroke-width="2"/>
+                    <line x1="0" y1="-5" x2="0" y2="5" stroke="#9ca3af" stroke-width="2"/>
+                    <line x1="100" y1="-5" x2="100" y2="5" stroke="#9ca3af" stroke-width="2"/>
+                    <text x="50" y="15" fill="#9ca3af" font-size="10" text-anchor="middle">~500 miles</text>
+                </g>
+            </svg>
+
+            <!-- Info Panel -->
+            <div class="info-panel" id="info-panel">
+                <h3 id="info-title">Location</h3>
+                <p id="info-desc">Description</p>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item"><span class="legend-dot eden"></span> Eden</div>
+            <div class="legend-item"><span class="legend-dot settlement"></span> Settlements</div>
+            <div class="legend-item"><span class="legend-dot character"></span> Characters</div>
+            <div class="legend-item"><span class="legend-dot river"></span> Rivers</div>
+        </div>
+    </div>
+
+    <script>
+        function showLayer(layer) {
+            const layers = {
+                'eden': 'eden-layer',
+                'rivers': 'rivers-layer',
+                'settlements': 'settlements-layer',
+                'characters': 'characters-layer'
+            };
+
+            document.querySelectorAll('.map-controls button').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (layer === 'all') {
+                Object.values(layers).forEach(id => {
+                    document.getElementById(id).style.opacity = '1';
+                });
+            } else {
+                Object.entries(layers).forEach(([key, id]) => {
+                    document.getElementById(id).style.opacity = key === layer ? '1' : '0.15';
+                });
+            }
+        }
+
+        // Click on map elements to show info
+        document.querySelectorAll('.map-svg circle, .map-svg text').forEach(el => {
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', (e) => {
+                const panel = document.getElementById('info-panel');
+                const title = document.getElementById('info-title');
+                const desc = document.getElementById('info-desc');
+
+                const text = el.textContent;
+                const info = {
+                    'Eden': { title: '🌿 Garden of Eden', desc: 'The garden God planted for Adam and Eve. Located between the Tigris and Euphrates rivers. The tree of life and tree of knowledge stand here.' },
+                    'Adam': { title: '👤 Adam', desc: 'The first human. Created from dust, given breath by God. Tasked with tending the garden and naming the animals.' },
+                    'Eve': { title: '👤 Eve', desc: 'The first woman. Created from Adam\'s rib as his companion. Mother of all living.' },
+                    'Nod': { title: '🏘️ Land of Nod', desc: 'East of Eden. Where Cain fled after his exile. The first settlement outside the garden.' },
+                    'Ur': { title: '🏛️ Ur (future)', desc: 'Will become a great city of the Chaldeans. Future home of Abraham before his journey.' },
+                    'Babel': { title: '🗼 Babel (future)', desc: 'Will become the site of the tower of Babel. Where languages will be confused and scattered.' },
+                    'Tigris': { title: '🌊 Tigris River', desc: 'One of the four rivers of Eden. Flows through Mesopotamia to the Persian Gulf.' },
+                    'Euphrates': { title: '🌊 Euphrates River', desc: 'The great river of Mesopotamia. One of the four rivers of Eden.' },
+                    'Pishon': { title: '🌊 Pishon River', desc: 'A river of Eden that winds through the land of Havilah, where there is gold.' },
+                    'Gihon': { title: '🌊 Gihon River', desc: 'A river of Eden that winds through the land of Cush.' },
+                    'Nile': { title: '🌊 Nile River', desc: 'The great river of Egypt. Will become central to the story of Moses and the Exodus.' },
+                };
+
+                if (info[text]) {
+                    title.textContent = info[text].title;
+                    desc.textContent = info[text].desc;
+                    panel.classList.add('visible');
+                }
+            });
+        });
+
+        // Close info panel on outside click
+        document.querySelector('.map-wrapper').addEventListener('click', (e) => {
+            if (!e.target.closest('circle') && !e.target.closest('text')) {
+                document.getElementById('info-panel').classList.remove('visible');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -14,6 +14,9 @@
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
         header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
         header h1 { font-size: 1.2rem; color: var(--gold); }
+        .nav-links { display: flex; gap: 1rem; align-items: center; }
+        .nav-links a { color: var(--blue); text-decoration: none; font-size: 0.85rem; }
+        .nav-links a:hover { text-decoration: underline; }
         .controls { display: flex; gap: 0.5rem; }
         .btn { padding: 0.5rem 1rem; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
         .btn:hover { background: var(--border); }
@@ -49,6 +52,9 @@
 <body>
     <header>
         <h1>World Sim — Creator Dashboard</h1>
+        <div class="nav-links">
+            <a href="/map">🗺️ World Map</a>
+        </div>
         <div class="controls">
             <button class="btn primary" onclick="tick()">▶ One Tick</button>
             <button class="btn" onclick="run5()">⏩ 5 Ticks</button>

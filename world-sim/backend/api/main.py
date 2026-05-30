@@ -160,6 +160,13 @@ def serve_sim():
     return FileResponse(ui_path)
 
 
+@app.get("/map")
+def serve_map():
+    """Serve the ancient world map."""
+    ui_path = PROJECT_ROOT / "frontend" / "map.html"
+    return FileResponse(ui_path)
+
+
 @app.get("/api/state")
 def get_world_state():
     """Return current world state."""
