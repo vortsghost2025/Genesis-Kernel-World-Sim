@@ -1,16 +1,22 @@
 """
-FastAPI server — World Sim Creator Dashboard.
+FastAPI server — World Sim Creator Dashboard (Dual Hemisphere).
 
 Endpoints:
   GET  /sim              — Creator dashboard UI
-  GET  /api/state        — Current world state
+  GET  /map              — World map
+  GET  /api/state        — Combined world state
+  GET  /api/state/east   — East hemisphere state
+  GET  /api/state/west   — West hemisphere state
   GET  /api/agents       — List all agents
-  GET  /api/agents/<name> — Agent details
+  GET  /api/agents/<name>/memory — Agent memories
   POST /api/agents       — Add new agent
   DELETE /api/agents/<name> — Remove agent
   GET  /api/events       — Recent events
-  GET  /api/timeline     — Full timeline
-  POST /api/tick         — Advance one tick
+  GET  /api/events/east  — East events
+  GET  /api/events/west  — West events
+  POST /api/tick         — Advance one tick (both hemispheres)
+  POST /api/tick/east    — Advance east tick
+  POST /api/tick/west    — Advance west tick
   POST /api/run          — Run N ticks
   POST /api/reset        — Reset simulation
   GET  /api/providers    — Provider call log
@@ -32,13 +38,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.config import WorldSimConfig, config
-from backend.agents.base import WorldAgent
-from backend.agents.adam import create_adam
-from backend.agents.eve import create_eve
-from backend.world.state import WorldState
-from backend.world.consequence_engine import ConsequenceEngine
-from backend.memory.event_log import EventLog
-from backend.providers.base import MockProvider, NvidiaNimProvider, call_log
+from backend.world.dual_sim import DualHemisphereSim
+from backend.providers.base import call_log
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +56,7 @@ if _env_path.exists():
                 _k, _, _v = _line.partition("=")
                 os.environ[_k.strip()] = _v.strip()
 
-app = FastAPI(title="World Sim API", version="0.1.0")
+app = FastAPI(title="World Sim API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,86 +65,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Singleton simulation state ---
+# --- Dual hemisphere simulation ---
 data_dir = PROJECT_ROOT / "data"
 data_dir.mkdir(parents=True, exist_ok=True)
 
 cfg = WorldSimConfig.from_env()
-world = WorldState()
-agents: dict[str, WorldAgent] = {"Adam": create_adam(), "Eve": create_eve()}
-engine = ConsequenceEngine()
-event_log = EventLog(log_path=data_dir / "events.jsonl")
-
-# Load saved state
-world.load_state(data_dir / "world_state.json")
-for name, agent in agents.items():
-    agent.load_state(data_dir / f"{name.lower()}_state.json")
-event_log.load_all()
-
-
-def _setup_providers() -> None:
-    """Configure providers for all agents."""
-    for name, agent in agents.items():
-        agent_cfg = cfg.agents.get(name)
-        if agent_cfg and agent_cfg.provider in ("nim-live", "nim-dry-run"):
-            agent.set_provider(NvidiaNimProvider(
-                name=f"{name.lower()}_nim",
-                api_key_env=agent_cfg.key_env,
-                model=agent_cfg.model,
-                mode=agent_cfg.provider,
-            ))
-        else:
-            agent.set_provider(MockProvider(name=f"{name.lower()}_mock"))
-
-
-_setup_providers()
-
-
-def _advance_one_tick() -> dict:
-    """Run a single simulation tick."""
-    world_snapshot = world.observe()
-
-    agent_actions = []
-    for name, agent in agents.items():
-        if agent.enabled:
-            action = agent.decide(world_snapshot)
-            agent_actions.append(action)
-
-    consequences = engine.resolve(agent_actions, world_snapshot)
-    world.apply_changes(consequences["world_changes"])
-    world.advance_tick()
-
-    for name, agent in agents.items():
-        agent_result = next(
-            (r for r in consequences["agent_results"] if r["agent"] == name),
-            None,
-        )
-        if agent_result:
-            agent.remember(agent_result)
-
-    event = {
-        "tick": world.tick,
-        "label": consequences["label"],
-        "narrative": consequences["narrative"],
-        "agents": {
-            name: {"thought": a.get("thought", ""), "action": a.get("action", "")}
-            for a in agent_actions
-        },
-        "world_changes": consequences["world_changes"],
-    }
-    event_log.append(event)
-
-    # Persist
-    world.save_state(data_dir / "world_state.json")
-    for name, agent in agents.items():
-        agent.save_state(data_dir / f"{name.lower()}_state.json")
-
-    return event
+dual_sim = DualHemisphereSim(cfg)
 
 
 # --- Pydantic models ---
 class AddAgentRequest(BaseModel):
     name: str
+    hemisphere: str = "east"
     role: str = ""
     provider: str = "mock"
     model: str = "meta/llama-3.1-8b-instruct"
@@ -162,7 +95,7 @@ def serve_sim():
 
 @app.get("/map")
 def serve_map():
-    """Serve the ancient world map."""
+    """Serve the world map."""
     ui_path = PROJECT_ROOT / "frontend" / "map-v2.html"
     return FileResponse(ui_path)
 
@@ -172,8 +105,7 @@ def serve_base_map_clean():
     """Serve the clean Azgaar-generated base map (East) - no UI."""
     map_path = PROJECT_ROOT / "data" / "base_map_clean.png"
     if map_path.exists():
-        from fastapi.responses import FileResponse as FR
-        return FR(map_path, media_type="image/png")
+        return FileResponse(map_path, media_type="image/png")
     raise HTTPException(status_code=404, detail="Clean base map not found")
 
 
@@ -182,8 +114,7 @@ def serve_base_map_west_clean():
     """Serve the clean Azgaar-generated base map (West) - no UI."""
     map_path = PROJECT_ROOT / "data" / "base_map_west_clean.png"
     if map_path.exists():
-        from fastapi.responses import FileResponse as FR
-        return FR(map_path, media_type="image/png")
+        return FileResponse(map_path, media_type="image/png")
     raise HTTPException(status_code=404, detail="West clean base map not found")
 
 
@@ -199,126 +130,176 @@ def get_map_state():
 
 @app.get("/api/state")
 def get_world_state():
-    """Return current world state."""
-    return {
-        "tick": world.tick,
-        "day": world.day,
-        "time_of_day": world.time_of_day,
-        "weather": world.weather,
-        "garden_condition": world.garden_condition,
-        "resources": world.resources,
-        "structures": world.structures,
-        "harmony_level": world.harmony_level,
-        "boundary_respected": world.boundary_respected,
-        "animals_present": world.animals_present,
-    }
+    """Return combined state of both hemispheres."""
+    return dual_sim.get_state()
+
+
+@app.get("/api/state/east")
+def get_east_state():
+    """Return east hemisphere state."""
+    return dual_sim.east.get_state()
+
+
+@app.get("/api/state/west")
+def get_west_state():
+    """Return west hemisphere state."""
+    return dual_sim.west.get_state()
 
 
 @app.get("/api/agents")
 def get_agents():
-    """Return all agents."""
-    return {
-        name: {
+    """Return all agents from both hemispheres."""
+    agents = {}
+    for name, agent in dual_sim.east.agents.items():
+        agents[f"east_{name}"] = {
             "name": agent.name,
+            "hemisphere": "east",
             "role": agent.role,
             "tick": agent.tick,
             "enabled": agent.enabled,
             "traits": agent.traits,
             "current_thought": agent.current_thought,
             "current_action": agent.current_action,
-            "memory_count": len(agent.memory),
+            "memory_stats": agent.get_memory_stats(),
             "provider": agent.provider.name,
         }
-        for name, agent in agents.items()
+    for name, agent in dual_sim.west.agents.items():
+        agents[f"west_{name}"] = {
+            "name": agent.name,
+            "hemisphere": "west",
+            "role": agent.role,
+            "tick": agent.tick,
+            "enabled": agent.enabled,
+            "traits": agent.traits,
+            "current_thought": agent.current_thought,
+            "current_action": agent.current_action,
+            "memory_stats": agent.get_memory_stats(),
+            "provider": agent.provider.name,
+        }
+    return agents
+
+
+@app.get("/api/agents/{agent_key}/memory")
+def get_agent_memory(agent_key: str, limit: int = 20):
+    """Return agent memories."""
+    # Parse agent key (e.g., "east_Adam" or "west_Eve")
+    if "_" not in agent_key:
+        raise HTTPException(status_code=400, detail="Agent key must be in format 'hemisphere_name'")
+    
+    hemisphere, name = agent_key.split("_", 1)
+    sim = dual_sim.east if hemisphere == "east" else dual_sim.west
+    
+    if name not in sim.agents:
+        raise HTTPException(status_code=404, detail=f"Agent {name} not found in {hemisphere}")
+    
+    agent = sim.agents[name]
+    memories = agent.persistent_memory.get_recent(limit)
+    
+    return {
+        "agent": agent.name,
+        "hemisphere": hemisphere,
+        "memories": [m.to_dict() for m in memories],
+        "stats": agent.get_memory_stats(),
     }
 
 
 @app.post("/api/agents")
 def add_agent(req: AddAgentRequest):
-    """Add a new agent to the simulation."""
-    if req.name in agents:
-        raise HTTPException(status_code=400, detail=f"Agent {req.name} already exists")
-
-    agent = WorldAgent(
-        name=req.name,
-        role=req.role,
-        traits=req.traits or {},
-        enabled=True,
-    )
-
-    if req.provider in ("nim-live", "nim-dry-run"):
-        agent.set_provider(NvidiaNimProvider(
-            name=f"{req.name.lower()}_nim",
-            api_key_env=req.key_env or f"AGENT_{req.name.upper()}_NIM_KEY",
-            model=req.model,
-            mode=req.provider,
-        ))
-    else:
-        agent.set_provider(MockProvider(name=f"{req.name.lower()}_mock"))
-
-    agents[req.name] = agent
-    cfg.add_agent(req.name, req.role, req.model, req.key_env)
-
-    return {"status": "ok", "agent": req.name}
+    """Add a new agent to a hemisphere."""
+    if req.hemisphere not in ("east", "west"):
+        raise HTTPException(status_code=400, detail="Hemisphere must be 'east' or 'west'")
+    
+    success = dual_sim.add_agent(req.hemisphere, req.name, req.role, req.provider)
+    if not success:
+        raise HTTPException(status_code=400, detail=f"Failed to add agent {req.name}")
+    
+    return {"status": "ok", "agent": req.name, "hemisphere": req.hemisphere}
 
 
-@app.delete("/api/agents/{name}")
-def remove_agent(name: str):
-    """Remove an agent from the simulation."""
-    if name not in agents:
-        raise HTTPException(status_code=404, detail=f"Agent {name} not found")
-    del agents[name]
-    cfg.remove_agent(name)
-    return {"status": "ok", "agent": name}
+@app.delete("/api/agents/{agent_key}")
+def remove_agent(agent_key: str):
+    """Remove an agent from a hemisphere."""
+    if "_" not in agent_key:
+        raise HTTPException(status_code=400, detail="Agent key must be in format 'hemisphere_name'")
+    
+    hemisphere, name = agent_key.split("_", 1)
+    success = dual_sim.remove_agent(hemisphere, name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Agent {name} not found in {hemisphere}")
+    
+    return {"status": "ok", "agent": name, "hemisphere": hemisphere}
 
 
 @app.get("/api/events")
-def get_events(limit: int = 50):
+def get_events(hemisphere: str = "both", limit: int = 50):
     """Return recent events."""
-    return event_log.recent(limit)
+    if hemisphere == "east":
+        return dual_sim.east.event_log.recent(limit)
+    elif hemisphere == "west":
+        return dual_sim.west.event_log.recent(limit)
+    else:
+        # Combine both
+        east_events = dual_sim.east.event_log.recent(limit // 2)
+        west_events = dual_sim.west.event_log.recent(limit // 2)
+        return east_events + west_events
+
+
+@app.get("/api/events/east")
+def get_east_events(limit: int = 50):
+    """Return east hemisphere events."""
+    return dual_sim.east.event_log.recent(limit)
+
+
+@app.get("/api/events/west")
+def get_west_events(limit: int = 50):
+    """Return west hemisphere events."""
+    return dual_sim.west.event_log.recent(limit)
 
 
 @app.get("/api/timeline")
 def get_timeline():
-    """Return full event timeline."""
-    return event_log.events
+    """Return full event timeline from both hemispheres."""
+    return {
+        "east": dual_sim.east.event_log.events,
+        "west": dual_sim.west.event_log.events,
+    }
 
 
 @app.post("/api/tick")
-def advance_tick():
-    """Advance the simulation by one tick."""
-    event = _advance_one_tick()
-    return {"status": "ok", "event": event}
+def advance_tick(hemisphere: str = "both"):
+    """Advance one tick for one or both hemispheres."""
+    results = dual_sim.run_tick(hemisphere)
+    return {"status": "ok", "results": results}
+
+
+@app.post("/api/tick/east")
+def advance_east_tick():
+    """Advance east hemisphere one tick."""
+    return {"status": "ok", "results": {"east": dual_sim.run_tick("east")}}
+
+
+@app.post("/api/tick/west")
+def advance_west_tick():
+    """Advance west hemisphere one tick."""
+    return {"status": "ok", "results": {"west": dual_sim.run_tick("west")}}
 
 
 @app.post("/api/run")
-def run_ticks(count: int = 5):
-    """Run N ticks of simulation."""
-    events = []
+def run_ticks(count: int = 5, hemisphere: str = "both"):
+    """Run N ticks."""
+    results = []
     for _ in range(count):
-        event = _advance_one_tick()
-        events.append(event)
-    return {"status": "ok", "ticks_run": count, "events": events}
+        result = dual_sim.run_tick(hemisphere)
+        results.append(result)
+    return {"status": "ok", "ticks_run": count, "results": results}
 
 
 @app.post("/api/reset")
 def reset_simulation():
-    """Reset the simulation to initial state."""
-    global world, agents, event_log
-
-    world = WorldState()
-    agents = {"Adam": create_adam(), "Eve": create_eve()}
-    event_log = EventLog(log_path=data_dir / "events.jsonl")
+    """Reset the simulation."""
+    global dual_sim
+    dual_sim = DualHemisphereSim(cfg)
     call_log.clear()
-
-    # Clear saved state
-    for f in data_dir.glob("*.json"):
-        f.unlink()
-    for f in data_dir.glob("*.jsonl"):
-        f.unlink()
-
-    _setup_providers()
-
     return {"status": "ok", "message": "Simulation reset"}
 
 

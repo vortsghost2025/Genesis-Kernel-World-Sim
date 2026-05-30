@@ -9,6 +9,7 @@
             --bg: #0f1117; --panel: #1a1d27; --card: #242836; --border: #2d3148;
             --text: #e8e6e3; --text2: #9ca3af; --muted: #6b7280;
             --gold: #d4a853; --green: #4ade80; --blue: #60a5fa; --red: #f87171;
+            --east-color: #4488ff; --west-color: #ff8844;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
@@ -21,12 +22,16 @@
         .btn { padding: 0.5rem 1rem; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
         .btn:hover { background: var(--border); }
         .btn.primary { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600; }
+        .btn.east { background: var(--east-color); color: #fff; border-color: var(--east-color); }
+        .btn.west { background: var(--west-color); color: #fff; border-color: var(--west-color); }
         .btn.danger { border-color: var(--red); color: var(--red); }
         .btn.danger:hover { background: var(--red); color: #000; }
-        .dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; padding: 1rem 2rem; }
-        .sidebar { display: flex; flex-direction: column; gap: 1rem; }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem 2rem; }
+        .hemisphere-panel { display: flex; flex-direction: column; gap: 1rem; }
         .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-        .panel-header { background: var(--card); padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+        .panel-header { background: var(--card); padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+        .panel-header.east { border-left: 4px solid var(--east-color); }
+        .panel-header.west { border-left: 4px solid var(--west-color); }
         .panel-body { padding: 1rem; }
         .stat-row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
         .stat-row:last-child { border-bottom: none; }
@@ -36,7 +41,7 @@
         .agent-card h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
         .agent-card .role { font-size: 0.75rem; color: var(--text2); }
         .agent-card .status { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
-        .timeline { max-height: 600px; overflow-y: auto; }
+        .timeline { max-height: 400px; overflow-y: auto; }
         .event-item { background: var(--card); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; font-size: 0.8rem; }
         .event-item .tick { font-weight: 600; color: var(--gold); }
         .event-item .narrative { margin-top: 0.3rem; color: var(--text2); }
@@ -47,28 +52,74 @@
         .provider-log .call { padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
         .provider-log .success { color: var(--green); }
         .provider-log .error { color: var(--red); }
+        .memory-view { max-height: 300px; overflow-y: auto; font-size: 0.75rem; }
+        .memory-item { padding: 0.5rem; border-bottom: 1px solid var(--border); }
+        .memory-item .type { font-weight: 600; color: var(--gold); }
+        .memory-item .content { margin-top: 0.2rem; color: var(--text2); }
+        @media (max-width: 900px) {
+            .dashboard { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <header>
-        <h1>World Sim — Creator Dashboard</h1>
+        <h1>World Sim — Dual Hemisphere Creator Dashboard</h1>
         <div class="nav-links">
             <a href="/map">🗺️ World Map</a>
         </div>
         <div class="controls">
-            <button class="btn primary" onclick="tick()">▶ One Tick</button>
+            <button class="btn primary" onclick="tickBoth()">▶ Both Ticks</button>
+            <button class="btn east" onclick="tickEast()">▶ East</button>
+            <button class="btn west" onclick="tickWest()">▶ West</button>
             <button class="btn" onclick="run5()">⏩ 5 Ticks</button>
-            <button class="btn" onclick="run20()">⏩ 20 Ticks</button>
             <button class="btn danger" onclick="resetSim()">↺ Reset</button>
         </div>
     </header>
 
     <div class="dashboard">
-        <div class="sidebar">
-            <!-- World State -->
+        <!-- EAST HEMISPHERE -->
+        <div class="hemisphere-panel">
             <div class="panel">
-                <div class="panel-header">🌍 World State</div>
-                <div class="panel-body" id="world-state">
+                <div class="panel-header east">🌍 East Hemisphere</div>
+                <div class="panel-body" id="east-state">
+                    <div class="stat-row"><span class="stat-label">Tick</span><span class="stat-value" id="e-tick">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Day</span><span class="stat-value" id="e-day">1</span></div>
+                    <div class="stat-row"><span class="stat-label">Time</span><span class="stat-value" id="e-time">morning</span></div>
+                    <div class="stat-row"><span class="stat-label">Weather</span><span class="stat-value" id="e-weather">gentle</span></div>
+                    <div class="stat-row"><span class="stat-label">Garden</span><span class="stat-value" id="e-garden">pristine</span></div>
+                    <div class="stat-row"><span class="stat-label">Harmony</span><span class="stat-value" id="e-harmony">1.00</span></div>
+                    <div class="stat-row"><span class="stat-label">Boundary</span><span class="stat-value" id="e-boundary">Respected</span></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">👥 East Agents</div>
+                <div class="panel-body" id="east-agents"></div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">🧠 East Agent Memories</div>
+                <div class="panel-body">
+                    <select id="east-memory-agent" onchange="loadMemories('east')" style="width:100%;margin-bottom:0.5rem;padding:0.5rem;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;">
+                        <option value="">Select agent...</option>
+                    </select>
+                    <div class="memory-view" id="east-memories"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">📜 East Timeline</div>
+                <div class="panel-body">
+                    <div class="timeline" id="east-timeline"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WEST HEMISPHERE -->
+        <div class="hemisphere-panel">
+            <div class="panel">
+                <div class="panel-header west">🌎 West Hemisphere</div>
+                <div class="panel-body" id="west-state">
                     <div class="stat-row"><span class="stat-label">Tick</span><span class="stat-value" id="w-tick">0</span></div>
                     <div class="stat-row"><span class="stat-label">Day</span><span class="stat-value" id="w-day">1</span></div>
                     <div class="stat-row"><span class="stat-label">Time</span><span class="stat-value" id="w-time">morning</span></div>
@@ -79,19 +130,45 @@
                 </div>
             </div>
 
-            <!-- Agents -->
             <div class="panel">
-                <div class="panel-header">👥 Agents</div>
-                <div class="panel-body" id="agent-list"></div>
+                <div class="panel-header west">👥 West Agents</div>
+                <div class="panel-body" id="west-agents"></div>
             </div>
 
-            <!-- Add Agent -->
             <div class="panel">
-                <div class="panel-header">+ Add Character</div>
+                <div class="panel-header west">🧠 West Agent Memories</div>
                 <div class="panel-body">
-                    <div class="add-agent-form">
+                    <select id="west-memory-agent" onchange="loadMemories('west')" style="width:100%;margin-bottom:0.5rem;padding:0.5rem;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;">
+                        <option value="">Select agent...</option>
+                    </select>
+                    <div class="memory-view" id="west-memories"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header west">📜 West Timeline</div>
+                <div class="panel-body">
+                    <div class="timeline" id="west-timeline"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Agent Panel -->
+    <div style="padding: 0 2rem 1rem;">
+        <div class="panel">
+            <div class="panel-header">+ Add Character</div>
+            <div class="panel-body">
+                <div class="add-agent-form" style="max-width: 600px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
                         <input type="text" id="new-name" placeholder="Name (e.g., Cain)">
-                        <input type="text" id="new-role" placeholder="Role (e.g., farmer)">
+                        <select id="new-hemisphere">
+                            <option value="east">East Hemisphere</option>
+                            <option value="west">West Hemisphere</option>
+                        </select>
+                    </div>
+                    <input type="text" id="new-role" placeholder="Role (e.g., farmer)">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;">
                         <select id="new-provider">
                             <option value="mock">Mock</option>
                             <option value="nim-dry-run">NIM Dry-Run</option>
@@ -99,25 +176,19 @@
                         </select>
                         <input type="text" id="new-model" placeholder="Model (optional)">
                         <input type="text" id="new-key-env" placeholder="Key env var (optional)">
-                        <button class="btn primary" onclick="addAgent()">Add Character</button>
                     </div>
-                </div>
-            </div>
-
-            <!-- Provider Log -->
-            <div class="panel">
-                <div class="panel-header">📡 Provider Calls</div>
-                <div class="panel-body">
-                    <div class="provider-log" id="provider-log"></div>
+                    <button class="btn primary" onclick="addAgent()">Add Character</button>
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Timeline -->
+    <!-- Provider Log -->
+    <div style="padding: 0 2rem 1rem;">
         <div class="panel">
-            <div class="panel-header">📜 Timeline</div>
+            <div class="panel-header">📡 Provider Calls</div>
             <div class="panel-body">
-                <div class="timeline" id="timeline"></div>
+                <div class="provider-log" id="provider-log"></div>
             </div>
         </div>
     </div>
@@ -127,37 +198,70 @@
         async function postJSON(path, body) {
             return (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json();
         }
-        async function deleteJSON(path) {
-            return (await fetch(path, { method: 'DELETE' })).json();
-        }
+        async function deleteJSON(path) { return (await fetch(path, { method: 'DELETE' })).json(); }
+        
         async function refresh() {
             try {
-                const [state, agents, events, providers] = await Promise.all([
-                    fetchJSON('/api/state'), fetchJSON('/api/agents'), fetchJSON('/api/events?limit=100'), fetchJSON('/api/providers'),
-                ]);
-                // World state
-                document.getElementById('w-tick').textContent = state.tick;
-                document.getElementById('w-day').textContent = state.day;
-                document.getElementById('w-time').textContent = state.time_of_day;
-                document.getElementById('w-weather').textContent = state.weather;
-                document.getElementById('w-garden').textContent = state.garden_condition;
-                document.getElementById('w-harmony').textContent = state.harmony_level.toFixed(2);
-                document.getElementById('w-boundary').textContent = state.boundary_respected ? 'Respected' : 'Not Respected';
+                const state = await fetchJSON('/api/state');
+                const agents = await fetchJSON('/api/agents');
+                const eastEvents = await fetchJSON('/api/events/east?limit=50');
+                const westEvents = await fetchJSON('/api/events/west?limit=50');
+                const providers = await fetchJSON('/api/providers');
+
+                // East state
+                if (state.east) {
+                    document.getElementById('e-tick').textContent = state.east.tick;
+                    document.getElementById('e-day').textContent = state.east.world?.day || 1;
+                    document.getElementById('e-time').textContent = state.east.world?.time_of_day || 'morning';
+                    document.getElementById('e-weather').textContent = state.east.world?.weather || 'gentle';
+                    document.getElementById('e-garden').textContent = state.east.world?.garden_condition || 'pristine';
+                    document.getElementById('e-harmony').textContent = state.east.world?.harmony_level?.toFixed(2) || '1.00';
+                    document.getElementById('e-boundary').textContent = state.east.world?.boundary_respected ? 'Respected' : 'Not Respected';
+                }
+
+                // West state
+                if (state.west) {
+                    document.getElementById('w-tick').textContent = state.west.tick;
+                    document.getElementById('w-day').textContent = state.west.world?.day || 1;
+                    document.getElementById('w-time').textContent = state.west.world?.time_of_day || 'morning';
+                    document.getElementById('w-weather').textContent = state.west.world?.weather || 'gentle';
+                    document.getElementById('w-garden').textContent = state.west.world?.garden_condition || 'pristine';
+                    document.getElementById('w-harmony').textContent = state.west.world?.harmony_level?.toFixed(2) || '1.00';
+                    document.getElementById('w-boundary').textContent = state.west.world?.boundary_respected ? 'Respected' : 'Not Respected';
+                }
+
                 // Agents
-                const agentList = document.getElementById('agent-list');
-                agentList.innerHTML = Object.values(agents).map(a => `
+                const eastAgents = Object.values(agents).filter(a => a.hemisphere === 'east');
+                const westAgents = Object.values(agents).filter(a => a.hemisphere === 'west');
+                
+                document.getElementById('east-agents').innerHTML = eastAgents.map(a => `
                     <div class="agent-card">
-                        <h3>${a.name} ${a.enabled ? '' : '(disabled)'}</h3>
+                        <h3>${a.name}</h3>
                         <div class="role">${a.role}</div>
-                        <div class="status">Tick ${a.tick} | ${a.provider} | ${a.memory_count} memories</div>
+                        <div class="status">Tick ${a.tick} | ${a.provider} | ${a.memory_stats?.total_memories || 0} memories</div>
                         <div style="font-size:0.75rem;margin-top:0.3rem;color:var(--muted);">Thought: ${a.current_thought?.substring(0, 60) || '—'}</div>
                         <div style="font-size:0.75rem;color:var(--muted);">Action: ${a.current_action?.substring(0, 60) || '—'}</div>
-                        ${a.name !== 'Adam' && a.name !== 'Eve' ? `<button class="btn danger" style="margin-top:0.3rem;font-size:0.7rem;" onclick="removeAgent('${a.name}')">Remove</button>` : ''}
                     </div>
                 `).join('');
-                // Timeline
-                const timeline = document.getElementById('timeline');
-                timeline.innerHTML = events.slice().reverse().map(e => `
+
+                document.getElementById('west-agents').innerHTML = westAgents.map(a => `
+                    <div class="agent-card">
+                        <h3>${a.name}</h3>
+                        <div class="role">${a.role}</div>
+                        <div class="status">Tick ${a.tick} | ${a.provider} | ${a.memory_stats?.total_memories || 0} memories</div>
+                        <div style="font-size:0.75rem;margin-top:0.3rem;color:var(--muted);">Thought: ${a.current_thought?.substring(0, 60) || '—'}</div>
+                        <div style="font-size:0.75rem;color:var(--muted);">Action: ${a.current_action?.substring(0, 60) || '—'}</div>
+                    </div>
+                `).join('');
+
+                // Update memory agent selectors
+                const eastSelect = document.getElementById('east-memory-agent');
+                const westSelect = document.getElementById('west-memory-agent');
+                eastSelect.innerHTML = '<option value="">Select agent...</option>' + eastAgents.map(a => `<option value="east_${a.name}">${a.name}</option>`).join('');
+                westSelect.innerHTML = '<option value="">Select agent...</option>' + westAgents.map(a => `<option value="west_${a.name}">${a.name}</option>`).join('');
+
+                // Timelines
+                document.getElementById('east-timeline').innerHTML = eastEvents.slice().reverse().map(e => `
                     <div class="event-item">
                         <span class="tick">Tick ${e.tick}</span>
                         <span style="color:var(--muted);margin-left:0.5rem;">[${e.label}]</span>
@@ -165,24 +269,53 @@
                         <div class="agents">${Object.entries(e.agents || {}).map(([n, a]) => `${n}: ${a.action?.substring(0, 40) || '—'}`).join(' | ')}</div>
                     </div>
                 `).join('');
+
+                document.getElementById('west-timeline').innerHTML = westEvents.slice().reverse().map(e => `
+                    <div class="event-item">
+                        <span class="tick">Tick ${e.tick}</span>
+                        <span style="color:var(--muted);margin-left:0.5rem;">[${e.label}]</span>
+                        <div class="narrative">${e.narrative}</div>
+                        <div class="agents">${Object.entries(e.agents || {}).map(([n, a]) => `${n}: ${a.action?.substring(0, 40) || '—'}`).join(' | ')}</div>
+                    </div>
+                `).join('');
+
                 // Provider log
-                const plog = document.getElementById('provider-log');
-                plog.innerHTML = (providers.recent_calls || []).slice().reverse().map(c => `
+                document.getElementById('provider-log').innerHTML = (providers.recent_calls || []).slice().reverse().map(c => `
                     <div class="call ${c.success ? 'success' : 'error'}">
                         ${c.agent} → ${c.provider} (tick ${c.tick}) ${c.success ? '✓' : '✗ ' + (c.error || '')} ${c.latency_ms ? c.latency_ms + 'ms' : ''}
                     </div>
                 `).join('');
             } catch (err) { console.error('Failed:', err); }
         }
-        async function tick() { await postJSON('/api/tick'); refresh(); }
+
+        async function loadMemories(hemisphere) {
+            const select = document.getElementById(`${hemisphere}-memory-agent`);
+            const agentKey = select.value;
+            if (!agentKey) return;
+
+            try {
+                const data = await fetchJSON(`/api/agents/${agentKey}/memory?limit=20`);
+                const container = document.getElementById(`${hemisphere}-memories`);
+                container.innerHTML = data.memories.map(m => `
+                    <div class="memory-item">
+                        <span class="type">[${m.memory_type}]</span> tick ${m.tick}
+                        <div class="content">${m.content}</div>
+                    </div>
+                `).join('');
+            } catch (err) { console.error('Failed to load memories:', err); }
+        }
+
+        async function tickBoth() { await postJSON('/api/tick', { hemisphere: 'both' }); refresh(); }
+        async function tickEast() { await postJSON('/api/tick/east'); refresh(); }
+        async function tickWest() { await postJSON('/api/tick/west'); refresh(); }
         async function run5() { await postJSON('/api/run', { count: 5 }); refresh(); }
-        async function run20() { await postJSON('/api/run', { count: 20 }); refresh(); }
         async function resetSim() { if (!confirm('Reset simulation?')) return; await postJSON('/api/reset'); refresh(); }
         async function addAgent() {
             const name = document.getElementById('new-name').value.trim();
             if (!name) return alert('Enter a name');
             await postJSON('/api/agents', {
                 name,
+                hemisphere: document.getElementById('new-hemisphere').value,
                 role: document.getElementById('new-role').value,
                 provider: document.getElementById('new-provider').value,
                 model: document.getElementById('new-model').value || undefined,
@@ -190,11 +323,6 @@
             });
             document.getElementById('new-name').value = '';
             document.getElementById('new-role').value = '';
-            refresh();
-        }
-        async function removeAgent(name) {
-            if (!confirm(`Remove ${name}?`)) return;
-            await deleteJSON(`/api/agents/${name}`);
             refresh();
         }
         refresh();
