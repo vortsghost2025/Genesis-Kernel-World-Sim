@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Sim — Dual Hemisphere Map</title>
+    <title>World Sim — Map</title>
     <style>
         :root {
             --bg: #0a0a0a; --panel: #1a1a1a; --card: #2a2a2a; --border: #444;
@@ -30,7 +30,6 @@
         
         .map-container { max-width: 1800px; margin: 0 auto; padding: 1rem; }
         
-        /* Dual hemisphere layout */
         .hemispheres { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         .hemisphere { position: relative; }
         .hemisphere-label { 
@@ -42,14 +41,14 @@
         .hemisphere-label.west { border-color: var(--west-color); color: var(--west-color); }
         
         .map-wrapper { 
-            position: relative; width: 100%; aspect-ratio: 16 / 9; background: #1a2a3a; border: 3px solid var(--border); border-radius: 12px; overflow: hidden;
+            position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0a1a2a; border: 3px solid var(--border); border-radius: 12px; overflow: hidden;
         }
         .map-wrapper.locked { opacity: 0.3; pointer-events: none; }
         .map-wrapper.locked::after {
             content: "🔒 Undiscovered — explore to reveal";
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(10,10,10,0.9); border: 2px solid var(--gold); border-radius: 12px;
-            padding: 1rem 2rem; font-size: 1.2rem; color: var(--gold); text-align: center;
+            padding: 1rem 2rem; font-size: 1.2rem; color: var(--gold); text-align: center; z-index: 10;
         }
         .map-svg { width: 100%; height: 100%; }
         
@@ -76,6 +75,7 @@
         .keyboard-hint { text-align: center; padding: 0.5rem; font-size: 0.9rem; color: var(--muted); }
         .keyboard-hint kbd { background: var(--card); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
         
+        /* Entity styles */
         .entity-marker { cursor: pointer; }
         .entity-marker:hover circle, .entity-marker:focus circle { stroke-width: 3; stroke: var(--gold); }
         .entity-label { font-size: 14px; font-weight: 700; fill: #fff; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
@@ -84,7 +84,6 @@
         .locked-entity { opacity: 0.25; }
         .locked-label { fill: #666; font-size: 12px; }
         
-        /* Single hemisphere mode */
         .hemispheres.single .hemisphere.west { display: none; }
         .hemispheres.single .hemisphere.east { grid-column: 1 / -1; max-width: 800px; margin: 0 auto; }
         
@@ -95,7 +94,7 @@
 </head>
 <body>
     <header>
-        <h1>🗺️ World Map — East & West</h1>
+        <h1>🗺️ World Map</h1>
         <div class="nav-links">
             <a href="/sim">← Back to Dashboard</a>
         </div>
@@ -103,8 +102,8 @@
 
     <div class="map-controls" id="layer-controls" role="toolbar" aria-label="Map layer controls">
         <button class="active" data-layer="all" aria-pressed="true">Show All</button>
-        <button data-layer="east" aria-pressed="false">East Hemisphere</button>
-        <button data-layer="west" aria-pressed="false">West Hemisphere</button>
+        <button data-layer="east" aria-pressed="false">East</button>
+        <button data-layer="west" aria-pressed="false">West</button>
         <button data-layer="discovered" aria-pressed="false">Discovered</button>
         <button data-layer="rivers" aria-pressed="false">Rivers</button>
         <button data-layer="characters" aria-pressed="false">Characters</button>
@@ -122,7 +121,9 @@
                         <defs>
                             <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
                         </defs>
-                        <image href="/data/base_map.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <!-- Clean base map - no UI, no overlays -->
+                        <image href="/data/base_map_clean.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <!-- State-driven overlay layers -->
                         <g id="east-rivers-layer"></g>
                         <g id="east-discovered-layer"></g>
                         <g id="east-characters-layer"></g>
@@ -146,7 +147,9 @@
                         <defs>
                             <filter id="glow-west"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
                         </defs>
-                        <image href="/data/base_map_west.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <!-- Clean base map - no UI, no overlays -->
+                        <image href="/data/base_map_west_clean.png" width="1200" height="675" preserveAspectRatio="xMidYMid slice"/>
+                        <!-- State-driven overlay layers -->
                         <g id="west-rivers-layer"></g>
                         <g id="west-discovered-layer"></g>
                         <g id="west-characters-layer"></g>
@@ -187,7 +190,7 @@
             try {
                 const res = await fetch('/api/map-state');
                 mapState = await res.json();
-                document.getElementById('disclaimer').textContent = mapState.disclaimer || '';
+                document.getElementById('disclaimer').textContent = mapState.disclaimer || 'This is a speculative simulation map. Locations are revealed as the world is explored.';
                 
                 // Check if west is discovered
                 if (mapState.regions && mapState.regions.west) {
@@ -213,8 +216,10 @@
             const settlementsLayer = document.getElementById(`${region}-settlements-layer`);
             const futureLockedLayer = document.getElementById(`${region}-future-locked-layer`);
 
+            // Clear all layers
             [riversLayer, discoveredLayer, charactersLayer, settlementsLayer, futureLockedLayer].forEach(l => l.innerHTML = '');
 
+            // Filter entities by region
             const regionEntities = mapState.entities.filter(e => e.region === region);
 
             regionEntities.forEach(entity => {
@@ -353,9 +358,7 @@
                 
                 // Toggle hemisphere visibility
                 const hemispheres = document.getElementById('hemispheres');
-                if (currentLayer === 'east') {
-                    hemispheres.classList.add('single');
-                } else if (currentLayer === 'west') {
+                if (currentLayer === 'east' || currentLayer === 'west') {
                     hemispheres.classList.add('single');
                 } else {
                     hemispheres.classList.remove('single');

@@ -167,24 +167,24 @@ def serve_map():
     return FileResponse(ui_path)
 
 
-@app.get("/data/base_map.png")
-def serve_base_map():
-    """Serve the Azgaar-generated base map (East)."""
-    map_path = PROJECT_ROOT / "data" / "base_map.png"
+@app.get("/data/base_map_clean.png")
+def serve_base_map_clean():
+    """Serve the clean Azgaar-generated base map (East) - no UI."""
+    map_path = PROJECT_ROOT / "data" / "base_map_clean.png"
     if map_path.exists():
         from fastapi.responses import FileResponse as FR
         return FR(map_path, media_type="image/png")
-    raise HTTPException(status_code=404, detail="Base map not found")
+    raise HTTPException(status_code=404, detail="Clean base map not found")
 
 
-@app.get("/data/base_map_west.png")
-def serve_base_map_west():
-    """Serve the Azgaar-generated base map (West)."""
-    map_path = PROJECT_ROOT / "data" / "base_map_west.png"
+@app.get("/data/base_map_west_clean.png")
+def serve_base_map_west_clean():
+    """Serve the clean Azgaar-generated base map (West) - no UI."""
+    map_path = PROJECT_ROOT / "data" / "base_map_west_clean.png"
     if map_path.exists():
         from fastapi.responses import FileResponse as FR
         return FR(map_path, media_type="image/png")
-    raise HTTPException(status_code=404, detail="West base map not found")
+    raise HTTPException(status_code=404, detail="West clean base map not found")
 
 
 @app.get("/api/map-state")
