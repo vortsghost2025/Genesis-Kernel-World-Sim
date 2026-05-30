@@ -1,6 +1,6 @@
 {
   "agent_name": "east_eve",
-  "next_id": 12,
+  "next_id": 14,
   "memories": [
     {
       "id": "east_eve_0",
@@ -141,6 +141,30 @@
       "content": "Eve acts.",
       "tick": 6,
       "timestamp": 1780170621.8630426,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_12",
+      "agent_name": "east_eve",
+      "memory_type": "idea",
+      "content": "The garden is pristine and full of resources. I notice the harmony level is perfect, and the boundary about the tree of knowledge of good and evil remains unbroken. My curiosity is high, but my relational reasoning reminds me to respect the boundary. I should explore the garden further to understand its layout and the animals present.",
+      "tick": 1,
+      "timestamp": 1780172978.2659566,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_eve_13",
+      "agent_name": "east_eve",
+      "memory_type": "event",
+      "content": "Eve gathers resources.",
+      "tick": 1,
+      "timestamp": 1780172978.267255,
       "importance": 1.0,
       "accessed_count": 0,
       "last_accessed": 0.0,

@@ -1,6 +1,6 @@
 {
   "agent_name": "west_adam",
-  "next_id": 12,
+  "next_id": 14,
   "memories": [
     {
       "id": "west_adam_0",
@@ -141,6 +141,30 @@
       "content": "West Adam acts.",
       "tick": 6,
       "timestamp": 1780170621.866244,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_12",
+      "agent_name": "west_adam",
+      "memory_type": "idea",
+      "content": "West Adam observes the world.",
+      "tick": 1,
+      "timestamp": 1780172992.1648571,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_adam_13",
+      "agent_name": "west_adam",
+      "memory_type": "event",
+      "content": "West Adam acts.",
+      "tick": 1,
+      "timestamp": 1780172993.7672448,
       "importance": 1.0,
       "accessed_count": 0,
       "last_accessed": 0.0,

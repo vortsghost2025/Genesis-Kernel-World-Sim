@@ -1,6 +1,6 @@
 {
   "agent_name": "east_adam",
-  "next_id": 12,
+  "next_id": 14,
   "memories": [
     {
       "id": "east_adam_0",
@@ -141,6 +141,30 @@
       "content": "Adam acts.",
       "tick": 6,
       "timestamp": 1780170621.8623314,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_12",
+      "agent_name": "east_adam",
+      "memory_type": "idea",
+      "content": "I should explore my surroundings and utilize the available resources to build a shelter, ensuring my safety and comfort in this pristine garden",
+      "tick": 1,
+      "timestamp": 1780172976.5938892,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "east_adam_13",
+      "agent_name": "east_adam",
+      "memory_type": "event",
+      "content": "Adam gathers resources.",
+      "tick": 1,
+      "timestamp": 1780172978.2667544,
       "importance": 1.0,
       "accessed_count": 0,
       "last_accessed": 0.0,

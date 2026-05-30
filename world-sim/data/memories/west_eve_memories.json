@@ -1,6 +1,6 @@
 {
   "agent_name": "west_eve",
-  "next_id": 12,
+  "next_id": 14,
   "memories": [
     {
       "id": "west_eve_0",
@@ -141,6 +141,30 @@
       "content": "West Eve acts.",
       "tick": 6,
       "timestamp": 1780170621.8667972,
+      "importance": 1.0,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_eve_12",
+      "agent_name": "west_eve",
+      "memory_type": "idea",
+      "content": "I observe the world state and notice we have a gentle morning with all resources available except shelter, and various animals are present. I should explore to understand our surroundings better.",
+      "tick": 1,
+      "timestamp": 1780172993.7667756,
+      "importance": 0.5,
+      "accessed_count": 0,
+      "last_accessed": 0.0,
+      "related_memories": []
+    },
+    {
+      "id": "west_eve_13",
+      "agent_name": "west_eve",
+      "memory_type": "event",
+      "content": "West Eve acts.",
+      "tick": 1,
+      "timestamp": 1780172993.7675283,
       "importance": 1.0,
       "accessed_count": 0,
       "last_accessed": 0.0,

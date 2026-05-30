@@ -48,7 +48,7 @@ logging.basicConfig(
 )
 
 # Load .env file
-_env_path = PROJECT_ROOT / "world-sim" / ".env"
+_env_path = PROJECT_ROOT / ".env"
 if _env_path.exists():
     with open(_env_path, "r", encoding="utf-8") as _f:
         for _line in _f:
