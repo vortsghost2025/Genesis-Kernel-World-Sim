@@ -207,18 +207,29 @@ class DualHemisphereSim:
             eve.persistent_memory = PersistentMemory("west_eve", self.data_dir / "memories")
             agents["West Eve"] = eve
         
-        # Configure providers for each agent
+        # Configure providers for each agent using direct env vars
+        provider_map = {
+            "Adam": ("AGENT_EAST_ADAM_PROVIDER", "AGENT_EAST_ADAM_MODEL", "AGENT_EAST_ADAM_NIM_KEY"),
+            "Eve": ("AGENT_EAST_EVE_PROVIDER", "AGENT_EAST_EVE_MODEL", "AGENT_EAST_EVE_NIM_KEY"),
+            "West Adam": ("AGENT_WEST_ADAM_PROVIDER", "AGENT_WEST_ADAM_MODEL", "AGENT_WEST_ADAM_NIM_KEY"),
+            "West Eve": ("AGENT_WEST_EVE_PROVIDER", "AGENT_WEST_EVE_MODEL", "AGENT_WEST_EVE_NIM_KEY"),
+        }
+
         for agent_name, agent in agents.items():
-            agent_cfg = self.config.agents.get(agent_name)
-            if agent_cfg and agent_cfg.provider in ("nim-live", "nim-dry-run"):
+            import os
+            prov_env, model_env, key_env = provider_map.get(agent_name, (None, None, None))
+            provider = os.environ.get(prov_env, "mock") if prov_env else "mock"
+            model = os.environ.get(model_env, "meta/llama-3.1-8b-instruct") if model_env else "meta/llama-3.1-8b-instruct"
+
+            if provider in ("nim-live", "nim-dry-run"):
                 agent.set_provider(NvidiaNimProvider(
-                    name=f"{agent_name.lower()}_nim",
-                    api_key_env=agent_cfg.key_env,
-                    model=agent_cfg.model,
-                    mode=agent_cfg.provider,
+                    name=f"{agent_name.lower().replace(' ', '_')}_nim",
+                    api_key_env=key_env or f"{prov_env.replace('_PROVIDER', '_NIM_KEY')}",
+                    model=model,
+                    mode=provider,
                 ))
             else:
-                agent.set_provider(MockProvider(name=f"{agent_name.lower()}_mock"))
+                agent.set_provider(MockProvider(name=f"{agent_name.lower().replace(' ', '_')}_mock"))
         
         engine = ConsequenceEngine()
         event_log = EventLog(log_path=self.data_dir / f"{name}_events.jsonl")
