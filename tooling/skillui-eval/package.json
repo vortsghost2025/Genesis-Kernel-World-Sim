@@ -8,5 +8,11 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "skillui": "^1.3.4"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
 }
