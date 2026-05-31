@@ -41,6 +41,7 @@ from backend.config import WorldSimConfig, config
 from backend.world.dual_sim import DualHemisphereSim
 from backend.providers.base import call_log
 from backend.key_management import save_keys, clear_keys, get_key_status, test_dry_run
+from backend.narrative_engine import NarrativeEngine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +107,13 @@ def serve_map():
     """Serve the world map."""
     ui_path = PROJECT_ROOT / "frontend" / "map-v2.html"
     return FileResponse(ui_path)
+
+@app.get("/cinematic")
+def serve_cinematic():
+    """Serve the cinematic watch-mode view."""
+    ui_path = PROJECT_ROOT / "frontend" / "cinematic.html"
+    return FileResponse(ui_path)
+
 
 
 @app.get("/data/base_map_clean.png")
