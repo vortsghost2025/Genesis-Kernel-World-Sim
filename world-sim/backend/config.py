@@ -1,7 +1,7 @@
 """
 World Sim Configuration
 
-Per-agent NIM key management, world settings, and simulation controls.
+Per-agent NIM key management, world settings, simulation controls, and video config.
 """
 
 from __future__ import annotations
@@ -27,6 +27,33 @@ class AgentConfig:
 
 
 @dataclass
+class VideoConfig:
+    """Video generation and HLS streaming configuration."""
+    enabled: bool = False
+    segment_duration_s: int = 18
+    regen_interval_ticks: int = 5
+    image_provider: str = "mock"  # "mock", "nim-live", "nim-dry-run"
+    image_model: str = "qwen/qwen-image-2512"
+    tts_provider: str = "mock"  # "mock", "riva"
+    output_dir: str = "data/stream"
+    fps: int = 24
+
+    @classmethod
+    def from_env(cls) -> "VideoConfig":
+        """Load Video configuration from environment variables."""
+        return cls(
+            enabled=os.environ.get("VIDEO_ENABLED", "false").lower() == "true",
+            segment_duration_s=int(os.environ.get("VIDEO_SEGMENT_DURATION", "18")),
+            regen_interval_ticks=int(os.environ.get("VIDEO_REGEN_INTERVAL", "5")),
+            image_provider=os.environ.get("VIDEO_IMAGE_PROVIDER", "mock"),
+            image_model=os.environ.get("VIDEO_IMAGE_MODEL", "qwen/qwen-image-2512"),
+            tts_provider=os.environ.get("VIDEO_TTS_PROVIDER", "mock"),
+            output_dir=os.environ.get("VIDEO_OUTPUT_DIR", "data/stream"),
+            fps=int(os.environ.get("VIDEO_FPS", "24")),
+        )
+
+
+@dataclass
 class WorldSimConfig:
     """Global simulation configuration."""
     provider_mode: str = "mock"
@@ -34,6 +61,7 @@ class WorldSimConfig:
     max_ticks: int = 0  # 0 = unlimited
     save_interval: int = 10
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    video_config: VideoConfig = field(default_factory=lambda: VideoConfig.from_env())
 
     @classmethod
     def from_env(cls) -> "WorldSimConfig":

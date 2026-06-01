@@ -264,6 +264,25 @@ class DualHemisphereSim:
         # Update physical map positions & process landmark exploration
         self._update_map_positions(results)
         
+        # Trigger Video Generation Pipeline if enabled
+        try:
+            from backend.providers.video_pipeline import video_pipeline
+            if video_pipeline.cfg.enabled:
+                narrative_parts = []
+                if "east" in results and results["east"].get("status") == "ok":
+                    narrative_parts.append(f"East: {results['east']['event']['narrative']}")
+                if "west" in results and results["west"].get("status") == "ok":
+                    narrative_parts.append(f"West: {results['west']['event']['narrative']}")
+                if "discovery" in results:
+                    narrative_parts.append(results["discovery"]["message"])
+                
+                if narrative_parts:
+                    combined_narrative = " ".join(narrative_parts)
+                    global_tick = self.east.tick
+                    video_pipeline.process_tick(combined_narrative, global_tick)
+        except Exception as video_err:
+            logger.error("Video Pipeline failed during run_tick: %s", video_err)
+        
         # Save state periodically
         if self.east.tick % 10 == 0 or self.west.tick % 10 == 0:
             self.east.save_state(self.data_dir)

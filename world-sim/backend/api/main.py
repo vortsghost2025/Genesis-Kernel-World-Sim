@@ -377,3 +377,53 @@ def post_intervention(req: InterventionRequest):
     if not success:
         raise HTTPException(status_code=400, detail="Failed to trigger intervention")
     return {"status": "ok", "message": f"Intervention {req.type} triggered successfully"}
+
+
+@app.get("/stream")
+def serve_stream_page():
+    """Serve the HLS video stream viewer page."""
+    ui_path = PROJECT_ROOT / "frontend" / "stream.html"
+    if ui_path.exists():
+        return FileResponse(ui_path)
+    raise HTTPException(status_code=404, detail="stream.html not found")
+
+
+@app.get("/stream/playlist.m3u8")
+@app.get("/stream/current.m3u8")
+def serve_hls_playlist():
+    """Serve the rolling live HLS .m3u8 playlist."""
+    playlist_path = PROJECT_ROOT / "data" / "stream" / "playlist.m3u8"
+    if playlist_path.exists():
+        return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")
+    raise HTTPException(status_code=404, detail="HLS stream playlist not found yet. Trigger some ticks to generate segments.")
+
+
+@app.get("/stream/{segment_name}.ts")
+def serve_hls_segment(segment_name: str):
+    """Serve an individual HLS .ts transport stream video segment."""
+    segment_path = PROJECT_ROOT / "data" / "stream" / segment_name
+    if segment_path.exists() and segment_name.endswith(".ts"):
+        return FileResponse(segment_path, media_type="video/MP2T")
+    raise HTTPException(status_code=404, detail=f"Segment {segment_name} not found")
+
+
+@app.get("/stream/status")
+def serve_stream_status():
+    """Get telemetry and diagnostic status of the HLS video streaming pipeline."""
+    try:
+        from backend.providers import video_pipeline as vp
+        return {
+            "enabled": vp.video_pipeline.cfg.enabled,
+            "segment_count": len(vp.video_pipeline.playlist_manager.segments),
+            "pipeline_runs_count": vp.pipeline_runs_count,
+            "pipeline_success_count": vp.pipeline_success_count,
+            "last_pipeline_error": vp.last_pipeline_error,
+            "last_image_error": vp.last_image_error,
+            "last_tts_error": vp.last_tts_error,
+            "last_assembly_error": vp.last_assembly_error,
+        }
+    except Exception as e:
+        return {
+            "enabled": False,
+            "error": f"Failed to retrieve status: {e}"
+        }
