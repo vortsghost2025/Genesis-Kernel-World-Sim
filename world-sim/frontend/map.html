@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genesis World — Emergent Parchment</title>
+    <style>
+        :root {
+            --void: #050508;
+            --parchment: #1a1814;
+            --terrain: #2a2520;
+            --water: #1a2a3a;
+            --gold: #d4a853;
+            --east: #60a5fa;
+            --west: #ff8844;
+            --text: #c8c4bc;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: var(--void);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: var(--text);
+        }
+        #map-root {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Terrain layer — revealed by mask */
+        .terrain-layer {
+            position: absolute;
+            inset: 0;
+            background: var(--parchment);
+            opacity: 0.95;
+            transition: mask-size 1.2s ease-out, -webkit-mask-size 1.2s ease-out;
+            pointer-events: none;
+        }
+        .terrain-svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        /* Veil overlay — hides unrevealed terrain */
+        .veil {
+            position: absolute;
+            inset: 0;
+            background: var(--void);
+            pointer-events: none;
+            transition: opacity 1.5s ease;
+        }
+        /* Entities layer */
+        .entities-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+        .entity {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: opacity 0.8s ease;
+        }
+        .entity.locked { opacity: 0.15; }
+        .entity-core {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* Agent orbs — soft glow + drift */
+        .orb {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.9), var(--glow-color) 60%, transparent 100%);
+            box-shadow:
+                0 0 18px 4px var(--glow-color),
+                0 0 40px 10px color-mix(in srgb, var(--glow-color) 40%, transparent),
+                inset 0 0 8px 2px rgba(255,255,255,0.3);
+            animation: drift 8s ease-in-out infinite, pulse 4s ease-in-out infinite;
+        }
+        .orb .label {
+            position: absolute;
+            top: 36px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text);
+            text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+            white-space: nowrap;
+            letter-spacing: 0.03em;
+            opacity: 0.85;
+        }
+        /* Settlement pinpricks — amber, steady */
+        .pinprick {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--gold);
+            box-shadow: 0 0 10px 2px rgba(212,168,83,0.6), 0 0 20px 6px rgba(212,168,83,0.25);
+        }
+        .pinprick .label {
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--gold);
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+            white-space: nowrap;
+            opacity: 0.8;
+        }
+        /* Landmark markers — smaller, neutral */
+        .landmark-marker {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #8a9aa8;
+            box-shadow: 0 0 8px 1px rgba(138,154,168,0.4);
+        }
+        .landmark-marker .label {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            font-style: italic;
+            color: #8a9aa8;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+            white-space: nowrap;
+            opacity: 0.7;
+        }
+        /* Tooltip */
+        .tooltip {
+            position: fixed;
+            background: rgba(10,10,12,0.94);
+            border: 1px solid rgba(200,196,188,0.2);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 13px;
+            line-height: 1.5;
+            max-width: 260px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+        }
+        .tooltip.visible { opacity: 1; }
+        .tooltip .tt-name {
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+        .tooltip .tt-desc {
+            color: #9a968e;
+            font-size: 12px;
+        }
+        .tooltip .tt-meta {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #6a6660;
+            font-style: italic;
+        }
+        /* Animations */
+        @keyframes drift {
+            0%, 100% { transform: translate(0, 0); }
+            25% { transform: translate(2px, -3px); }
+            50% { transform: translate(-1px, 2px); }
+            75% { transform: translate(-2px, -1px); }
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 18px 4px var(--glow-color), 0 0 40px 10px color-mix(in srgb, var(--glow-color) 40%, transparent); }
+            50% { box-shadow: 0 0 24px 6px var(--glow-color), 0 0 55px 16px color-mix(in srgb, var(--glow-color) 50%, transparent); }
+        }
+        /* Compass — minimal */
+        .compass {
+            position: absolute;
+            bottom: 24px; left: 24px;
+            width: 48px; height: 48px;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-root">
+        <!-- Terrain (parchment earth shapes) -->
+        <div class="terrain-layer" id="terrain">
+            <svg class="terrain-svg" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                    <filter id="noise">
+                        <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/>
+                        <feColorMatrix type="saturate" values="0"/>
+                        <feBlend in="SourceGraphic" mode="multiply"/>
+                    </filter>
+                </defs>
+                <g filter="url(#noise)" opacity="0.35">
+                    <rect width="1000" height="600" fill="#2a2520"/>
+                </g>
+                <!-- East landmass -->
+                <path d="M 280 120 Q 380 80 480 110 Q 560 140 540 220 Q 520 300 580 360 Q 620 420 560 480 Q 480 520 400 500 Q 320 470 280 380 Q 240 280 260 200 Q 270 150 280 120 Z" fill="#252018" stroke="#3a3528" stroke-width="1.5"/>
+                <!-- West landmass -->
+                <path d="M 520 100 Q 620 70 720 110 Q 800 150 780 240 Q 760 330 720 400 Q 680 470 600 490 Q 530 480 510 400 Q 490 300 500 200 Q 505 140 520 100 Z" fill="#201e18" stroke="#3a3528" stroke-width="1.5"/>
+                <!-- Water bodies -->
+                <ellipse cx="420" cy="260" rx="45" ry="22" fill="#1a2a3a" opacity="0.7"/>
+                <ellipse cx="560" cy="320" rx="35" ry="16" fill="#1a2a3a" opacity="0.6"/>
+                <ellipse cx="640" cy="240" rx="28" ry="12" fill="#1a2a3a" opacity="0.5"/>
+            </svg>
+        </div>
+        <!-- Veil (covers unrevealed terrain) -->
+        <div class="veil" id="veil"></div>
+        <!-- Entities -->
+        <div class="entities-layer" id="entities"></div>
+        <!-- Compass -->
+        <svg class="compass" viewBox="0 0 48 48">
+            <circle r="22" fill="none" stroke="rgba(200,196,188,0.25)" stroke-width="1"/>
+            <line x1="24" y1="4" x2="24" y2="12" stroke="rgba(200,196,188,0.5)" stroke-width="1.5"/>
+            <line x1="24" y1="36" x2="24" y2="44" stroke="rgba(200,196,188,0.3)" stroke-width="1"/>
+            <line x1="4" y1="24" x2="12" y2="24" stroke="rgba(200,196,188,0.3)" stroke-width="1"/>
+            <line x1="36" y1="24" x2="44" y2="24" stroke="rgba(200,196,188,0.3)" stroke-width="1"/>
+            <text x="24" y="8" text-anchor="middle" fill="rgba(200,196,188,0.6)" font-size="7" font-weight="700">N</text>
+        </svg>
+    </div>
+    <div class="tooltip" id="tooltip">
+        <div class="tt-name"></div>
+        <div class="tt-desc"></div>
+        <div class="tt-meta"></div>
+    </div>
+
+    <script>
+        let mapState = null;
+        const tooltip = document.getElementById('tooltip');
+        const veil = document.getElementById('veil');
+        const entitiesLayer = document.getElementById('entities');
+
+        async function loadMapState() {
+            try {
+                const res = await fetch('/api/map-state');
+                mapState = await res.json();
+                render();
+            } catch (err) {
+                console.error('Failed to load map state:', err);
+            }
+        }
+
+        function render() {
+            if (!mapState) return;
+            const regions = mapState.regions || {};
+            const eastLevel = regions.east?.exploration_level ?? 0;
+            const westLevel = regions.west?.exploration_level ?? 0;
+            const westDiscovered = regions.west?.discovered || false;
+
+            const eastCenter = { x: 42, y: 50 };
+            const westCenter = { x: 62, y: 50 };
+            const eastReveal = Math.min(100, 20 + eastLevel * 8);
+            const westReveal = Math.min(100, 20 + westLevel * 8);
+
+            const terrain = document.getElementById('terrain');
+            terrain.style.maskImage = `radial-gradient(circle at ${eastCenter.x}% ${eastCenter.y}%, black 0 ${eastReveal}%, transparent ${eastReveal + 15}%), radial-gradient(circle at ${westCenter.x}% ${westCenter.y}%, black 0 ${westReveal}%, transparent ${westReveal + 15}%)`;
+            terrain.style.webkitMaskImage = terrain.style.maskImage;
+
+            const veilOpacity = (0.25 * (1 - (eastReveal + westReveal) / 200)).toFixed(2);
+            veil.style.opacity = veilOpacity;
+
+            // Render entities
+            entitiesLayer.innerHTML = '';
+            (mapState.entities || []).forEach(entity => {
+                const isWest = entity.region === 'west';
+                // West entities only show if discovered or the entity itself is discovered
+                const show = !isWest || entity.discovered || westDiscovered;
+                if (!show) return;
+
+                const x = (entity.x ?? 0.5) * 100;
+                const y = (entity.y ?? 0.5) * 100;
+                const locked = isWest && !entity.discovered && !westDiscovered;
+
+                const el = document.createElement('div');
+                el.className = `entity${locked ? ' locked' : ''}`;
+                el.style.left = x + '%';
+                el.style.top = y + '%';
+
+                const core = document.createElement('div');
+                core.className = 'entity-core';
+
+                if (entity.type === 'character') {
+                    const orb = document.createElement('div');
+                    orb.className = 'orb';
+                    orb.style.setProperty('--glow-color', entity.color || '#60a5fa');
+                    core.appendChild(orb);
+                } else if (entity.type === 'settlement') {
+                    const pin = document.createElement('div');
+                    pin.className = 'pinprick';
+                    core.appendChild(pin);
+                } else {
+                    const lm = document.createElement('div');
+                    lm.className = 'landmark-marker';
+                    core.appendChild(lm);
+                }
+
+                const lbl = document.createElement('div');
+                lbl.className = 'label';
+                lbl.textContent = entity.name + (locked ? ' (?)' : '');
+                core.appendChild(lbl);
+
+                el.appendChild(core);
+
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showTooltip(entity, e.clientX, e.clientY);
+                });
+                el.addEventListener('mouseenter', (e) => {
+                    showTooltip(entity, e.clientX, e.clientY);
+                });
+                el.addEventListener('mousemove', (e) => {
+                    moveTooltip(e.clientX, e.clientY);
+                });
+                el.addEventListener('mouseleave', () => {
+                    hideTooltip();
+                });
+
+                entitiesLayer.appendChild(el);
+            });
+        }
+
+        function showTooltip(entity, cx, cy) {
+            tooltip.querySelector('.tt-name').textContent = entity.icon + ' ' + entity.name;
+            tooltip.querySelector('.tt-desc').textContent = entity.description || '';
+            tooltip.querySelector('.tt-meta').textContent = `Region: ${entity.region === 'east' ? 'East' : 'West'} · Type: ${entity.type}`;
+            tooltip.classList.add('visible');
+            moveTooltip(cx, cy);
+        }
+        function moveTooltip(cx, cy) {
+            const pad = 16;
+            let x = cx + pad;
+            let y = cy + pad;
+            const rect = tooltip.getBoundingClientRect();
+            if (x + 260 > window.innerWidth) x = cx - 260 - pad;
+            if (y + rect.height > window.innerHeight) y = cy - rect.height - pad;
+            tooltip.style.left = x + 'px';
+            tooltip.style.top = y + 'px';
+        }
+        function hideTooltip() {
+            tooltip.classList.remove('visible');
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.entity')) hideTooltip();
+        });
+
+        loadMapState();
+        setInterval(loadMapState, 4000);
+    </script>
+</body>
+</html>

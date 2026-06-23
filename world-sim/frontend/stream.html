@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Genesis World Sim — Stream</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000;
+  color: #e0d6c8;
+  font-family: 'Georgia', serif;
+  overflow: hidden;
+  height: 100vh;
+}
+#video-wrap {
+  position: fixed; inset: 0; z-index: 1;
+}
+video {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+#overlay {
+  position: fixed; z-index: 10;
+  top: 0; right: 0; bottom: 0;
+  width: 420px;
+  background: rgba(10, 8, 5, 0.88);
+  border-left: 1px solid rgba(180, 150, 90, 0.3);
+  transform: translateX(0);
+  transition: transform 0.35s ease;
+  display: flex; flex-direction: column;
+  padding: 16px; overflow-y: auto;
+}
+#overlay.collapsed { transform: translateX(420px); }
+#toggle-btn {
+  position: fixed; z-index: 20;
+  top: 12px; right: 12px;
+  background: rgba(180, 150, 90, 0.18);
+  color: #d4b96a;
+  border: 1px solid rgba(180, 150, 90, 0.4);
+  padding: 6px 14px; cursor: pointer;
+  font-family: inherit; font-size: 13px;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+#toggle-btn:hover { background: rgba(180, 150, 90, 0.35); }
+#live-badge {
+  position: fixed; top: 12px; left: 12px; z-index: 20;
+  background: #8b1a1a; color: #fff;
+  padding: 4px 10px; font-size: 11px; letter-spacing: 2px;
+  border-radius: 2px; animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+.panel { margin-bottom: 14px; border-bottom: 1px solid rgba(180,150,90,0.15); padding-bottom: 10px; }
+.panel h3 { color: #d4b96a; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+.seg-item { font-size: 11px; color: #a09070; margin: 3px 0; }
+#stats { font-size: 11px; color: #7a7050; margin-top: auto; }
+a { color: #9ab8d0; text-decoration: none; }
+</style>
+</head>
+<body>
+<div id="video-wrap">
+  <video id="hls-video" controls autoplay muted playsinline></video>
+</div>
+<div id="live-badge">● LIVE</div>
+<button id="toggle-btn">◂ Dashboard</button>
+<div id="overlay">
+  <div class="panel">
+    <h3>Stream Status</h3>
+    <div id="status-msg">Connecting…</div>
+  </div>
+  <div class="panel">
+    <h3>Recent Segments</h3>
+    <div id="segments">—</div>
+  </div>
+  <div class="panel">
+    <h3>Full Dashboard</h3>
+    <a href="/sim" target="_blank">Open Creator Dashboard →</a>
+  </div>
+  <div id="stats">Genesis World Sim · HLS Stream</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17"></script>
+<script>
+const video = document.getElementById('hls-video');
+const overlay = document.getElementById('overlay');
+const toggleBtn = document.getElementById('toggle-btn');
+const segDiv = document.getElementById('segments');
+const statusMsg = document.getElementById('status-msg');
+
+toggleBtn.onclick = () => {
+  overlay.classList.toggle('collapsed');
+  toggleBtn.textContent = overlay.classList.contains('collapsed') ? '▸ Dashboard' : '◂ Dashboard';
+};
+
+function loadPlaylist(url) {
+  if (Hls.isSupported()) {
+    const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      statusMsg.textContent = `Stream active · ${hls.levels.length} quality levels`;
+      video.play().catch(() => {});
+    });
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        statusMsg.textContent = `Error: ${data.type} — retrying…`;
+        setTimeout(() => loadPlaylist(url), 3000);
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => video.play().catch(() => {}));
+  }
+}
+
+async function updateSegments() {
+  try {
+    const r = await fetch('/stream/status');
+    const d = await r.json();
+    if (d.enabled) {
+      statusMsg.textContent = `Streaming · ${d.segment_count} segments · style: ${d.config.style}`;
+      segDiv.innerHTML = d.segments.slice(-8).reverse().map(s =>
+        `<div class="seg-item">tick ${s.tick} · ${s.duration.toFixed(1)}s · #${s.sequence}</div>`
+      ).join('');
+    } else {
+      statusMsg.textContent = 'Stream disabled — enable VIDEO_PIPELINE_ENABLED=true in .env';
+    }
+  } catch (e) {
+    statusMsg.textContent = 'Stream unavailable';
+  }
+}
+
+loadPlaylist('/stream/playlist.m3u8');
+updateSegments();
+setInterval(updateSegments, 8000);
+</script>
+</body>
+</html>

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Planet Map</title>
+    <style>
+        :root {
+            --bg: #05070a; --panel: #0d1117; --card: #161b22; --border: #30363d;
+            --text: #c9d1d9; --text2: #8b949e; --muted: #484f58;
+            --gold: #e3b341; --green: #238636; --blue: #58a6ff; --red: #f85149;
+            --east-color: #58a6ff; --west-color: #ff8844;
+            --accent-glow: rgba(227, 179, 65, 0.3);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; 
+            background: var(--bg); 
+            color: var(--text); 
+            min-height: 100vh; 
+            font-size: 18px; 
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0);
+            background-size: 40px 40px;
+        }
+        
+        header { 
+            background: rgba(13, 17, 23, 0.8); 
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--gold); 
+            padding: 1rem 2rem; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        header h1 { 
+            font-size: 1.5rem; 
+            color: var(--gold); 
+            font-weight: 300; 
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .nav-links a { color: var(--blue); text-decoration: none; font-size: 0.9rem; padding: 0.5rem 1rem; border: 1px solid var(--blue); border-radius: 4px; transition: all 0.3s; }
+        .nav-links a:hover { background: var(--blue); color: white; }
+        
+        .map-container { max-width: 1600px; margin: 0 auto; padding: 2rem; }
+        
+        .planet-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+        .planet-wrapper img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: saturate(0.8) contrast(1.1);
+            opacity: 0.7;
+        }
+        
+        .hemisphere-label {
+            position: absolute;
+            top: 2rem;
+            padding: 0.4rem 1rem;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            border-left: 4px solid;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .hemisphere-label.east { left: 2rem; border-color: var(--east-color); color: var(--east-color); }
+        .hemisphere-label.west { right: 2rem; border-color: var(--west-color); color: var(--west-color); }
+        
+        /* Atmospheric Fog Canvas */
+        #fog-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 4;
+            mix-blend-mode: screen;
+        }
+        
+        .west-fog-text {
+            position: absolute;
+            top: 50%;
+            right: 25%;
+            transform: translate(50%, -50%);
+            color: var(--muted);
+            font-size: 1.2rem;
+            font-weight: 300;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            text-align: center;
+            z-index: 5;
+            pointer-events: none;
+            text-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        
+        .marker-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 6;
+        }
+        
+        .entity-marker { cursor: pointer; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .entity-marker:hover { transform: scale(1.2); }
+        
+        /* Pulsing animation for active agents */
+        @keyframes pulse {
+            0% { r: 6; opacity: 0.8; stroke-width: 2; }
+            50% { r: 12; opacity: 0.3; stroke-width: 1; }
+            100% { r: 6; opacity: 0.8; stroke-width: 2; }
+        }
+        .agent-pulse {
+            animation: pulse 2s infinite ease-in-out;
+            fill: transparent;
+            stroke: inherit;
+        }
+        
+        .entity-label { 
+            font-size: 11px; 
+            font-weight: 400; 
+            fill: rgba(255,255,255,0.9); 
+            pointer-events: none; 
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            letter-spacing: 0.5px;
+        }
+        
+        .info-panel { 
+            position: absolute; top: 2rem; right: 2rem; 
+            background: rgba(13, 17, 23, 0.9); 
+            backdrop-filter: blur(15px);
+            border: 1px solid var(--gold); 
+            border-radius: 0; 
+            padding: 2rem; 
+            min-width: 320px; 
+            display: none; 
+            z-index: 10;
+            box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+        }
+        .info-panel.visible { display: block; animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        
+        .info-panel h3 { font-size: 1.2rem; color: var(--gold); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        .info-panel p { font-size: 1rem; color: var(--text2); line-height: 1.6; font-weight: 300; }
+        .info-panel .meta { font-family: 'Courier New', monospace; font-size: 0.8rem; color: var(--muted); margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+        .info-panel .close-btn { position: absolute; top: 1rem; right: 1rem; background: transparent; border: 1px solid var(--border); color: var(--text2); width: 30px; height: 30px; cursor: pointer; transition: all 0.2s; }
+        .info-panel .close-btn:hover { border-color: var(--red); color: var(--red); }
+        
+        .legend { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); 
+            gap: 1rem; 
+            padding: 1.5rem; 
+            background: var(--panel); 
+            border: 1px solid var(--border); 
+            margin-top: 2rem; 
+        }
+        .legend-item { display: flex; align-items: center; gap: 0.8rem; font-size: 0.8rem; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 2px; }
+        .legend-dot.east { background: var(--east-color); }
+        .legend-dot.west { background: var(--west-color); }
+        .legend-dot.settlement { background: var(--gold); }
+        .legend-dot.character { background: var(--blue); }
+        .legend-dot.locked { background: var(--muted); }
+        
+        .disclaimer { text-align: center; padding: 2rem; font-size: 0.8rem; color: var(--muted); font-weight: 300; letter-spacing: 1px; text-transform: uppercase; }
+        
+        @media (max-width: 900px) {
+            .map-container { padding: 1rem; }
+            .info-panel { width: calc(100% - 4rem); right: 2rem; left: 2rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌍 Genesis — World Atlas</h1>
+        <div class="nav-links">
+            <a href="/sim">Dashboard</a>
+        </div>
+    </header>
+
+    <div class="map-container">
+        <div class="planet-wrapper" id="planet-wrapper">
+            <img src="/data/base_map_clean.png" alt="World Map" id="planet-image">
+            
+            <canvas id="fog-canvas"></canvas>
+            
+            <div class="hemisphere-label east">East Hemisphere // Discovered</div>
+            <div class="hemisphere-label west">West Hemisphere // Uncharted</div>
+            
+            <div class="west-fog-text" id="west-fog-text">The Great Unknown</div>
+            
+            <svg class="marker-overlay" id="marker-overlay" viewBox="0 0 1200 675" preserveAspectRatio="none">
+                <g id="east-markers"></g>
+                <g id="west-markers"></g>
+            </svg>
+            
+            <div class="info-panel" id="info-panel">
+                <button class="close-btn" onclick="closeInfo()">✕</button>
+                <h3 id="info-title">Location</h3>
+                <p id="info-desc">Description</p>
+                <div class="meta" id="info-meta"></div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item"><span class="legend-dot east"></span> Eastern Domain</div>
+            <div class="legend-item"><span class="legend-dot west"></span> Western Wilds</div>
+            <div class="legend-item"><span class="legend-dot character"></span> Sentience</div>
+            <div class="legend-item"><span class="legend-dot settlement"></span> Outposts</div>
+            <div class="legend-item"><span class="legend-dot locked"></span> Hidden</div>
+        </div>
+
+        <div class="disclaimer" id="disclaimer"></div>
+    </div>
+
+    <script>
+        let mapState = null;
+
+        // Atmospheric Fog Implementation
+        const canvas = document.getElementById('fog-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = (Math.random() - 0.5) * 0.5;
+                this.size = Math.random() * 100 + 50;
+                this.opacity = Math.random() * 0.2;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) this.reset();
+            }
+            draw() {
+                const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+                grad.addColorStop(0, `rgba(10, 20, 30, ${this.opacity})`);
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function initFog() {
+            resizeCanvas();
+            particles = Array.from({ length: 30 }, () => new Particle());
+            animateFog();
+        }
+
+        function animateFog() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const westDiscovered = mapState?.regions?.west?.discovered || false;
+            if (!westDiscovered) {
+                // Create a gradient mask for the fog
+                const mask = ctx.createLinearGradient(canvas.width/2, 0, canvas.width, 0);
+                mask.addColorStop(0, 'rgba(0,0,0,0)');
+                mask.addColorStop(0.2, 'rgba(0,0,0,0.4)');
+                mask.addColorStop(1, 'rgba(0,0,0,0.9)');
+                ctx.fillStyle = mask;
+                ctx.fillRect(canvas.width/2, 0, canvas.width/2, canvas.height);
+                
+                particles.forEach(p => {
+                    p.update();
+                    p.draw();
+                });
+            }
+            requestAnimationFrame(animateFog);
+        }
+
+        async function loadMapState() {
+            try {
+                const res = await fetch('/api/map-state');
+                mapState = await res.json();
+                document.getElementById('disclaimer').textContent = mapState.disclaimer || 'Speculative Simulation — Civilizations emerge through choice.';
+                renderMarkers();
+            } catch (err) {
+                console.error('Map load error:', err);
+            }
+        }
+
+        function renderMarkers() {
+            if (!mapState) return;
+
+            const eastMarkers = document.getElementById('east-markers');
+            const westMarkers = document.getElementById('west-markers');
+            eastMarkers.innerHTML = '';
+            westMarkers.innerHTML = '';
+
+            const westDiscovered = mapState.regions?.west?.discovered || false;
+            if (westDiscovered) {
+                document.getElementById('west-fog-text').style.display = 'none';
+            }
+
+            mapState.entities.forEach(entity => {
+                if (entity.x === undefined || entity.y === undefined) return;
+                
+                const x = entity.x * 1200;
+                const y = entity.y * 675;
+                const isWest = entity.region === 'west';
+                const targetGroup = isWest ? westMarkers : eastMarkers;
+                
+                if (isWest && !westDiscovered && !entity.discovered) return;
+
+                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                g.setAttribute('class', `entity-marker ${entity.discovered ? '' : 'locked-entity'}`);
+                g.setAttribute('data-id', entity.id);
+
+                // Pulsing ring for characters
+                if (entity.type === 'character') {
+                    const pulse = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    pulse.setAttribute('cx', x);
+                    pulse.setAttribute('cy', y);
+                    pulse.setAttribute('class', 'agent-pulse');
+                    const color = entity.color || (isWest ? '#ff8844' : '#4488ff');
+                    pulse.setAttribute('stroke', color);
+                    g.appendChild(pulse);
+                }
+
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', x);
+                circle.setAttribute('cy', y);
+                circle.setAttribute('r', entity.type === 'character' ? 5 : 7);
+                const color = entity.color || (isWest ? '#ff8844' : '#4488ff');
+                circle.setAttribute('fill', entity.discovered ? color : '#333');
+                circle.setAttribute('stroke', '#fff');
+                circle.setAttribute('stroke-width', '1.5');
+                g.appendChild(circle);
+
+                const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                icon.setAttribute('x', x);
+                icon.setAttribute('y', y - 15);
+                icon.setAttribute('text-anchor', 'middle');
+                icon.setAttribute('font-size', '14');
+                icon.textContent = entity.icon || '📍';
+                g.appendChild(icon);
+
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', x);
+                label.setAttribute('y', y + 22);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('class', entity.discovered ? 'entity-label' : 'locked-label');
+                label.textContent = entity.name + (entity.discovered ? '' : ' [LOCKED]');
+                g.appendChild(label);
+
+                g.addEventListener('click', () => showInfo(entity));
+                targetGroup.appendChild(g);
+            });
+        }
+
+        function showInfo(entity) {
+            const panel = document.getElementById('info-panel');
+            document.getElementById('info-title').textContent = `${entity.icon || '📍'} ${entity.name}`;
+            
+            // Use lore_snippet if available, otherwise fallback to description
+            const description = entity.lore_snippet || entity.description || 'No records available for this entity.';
+            document.getElementById('info-desc').textContent = description;
+            
+            document.getElementById('info-meta').innerHTML = `
+                REGION: ${entity.region.toUpperCase()}<br>
+                STATUS: ${entity.discovered ? 'MANIFESTED' : 'OBSCURED'}<br>
+                COORD: ${entity.x.toFixed(3)}, ${entity.y.toFixed(3)}<br>
+                TICK: ${entity.first_seen_tick || 'N/A'}
+            `;
+            panel.classList.add('visible');
+        }
+
+        function closeInfo() {
+            document.getElementById('info-panel').classList.remove('visible');
+        }
+
+        document.getElementById('planet-wrapper').addEventListener('click', (e) => {
+            if (!e.target.closest('.entity-marker') && !e.target.closest('.info-panel')) {
+                closeInfo();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeInfo();
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+        loadMapState().then(initFog);
+        setInterval(loadMapState, 5000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Setup Keys</title>
+    <style>
+        :root {
+            --bg: #0a0a0a; --panel: #1a1a1a; --card: #2a2a2a; --border: #444;
+            --text: #ffffff; --text2: #cccccc; --muted: #888888;
+            --gold: #ffd700; --green: #00ff88; --blue: #4488ff; --red: #ff4444;
+            --east-color: #4488ff; --west-color: #ff8844;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 22px; line-height: 1.6; }
+        header { background: var(--panel); border-bottom: 3px solid var(--gold); padding: 1.5rem 2rem; text-align: center; }
+        header h1 { font-size: 2.5rem; color: var(--gold); margin-bottom: 0.5rem; }
+        header .subtitle { font-size: 1.3rem; color: var(--text2); }
+        .container { max-width: 900px; margin: 2rem auto; padding: 0 2rem; }
+        .warning-box { background: rgba(255, 215, 0, 0.1); border: 2px solid var(--gold); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; font-size: 1.1rem; }
+        .warning-box strong { color: var(--gold); }
+        .form-group { margin-bottom: 2rem; }
+        .form-group label { display: block; font-size: 1.3rem; font-weight: 600; margin-bottom: 0.75rem; }
+        .form-group input[type="text"], .form-group input[type="password"] {
+            width: 100%; padding: 1rem; font-size: 1.2rem; font-family: 'Consolas', monospace;
+            background: var(--card); border: 2px solid var(--border); border-radius: 8px; color: var(--text); min-height: 60px;
+        }
+        .form-group input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.3); }
+        .form-group .hint { font-size: 1rem; color: var(--muted); margin-top: 0.5rem; }
+        .button-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 2rem; }
+        .btn { padding: 1rem 2rem; font-size: 1.3rem; font-weight: 600; border: 2px solid transparent; border-radius: 12px; cursor: pointer; min-height: 64px; transition: all 0.2s; }
+        .btn-primary { background: var(--gold); color: #000; border-color: var(--gold); }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-secondary { background: var(--blue); color: #000; border-color: var(--blue); }
+        .btn-secondary:hover { opacity: 0.9; }
+        .btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
+        .btn-danger:hover { background: var(--red); color: #000; }
+        .status-box { margin-top: 2rem; padding: 1.5rem; border-radius: 8px; font-size: 1.1rem; display: none; }
+        .status-box.success { display: block; background: rgba(0, 255, 136, 0.1); border: 2px solid var(--green); color: var(--green); }
+        .status-box.error { display: block; background: rgba(255, 68, 68, 0.1); border: 2px solid var(--red); color: var(--red); }
+        .status-box.info { display: block; background: rgba(68, 136, 255, 0.1); border: 2px solid var(--blue); color: var(--blue); }
+        .key-status { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+        .key-status-item { background: var(--panel); border: 2px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; }
+        .key-status-item .label { font-size: 1rem; color: var(--muted); }
+        .key-status-item .value { font-size: 1.3rem; font-weight: 600; margin-top: 0.25rem; }
+        .key-status-item .value.present { color: var(--green); }
+        .key-status-item .value.absent { color: var(--muted); }
+        .back-link { display: inline-block; margin-top: 2rem; color: var(--blue); text-decoration: none; font-size: 1.1rem; }
+        .back-link:hover { text-decoration: underline; }
+        @media (max-width: 600px) {
+            .button-group { flex-direction: column; }
+            .btn { width: 100%; }
+            .key-status { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>World Sim — Setup Keys</h1>
+        <div class="subtitle">Enter NVIDIA NIM keys for all 4 agents. Keys are saved locally and never committed.</div>
+    </header>
+
+    <div class="container">
+        <div class="warning-box">
+            <strong>⚠ Security Warning:</strong> Keys are written only to your local <code>.env</code> file and are <strong>never committed</strong> to version control. They are never shown in logs, API responses, or the UI.
+        </div>
+
+        <div class="key-status" id="key-status">
+            <div class="key-status-item">
+                <div class="label">🌍 East Adam</div>
+                <div class="value absent" id="east-adam-status">Not configured</div>
+            </div>
+            <div class="key-status-item">
+                <div class="label">🌍 East Eve</div>
+                <div class="value absent" id="east-eve-status">Not configured</div>
+            </div>
+            <div class="key-status-item">
+                <div class="label">🌎 West Adam</div>
+                <div class="value absent" id="west-adam-status">Not configured</div>
+            </div>
+            <div class="key-status-item">
+                <div class="label">🌎 West Eve</div>
+                <div class="value absent" id="west-eve-status">Not configured</div>
+            </div>
+        </div>
+
+        <form id="key-form" onsubmit="return false;">
+            <div class="form-group">
+                <label for="east-adam-key">🌍 East Adam NIM Key</label>
+                <input type="password" id="east-adam-key" name="east_adam_key" placeholder="Paste East Adam's NVIDIA NIM API key here..." autocomplete="off" spellcheck="false">
+                <div class="hint">This key will be used for East Adam's cognition when NIM mode is enabled.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="east-eve-key">🌍 East Eve NIM Key</label>
+                <input type="password" id="east-eve-key" name="east_eve_key" placeholder="Paste East Eve's NVIDIA NIM API key here..." autocomplete="off" spellcheck="false">
+                <div class="hint">This key will be used for East Eve's cognition when NIM mode is enabled.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="west-adam-key">🌎 West Adam NIM Key</label>
+                <input type="password" id="west-adam-key" name="west_adam_key" placeholder="Paste West Adam's NVIDIA NIM API key here..." autocomplete="off" spellcheck="false">
+                <div class="hint">This key will be used for West Adam's cognition when NIM mode is enabled.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="west-eve-key">🌎 West Eve NIM Key</label>
+                <input type="password" id="west-eve-key" name="west_eve_key" placeholder="Paste West Eve's NVIDIA NIM API key here..." autocomplete="off" spellcheck="false">
+                <div class="hint">This key will be used for West Eve's cognition when NIM mode is enabled.</div>
+            </div>
+
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" onclick="saveKeys()">💾 Save All Keys</button>
+                <button type="button" class="btn btn-secondary" onclick="testDryRun()">🧪 Test Dry-Run</button>
+                <button type="button" class="btn btn-danger" onclick="clearKeys()">🗑 Clear All Keys</button>
+            </div>
+        </form>
+
+        <div id="status-box" class="status-box"></div>
+
+        <a href="/sim" class="back-link">← Back to Dashboard</a>
+    </div>
+
+    <script>
+        async function fetchJSON(path) { return (await fetch(path)).json(); }
+        async function postJSON(path, body) {
+            return (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json();
+        }
+        function showStatus(message, type) {
+            const box = document.getElementById('status-box');
+            box.className = `status-box ${type}`;
+            box.textContent = message;
+        }
+        async function loadKeyStatus() {
+            try {
+                const status = await fetchJSON('/api/setup-keys');
+                const setStatus = (id, present) => {
+                    const el = document.getElementById(id);
+                    el.textContent = present ? 'Configured ✓' : 'Not configured';
+                    el.className = `value ${present ? 'present' : 'absent'}`;
+                };
+                setStatus('east-adam-status', status.east_adam_key_present);
+                setStatus('east-eve-status', status.east_eve_key_present);
+                setStatus('west-adam-status', status.west_adam_key_present);
+                setStatus('west-eve-status', status.west_eve_key_present);
+            } catch (err) { console.error('Failed to load key status:', err); }
+        }
+        async function saveKeys() {
+            const keys = {
+                east_adam_key: document.getElementById('east-adam-key').value,
+                east_eve_key: document.getElementById('east-eve-key').value,
+                west_adam_key: document.getElementById('west-adam-key').value,
+                west_eve_key: document.getElementById('west-eve-key').value,
+            };
+            if (!keys.east_adam_key && !keys.east_eve_key && !keys.west_adam_key && !keys.west_eve_key) {
+                showStatus('Please enter at least one key.', 'error');
+                return;
+            }
+            try {
+                const result = await postJSON('/api/setup-keys', keys);
+                if (result.status === 'ok') {
+                    showStatus(result.message, 'success');
+                    document.getElementById('east-adam-key').value = '';
+                    document.getElementById('east-eve-key').value = '';
+                    document.getElementById('west-adam-key').value = '';
+                    document.getElementById('west-eve-key').value = '';
+                    loadKeyStatus();
+                } else {
+                    showStatus(result.message, 'error');
+                }
+            } catch (err) { showStatus(`Error: ${err.message}`, 'error'); }
+        }
+        async function testDryRun() {
+            try {
+                showStatus('Running dry-run test...', 'info');
+                const result = await fetchJSON('/api/setup-keys/test');
+                let message = 'Dry-run results:\n';
+                message += `East Adam: ${result.east_adam_dry_run}\n`;
+                message += `East Eve: ${result.east_eve_dry_run}\n`;
+                message += `West Adam: ${result.west_adam_dry_run}\n`;
+                message += `West Eve: ${result.west_eve_dry_run}`;
+                const allSuccess = Object.values(result).filter(v => typeof v === 'string').every(v => v === 'success' || v === 'skipped');
+                showStatus(message, allSuccess ? 'success' : 'error');
+            } catch (err) { showStatus(`Error: ${err.message}`, 'error'); }
+        }
+        async function clearKeys() {
+            if (!confirm('Are you sure you want to clear all NIM keys? This cannot be undone.')) return;
+            try {
+                const result = await postJSON('/api/setup-keys/clear', {});
+                showStatus(result.message, 'success');
+                loadKeyStatus();
+            } catch (err) { showStatus(`Error: ${err.message}`, 'error'); }
+        }
+        loadKeyStatus();
+    </script>
+</body>
+</html>

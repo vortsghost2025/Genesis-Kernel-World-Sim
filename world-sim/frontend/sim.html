@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Sim — Cosmic Creator Dashboard</title>
+    <style>
+        :root {
+            --bg: #07080c; --panel: #0d111b; --card: #151b2a; --border: #232d45;
+            --text: #f0f4f8; --text2: #a0aec0; --muted: #64748b;
+            --gold: #f59e0b; --green: #10b981; --blue: #3b82f6; --red: #ef4444;
+            --purple: #8b5cf6; --teal: #14b8a6;
+            --east-color: #3b82f6; --west-color: #f97316;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+        
+        header { 
+            background: var(--panel); 
+            border-bottom: 2px solid var(--border); 
+            padding: 1.25rem 2rem; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .logo-section h1 { font-size: 1.5rem; color: var(--gold); letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.5rem; }
+        .logo-section .subtitle { font-size: 0.75rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.15em; }
+        
+        .nav-links { display: flex; gap: 1.25rem; align-items: center; }
+        .nav-links a { 
+            color: var(--blue); 
+            text-decoration: none; 
+            font-size: 0.9rem; 
+            font-weight: 500;
+            padding: 0.5rem 0.8rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        .nav-links a:hover { 
+            background: var(--blue); 
+            color: #fff;
+            transform: translateY(-1px);
+        }
+        
+        .controls { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+        .btn { 
+            padding: 0.6rem 1.2rem; 
+            background: var(--card); 
+            border: 1px solid var(--border); 
+            color: var(--text); 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 0.85rem; 
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s;
+        }
+        .btn:hover { background: var(--border); transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .btn.primary { background: var(--gold); color: #000; border-color: var(--gold); }
+        .btn.primary:hover { background: #e08e0b; box-shadow: 0 0 12px rgba(245, 158, 11, 0.4); }
+        .btn.east { background: var(--east-color); color: #fff; border-color: var(--east-color); }
+        .btn.east:hover { box-shadow: 0 0 12px rgba(59, 130, 246, 0.4); }
+        .btn.west { background: var(--west-color); color: #fff; border-color: var(--west-color); }
+        .btn.west:hover { box-shadow: 0 0 12px rgba(249, 115, 22, 0.4); }
+        .btn.danger { border-color: var(--red); color: var(--red); background: rgba(239, 68, 68, 0.05); }
+        .btn.danger:hover { background: var(--red); color: #000; }
+        
+        /* Auto-Watch & TTS Toggles */
+        .watch-center {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+        }
+        .watch-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+        }
+        .watch-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--muted);
+            box-shadow: 0 0 8px var(--muted);
+        }
+        .watch-indicator.active {
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.7; }
+        }
+        
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .toggle-checkbox {
+            display: none;
+        }
+        .toggle-switch {
+            width: 44px;
+            height: 24px;
+            background: var(--border);
+            border-radius: 12px;
+            position: relative;
+            transition: background 0.2s;
+        }
+        .toggle-switch::after {
+            content: '';
+            width: 18px;
+            height: 18px;
+            background: #fff;
+            border-radius: 50%;
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            transition: left 0.2s;
+        }
+        .toggle-checkbox:checked + .toggle-switch {
+            background: var(--green);
+        }
+        .toggle-checkbox:checked + .toggle-switch::after {
+            left: 23px;
+        }
+        
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; padding: 1.5rem 2rem; }
+        .hemisphere-panel { display: flex; flex-direction: column; gap: 1.5rem; }
+        
+        .panel { 
+            background: var(--panel); 
+            border: 1px solid var(--border); 
+            border-radius: 12px; 
+            overflow: hidden; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+        .panel-header { 
+            background: var(--card); 
+            padding: 0.9rem 1.25rem; 
+            border-bottom: 1px solid var(--border); 
+            font-weight: 700; 
+            font-size: 0.95rem;
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+        .panel-header.east { border-left: 5px solid var(--east-color); }
+        .panel-header.west { border-left: 5px solid var(--west-color); }
+        .panel-body { padding: 1.25rem; }
+        
+        /* Stats & Metric Bars */
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.8rem;
+        }
+        .stat-card-title { color: var(--text2); font-size: 0.75rem; margin-bottom: 0.2rem; }
+        .stat-card-value { font-size: 1rem; font-weight: 700; color: #fff; }
+        
+        .metric-bar-container { margin-top: 0.75rem; }
+        .metric-label { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text2); margin-bottom: 0.25rem; }
+        .metric-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+        .metric-fill { height: 100%; width: 0%; border-radius: 4px; transition: width 0.5s ease; }
+        .metric-fill.harmony { background: linear-gradient(90deg, var(--red) 0%, var(--gold) 50%, var(--green) 100%); }
+        .metric-fill.exploration { background: linear-gradient(90deg, var(--muted) 0%, var(--blue) 100%); }
+        
+        /* Agent Profiles */
+        .agent-list { display: flex; flex-direction: column; gap: 0.75rem; }
+        .agent-card { 
+            background: var(--card); 
+            border: 1px solid var(--border); 
+            border-radius: 10px; 
+            padding: 1rem;
+            transition: all 0.2s;
+        }
+        .agent-card:hover { border-color: var(--muted); }
+        .agent-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
+        .agent-card-header h3 { font-size: 1rem; color: #fff; display: flex; align-items: center; gap: 0.4rem; }
+        .agent-card .role { font-size: 0.75rem; color: var(--text2); font-style: italic; }
+        .agent-card .status { font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; font-weight: 600; text-transform: uppercase; }
+        .agent-bubble { 
+            background: rgba(255,255,255,0.03); 
+            border-left: 3px solid var(--gold); 
+            padding: 0.5rem 0.75rem; 
+            border-radius: 0 6px 6px 0; 
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .agent-bubble-label { font-size: 0.7rem; color: var(--gold); font-weight: 700; text-transform: uppercase; margin-bottom: 0.15rem; }
+        
+        /* Interactive Divine Creator Deck (Interventions) */
+        .divine-console {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin: 0 2rem 1.5rem;
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.1);
+        }
+        .divine-title { font-size: 1.1rem; color: var(--purple); font-weight: 700; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+        .divine-grid { display: flex; flex-direction: column; gap: 1rem; }
+        .intervention-buttons { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        .btn-intervention {
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: #fff;
+        }
+        .btn-intervention:hover { transform: translateY(-1px); }
+        .btn-lightning { background: #ef4444; border-color: #f87171; }
+        .btn-lightning:hover { box-shadow: 0 0 12px rgba(239, 68, 68, 0.5); }
+        .btn-rain { background: #3b82f6; border-color: #60a5fa; }
+        .btn-rain:hover { box-shadow: 0 0 12px rgba(59, 130, 246, 0.5); }
+        .btn-blessing { background: #d4a853; border-color: #ffd700; color: #000; }
+        .btn-blessing:hover { box-shadow: 0 0 12px rgba(212, 168, 83, 0.5); }
+        .btn-trial { background: #8b5cf6; border-color: #a78bfa; }
+        .btn-trial:hover { box-shadow: 0 0 12px rgba(139, 92, 246, 0.5); }
+        
+        .whisper-form {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 0.75rem;
+            align-items: center;
+            background: var(--card);
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .whisper-form select, .whisper-form input {
+            padding: 0.6rem;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 0.85rem;
+            border-radius: 6px;
+        }
+        .whisper-form input { width: 100%; }
+        
+        /* Timelines & Logs */
+        .timeline { max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.25rem; }
+        .timeline::-webkit-scrollbar { width: 6px; }
+        .timeline::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .event-item { 
+            background: var(--card); 
+            border: 1px solid var(--border);
+            border-radius: 8px; 
+            padding: 0.9rem; 
+            font-size: 0.85rem;
+            transition: all 0.3s;
+        }
+        .event-item.new-event {
+            animation: highlightEvent 2s ease-out;
+            border-color: var(--gold);
+        }
+        @keyframes highlightEvent {
+            0% { background: rgba(245, 158, 11, 0.15); }
+            100% { background: var(--card); }
+        }
+        .event-item .event-meta { display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 0.25rem; font-size: 0.75rem; }
+        .event-item .tick { color: var(--gold); }
+        .event-item .narrative { color: var(--text); font-weight: 500; }
+        .event-item .agents { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px dashed var(--border); font-size: 0.75rem; color: var(--text2); }
+        
+        .memory-view { max-height: 250px; overflow-y: auto; font-size: 0.8rem; }
+        .memory-item { padding: 0.5rem; border-bottom: 1px solid var(--border); }
+        .memory-item .type { font-weight: 700; color: var(--gold); font-size: 0.7rem; text-transform: uppercase; }
+        .memory-item .content { margin-top: 0.15rem; color: var(--text2); }
+        
+        .add-agent-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .add-agent-form input, .add-agent-form select { padding: 0.6rem; background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.8rem; }
+        
+        .provider-log { font-size: 0.75rem; max-height: 180px; overflow-y: auto; }
+        .provider-log .call { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.25rem; }
+        .provider-log .success { background: rgba(16, 185, 129, 0.05); border-left: 3px solid var(--green); }
+        .provider-log .error { background: rgba(239, 68, 68, 0.05); border-left: 3px solid var(--red); }
+        
+        /* Agent Card — Expanded */
+        .agent-card { 
+            background: var(--card); 
+            border: 1px solid var(--border); 
+            border-radius: 10px; 
+            padding: 1rem;
+            transition: all 0.2s;
+        }
+        .agent-card:hover { border-color: var(--muted); }
+        .agent-section {
+            margin-top: 0.65rem;
+            padding-top: 0.5rem;
+            border-top: 1px dashed var(--border);
+        }
+        .agent-section:first-of-type {
+            margin-top: 0.5rem;
+            padding-top: 0;
+            border-top: none;
+        }
+        .agent-section-label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            margin-bottom: 0.3rem;
+        }
+        .agent-section-label.goal { color: var(--purple); }
+        .agent-section-label.rel { color: var(--teal); }
+        .agent-section-label.explore { color: var(--blue); }
+        .agent-goal {
+            font-size: 0.82rem;
+            color: var(--text);
+            font-weight: 500;
+            line-height: 1.4;
+        }
+        .agent-goal.empty { color: var(--muted); font-style: italic; font-weight: 400; }
+        .rel-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.4rem;
+        }
+        .rel-item {
+            background: rgba(255,255,255,0.02);
+            border-radius: 6px;
+            padding: 0.35rem 0.5rem;
+            font-size: 0.75rem;
+        }
+        .rel-name { font-weight: 700; color: var(--text); margin-bottom: 0.2rem; }
+        .rel-bar-wrap { display: flex; gap: 0.4rem; align-items: center; }
+        .rel-bar-bg {
+            flex: 1;
+            height: 5px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .rel-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+        .rel-bar-fill.trust { background: var(--green); }
+        .rel-bar-fill.familiar { background: var(--gold); }
+        .rel-val { font-size: 0.65rem; color: var(--text2); min-width: 22px; text-align: right; }
+        .explore-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .explore-bar-bg {
+            flex: 1;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .explore-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--muted) 0%, var(--blue) 60%, var(--gold) 100%);
+            border-radius: 3px;
+            transition: width 0.5s;
+        }
+        .explore-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text2);
+            min-width: 60px;
+            text-align: right;
+        }
+        .veil-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .veil-badge.intact { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+        .veil-badge.frayed { background: rgba(245,158,11,0.15); color: var(--gold); border: 1px solid rgba(245,158,11,0.3); }
+        .veil-badge.lifted { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+        .veil-badge.unknown { background: rgba(100,116,139,0.15); color: var(--muted); border: 1px solid rgba(100,116,139,0.3); }
+        
+        @media (max-width: 1024px) {
+            .dashboard { grid-template-columns: 1fr; }
+            .divine-console { margin: 0 1rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-section">
+            <h1>🌌 World Sim</h1>
+            <div class="subtitle">Cosmic Creator Headquarters</div>
+        </div>
+        
+        <!-- Live Watch Engine -->
+        <div class="watch-center">
+            <div class="watch-status">
+                <span class="watch-indicator" id="watch-indicator"></span>
+                <span id="watch-status-text">STANDBY</span>
+            </div>
+            
+            <button class="btn primary" id="btn-watch" onclick="toggleAutoWatch()">
+                <span>▶️</span> Start Watch Mode
+            </button>
+            
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+                <label for="watch-speed" style="font-size:0.8rem;font-weight:600;color:var(--text2);">Interval:</label>
+                <select id="watch-speed" onchange="changeWatchSpeed()" style="padding:0.4rem;background:var(--panel);border:1px solid var(--border);color:#fff;border-radius:6px;font-size:0.8rem;">
+                    <option value="3000">3 Seconds</option>
+                    <option value="5000" selected>5 Seconds</option>
+                    <option value="8000">8 Seconds</option>
+                    <option value="15000">15 Seconds</option>
+                </select>
+            </div>
+
+            <!-- Narrator Voice Toggle -->
+            <label class="toggle-container">
+                <input type="checkbox" class="toggle-checkbox" id="narrator-toggle" checked>
+                <div class="toggle-switch"></div>
+                <span style="display:flex;align-items:center;gap:0.25rem;">🔊 Narrator Voice</span>
+            </label>
+        </div>
+
+        <div class="nav-links">
+            <a href="/map">🗺️ Interactive Map Overlay</a>
+            <a href="/setup-keys">🔑 Setup Keys</a>
+        </div>
+        
+        <div class="controls">
+            <button class="btn primary" onclick="tickBoth()">⚡ Force Tick Both</button>
+            <button class="btn east" onclick="tickEast()">▶ East Tick</button>
+            <button class="btn west" onclick="tickWest()">▶ West Tick</button>
+            <button class="btn danger" onclick="resetSim()">↺ Reset Universe</button>
+        </div>
+    </header>
+
+    <!-- DIVINE CREATOR CONSOLE -->
+    <div class="divine-console">
+        <div class="divine-title">🔮 Divine Interventions Console</div>
+        <div class="divine-grid">
+            <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                <span style="font-size:0.8rem;font-weight:700;color:var(--text2);text-transform:uppercase;">Select Hemisphere & Major Event:</span>
+                <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+                    <select id="divine-hemisphere" style="padding:0.6rem;background:var(--card);border:1px solid var(--border);color:#fff;border-radius:8px;font-weight:600;">
+                        <option value="both">Both Hemispheres</option>
+                        <option value="east">East Hemisphere (Eden)</option>
+                        <option value="west">West Hemisphere (Frontier)</option>
+                    </select>
+                    
+                    <div class="intervention-buttons">
+                        <button class="btn-intervention btn-lightning" onclick="triggerEvent('lightning')">⚡ Cast Lightning</button>
+                        <button class="btn-intervention btn-rain" onclick="triggerEvent('rain')">🌧️ Rain Shower</button>
+                        <button class="btn-intervention btn-blessing" onclick="triggerEvent('blessing')">✨ Bestow Blessing</button>
+                        <button class="btn-intervention btn-trial" onclick="triggerEvent('trial')">🔥 Inflict Trial</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;border-top:1px dashed var(--border);padding-top:0.75rem;">
+                <span style="font-size:0.8rem;font-weight:700;color:var(--text2);text-transform:uppercase;">Whisper Divine Dream / Command into Agent thoughts:</span>
+                <div class="whisper-form">
+                    <select id="whisper-target">
+                        <option value="">Whisper to Everyone</option>
+                        <option value="Adam">East Adam</option>
+                        <option value="Eve">East Eve</option>
+                        <option value="West Adam">West Adam</option>
+                        <option value="West Eve">West Eve</option>
+                    </select>
+                    <input type="text" id="whisper-message" placeholder="Whisper something holy, comforting or demanding (e.g. 'Explore the northern mountains today...')">
+                    <button class="btn primary" onclick="sendWhisper()" style="padding:0.6rem 1.2rem;border-radius:6px;font-weight:700;">💭 Send Whisper</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <!-- EAST HEMISPHERE -->
+        <div class="hemisphere-panel">
+            <div class="panel">
+                <div class="panel-header east">
+                    <span>🌍 Eastern Hemisphere (Eden)</span>
+                    <span id="e-tick-badge" style="background:var(--east-color);padding:0.2rem 0.6rem;border-radius:10px;font-size:0.75rem;">Tick 0</span>
+                </div>
+                <div class="panel-body">
+                    <div class="stat-grid" style="margin-bottom:1rem;">
+                        <div class="stat-card"><div class="stat-card-title">Day/Cycle</div><div class="stat-card-value" id="e-day">1 (morning)</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Weather</div><div class="stat-card-value" id="e-weather">gentle</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Garden State</div><div class="stat-card-value" id="e-garden">pristine</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Boundary Status</div><div class="stat-card-value" id="e-boundary">Respected</div></div>
+                    </div>
+                    
+                    <div class="metric-bar-container">
+                        <div class="metric-label"><span>Harmony Index</span><span id="e-harmony-val">1.00</span></div>
+                        <div class="metric-bar"><div class="metric-fill harmony" id="e-harmony-bar"></div></div>
+                    </div>
+                    
+                    <div class="metric-bar-container">
+                        <div class="metric-label"><span>Exploration Level</span><span id="e-explore-val">0 / 5</span></div>
+                        <div class="metric-bar"><div class="metric-fill exploration" id="e-explore-bar"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">👥 Eastern Agents</div>
+                <div class="panel-body">
+                    <div class="agent-list" id="east-agents"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">🧠 Eastern Agent Memories</div>
+                <div class="panel-body">
+                    <select id="east-memory-agent" onchange="loadMemories('east')" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:6px;font-weight:600;">
+                        <option value="">Select agent...</option>
+                    </select>
+                    <div class="memory-view" id="east-memories"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header east">📜 Eden Live Chronology</div>
+                <div class="panel-body">
+                    <div class="timeline" id="east-timeline"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WEST HEMISPHERE -->
+        <div class="hemisphere-panel">
+            <div class="panel">
+                <div class="panel-header west">
+                    <span>🌎 Western Hemisphere (Frontier)</span>
+                    <span id="w-tick-badge" style="background:var(--west-color);padding:0.2rem 0.6rem;border-radius:10px;font-size:0.75rem;">Tick 0</span>
+                </div>
+                <div class="panel-body">
+                    <div class="stat-grid" style="margin-bottom:1rem;">
+                        <div class="stat-card"><div class="stat-card-title">Day/Cycle</div><div class="stat-card-value" id="w-day">1 (morning)</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Weather</div><div class="stat-card-value" id="w-weather">gentle</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Garden State</div><div class="stat-card-value" id="w-garden">pristine</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Boundary Status</div><div class="stat-card-value" id="w-boundary">Respected</div></div>
+                    </div>
+                    
+                    <div class="metric-bar-container">
+                        <div class="metric-label"><span>Harmony Index</span><span id="w-harmony-val">1.00</span></div>
+                        <div class="metric-bar"><div class="metric-fill harmony" id="w-harmony-bar"></div></div>
+                    </div>
+                    
+                    <div class="metric-bar-container">
+                        <div class="metric-label"><span>Exploration Level</span><span id="w-explore-val">0 / 5</span></div>
+                        <div class="metric-bar"><div class="metric-fill exploration" id="w-explore-bar"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header west">👥 Western Agents</div>
+                <div class="panel-body">
+                    <div class="agent-list" id="west-agents"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header west">🧠 Western Agent Memories</div>
+                <div class="panel-body">
+                    <select id="west-memory-agent" onchange="loadMemories('west')" style="width:100%;margin-bottom:0.75rem;padding:0.5rem;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:6px;font-weight:600;">
+                        <option value="">Select agent...</option>
+                    </select>
+                    <div class="memory-view" id="west-memories"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header west">📜 Frontier Live Chronology</div>
+                <div class="panel-body">
+                    <div class="timeline" id="west-timeline"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW PANELS: Resources, Event Feed, Interventions, Performance -->
+    <div style="padding: 0 2rem 1.5rem;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <!-- Resources Panel -->
+            <div class="panel">
+                <div class="panel-header">🌿 World Resources</div>
+                <div class="panel-body">
+                    <div id="resources-display" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                        <div class="stat-card"><div class="stat-card-title">🍎 Food</div><div class="stat-card-value" id="res-food">1.00</div></div>
+                        <div class="stat-card"><div class="stat-card-title">💧 Water</div><div class="stat-card-value" id="res-water">1.00</div></div>
+                        <div class="stat-card"><div class="stat-card-title">🪵 Wood</div><div class="stat-card-value" id="res-wood">0.80</div></div>
+                        <div class="stat-card"><div class="stat-card-title">🪨 Stone</div><div class="stat-card-value" id="res-stone">0.50</div></div>
+                        <div class="stat-card"><div class="stat-card-title">🌿 Herbs</div><div class="stat-card-value" id="res-herbs">0.30</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Panel -->
+            <div class="panel">
+                <div class="panel-header">⚡ Performance</div>
+                <div class="panel-body">
+                    <div id="performance-display" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                        <div class="stat-card"><div class="stat-card-title">API Calls</div><div class="stat-card-value" id="perf-calls">0</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Success Rate</div><div class="stat-card-value" id="perf-success">100%</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Avg Latency</div><div class="stat-card-value" id="perf-latency">—</div></div>
+                        <div class="stat-card"><div class="stat-card-title">Uptime</div><div class="stat-card-value" id="perf-uptime">0s</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combined Event Feed -->
+    <div style="padding: 0 2rem 1.5rem;">
+        <div class="panel">
+            <div class="panel-header">📡 Real-Time Event Feed (Both Hemispheres)</div>
+            <div class="panel-body">
+                <div class="timeline" id="combined-timeline" style="max-height:400px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Intervention History -->
+    <div style="padding: 0 2rem 1.5rem;">
+        <div class="panel">
+            <div class="panel-header">⚡ Divine Intervention History</div>
+            <div class="panel-body">
+                <div class="timeline" id="intervention-timeline" style="max-height:300px;">
+                    <div style="color:var(--muted);font-style:italic;padding:1rem;">No interventions yet. Use the Divine Console above to cast events.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Character Panel -->
+    <div style="padding: 0 2rem 1.5rem;">
+        <div class="panel">
+            <div class="panel-header">+ Form a New Being (Add Character)</div>
+            <div class="panel-body">
+                <div class="add-agent-form">
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                        <label style="font-size:0.8rem;font-weight:600;color:var(--text2);">Character Name</label>
+                        <input type="text" id="new-name" placeholder="e.g., Seth, Cain, Abel">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                        <label style="font-size:0.8rem;font-weight:600;color:var(--text2);">Target Hemisphere</label>
+                        <select id="new-hemisphere">
+                            <option value="east">East Hemisphere (Eden)</option>
+                            <option value="west">West Hemisphere (Frontier)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;grid-column: 1 / -1;">
+                        <label style="font-size:0.8rem;font-weight:600;color:var(--text2);">Core Purpose / Role</label>
+                        <input type="text" id="new-role" placeholder="e.g., first human builder, shepherd of sheep, keeper of records">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                        <label style="font-size:0.8rem;font-weight:600;color:var(--text2);">Cognition Provider</label>
+                        <select id="new-provider">
+                            <option value="mock">Deterministic Mock Provider</option>
+                            <option value="nim-dry-run">NVIDIA NIM Dry-Run</option>
+                            <option value="nim-live">NVIDIA NIM Live Model Calls</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                        <label style="font-size:0.8rem;font-weight:600;color:var(--text2);">Model ID</label>
+                        <input type="text" id="new-model" placeholder="meta/llama-3.1-8b-instruct (optional)">
+                    </div>
+                    <div style="grid-column: 1 / -1;margin-top:0.5rem;text-align:right;">
+                        <button class="btn primary" onclick="addAgent()" style="display:inline-flex;">✨ Breathe Life Into Character</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Provider Telemetry -->
+    <div style="padding: 0 2rem 2rem;">
+        <div class="panel">
+            <div class="panel-header">📡 NVIDIA NIM Telemetry Logs</div>
+            <div class="panel-body">
+                <div class="provider-log" id="provider-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastEastTick = -1;
+        let lastWestTick = -1;
+        let autoWatchIntervalId = null;
+        let speechQueue = [];
+        let isSpeaking = false;
+        let startTime = Date.now();
+
+        async function fetchJSON(path) { return (await fetch(path)).json(); }
+        async function postJSON(path, body) {
+            return (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json();
+        }
+        
+        function veilClass(level) {
+            if (level >= 8) return 'lifted';
+            if (level >= 4) return 'frayed';
+            if (level > 0) return 'frayed';
+            return 'intact';
+        }
+        function veilLabel(level) {
+            if (level >= 8) return 'LIFTED — contact possible';
+            if (level >= 4) return 'FRAYED — traces leak through';
+            if (level > 0) return 'Intact — distant curiosity';
+            return 'Intact — sealed';
+        }
+        
+        function renderAgentCard(a, colorVar) {
+            const goalText = (a.current_goal || '').trim();
+            const goalDisplay = goalText
+                ? `<div class="agent-goal">${escapeHtml(goalText)}</div>`
+                : `<div class="agent-goal empty">No active goal yet</div>`;
+            const relEntries = Object.entries(a.relationships || {}).filter(([k]) => k !== a.name);
+            const relHtml = relEntries.length === 0
+                ? `<div style="font-size:0.75rem;color:var(--muted);font-style:italic;">No relationships tracked</div>`
+                : relEntries.map(([name, vals]) => {
+                    const trust = Math.round((vals.trust || 0) * 100);
+                    const fam = Math.round((vals.familiarity || 0) * 100);
+                    return `<div class="rel-item">
+                        <div class="rel-name">${escapeHtml(name)}</div>
+                        <div class="rel-bar-wrap">
+                            <div class="rel-bar-bg"><div class="rel-bar-fill trust" style="width:${trust}%"></div></div>
+                            <span class="rel-val">${trust}%</span>
+                        </div>
+                        <div class="rel-bar-wrap" style="margin-top:0.2rem;">
+                            <div class="rel-bar-bg"><div class="rel-bar-fill familiar" style="width:${fam}%"></div></div>
+                            <span class="rel-val">${fam}%</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            return `<div class="agent-card">
+                <div class="agent-card-header">
+                    <div>
+                        <h3>${a.hemisphere === 'east' ? '👤' : '🤠'} ${escapeHtml(a.name)}</h3>
+                        <div class="role">${escapeHtml(a.role)}</div>
+                    </div>
+                    <span class="status" style="background:rgba(255,255,255,0.05);padding:0.2rem 0.5rem;border-radius:4px;font-size:0.65rem;">
+                        ${escapeHtml(a.provider)}
+                    </span>
+                </div>
+                <div style="display:flex;gap:0.75rem;flex-wrap:wrap;font-size:0.75rem;color:var(--text2);margin-bottom:0.4rem;">
+                    <span><strong>Memories:</strong> ${a.memory_stats?.total_memories || 0}</span>
+                    <span><strong>Veil:</strong> <span class="veil-badge ${veilClass(a.exploration_level ?? 0)}">${veilLabel(a.exploration_level ?? 0)}</span></span>
+                </div>
+                <div class="agent-section">
+                    <div class="agent-section-label">Current Goal</div>
+                    ${goalDisplay}
+                </div>
+                <div class="agent-section">
+                    <div class="agent-bubble">
+                        <div class="agent-bubble-label">Thought</div>
+                        <div>${escapeHtml(a.current_thought || '—')}</div>
+                    </div>
+                    <div class="agent-bubble" style="border-left-color:var(${colorVar});margin-top:0.4rem;">
+                        <div class="agent-bubble-label" style="color:var(${colorVar});">Action</div>
+                        <div>${escapeHtml(a.current_action || '—')}</div>
+                    </div>
+                </div>
+                <div class="agent-section">
+                    <div class="agent-section-label rel">Relationships</div>
+                    <div class="rel-grid">${relHtml}</div>
+                </div>
+                <div class="agent-section">
+                    <div class="agent-section-label explore">Exploration — ${a.exploration_level ?? 0}/10</div>
+                    <div class="explore-row">
+                        <div class="explore-bar-bg"><div class="explore-bar-fill" style="width:${Math.min(((a.exploration_level ?? 0) / 10) * 100, 100)}%"></div></div>
+                        <span class="explore-label">${veilLabel(a.exploration_level ?? 0)}</span>
+                    </div>
+                </div>
+            </div>`;
+        }
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        
+        async function refresh() {
+            try {
+                const state = await fetchJSON('/api/state');
+                const agents = await fetchJSON('/api/agents');
+                const eastEvents = await fetchJSON('/api/events/east?limit=50');
+                const westEvents = await fetchJSON('/api/events/west?limit=50');
+                const providers = await fetchJSON('/api/providers');
+
+                let newEastEvent = false;
+                let newWestEvent = false;
+
+                // East state
+                if (state.east) {
+                    const t = state.east.tick;
+                    if (t > lastEastTick && lastEastTick !== -1) {
+                        newEastEvent = true;
+                    }
+                    lastEastTick = t;
+
+                    document.getElementById('e-tick-badge').textContent = `Tick ${t}`;
+                    document.getElementById('e-day').textContent = `Day ${state.east.world?.day || 1} (${state.east.world?.time_of_day || 'morning'})`;
+                    document.getElementById('e-weather').textContent = state.east.world?.weather || 'gentle';
+                    document.getElementById('e-garden').textContent = state.east.world?.garden_condition || 'pristine';
+                    document.getElementById('e-boundary').textContent = state.east.world?.boundary_respected ? 'Respected' : 'Not Respected';
+                    
+                    const harmony = state.east.world?.harmony_level || 0;
+                    document.getElementById('e-harmony-val').textContent = harmony.toFixed(2);
+                    document.getElementById('e-harmony-bar').style.width = `${harmony * 100}%`;
+                    
+                    const explore = state.east.exploration_level || 0;
+                    document.getElementById('e-explore-val').textContent = `${explore} / 5`;
+                    document.getElementById('e-explore-bar').style.width = `${(explore / 5) * 100}%`;
+                }
+
+                // West state
+                if (state.west) {
+                    const t = state.west.tick;
+                    if (t > lastWestTick && lastWestTick !== -1) {
+                        newWestEvent = true;
+                    }
+                    lastWestTick = t;
+
+                    document.getElementById('w-tick-badge').textContent = `Tick ${t}`;
+                    document.getElementById('w-day').textContent = `Day ${state.west.world?.day || 1} (${state.west.world?.time_of_day || 'morning'})`;
+                    document.getElementById('w-weather').textContent = state.west.world?.weather || 'gentle';
+                    document.getElementById('w-garden').textContent = state.west.world?.garden_condition || 'pristine';
+                    document.getElementById('w-boundary').textContent = state.west.world?.boundary_respected ? 'Respected' : 'Not Respected';
+                    
+                    const harmony = state.west.world?.harmony_level || 0;
+                    document.getElementById('w-harmony-val').textContent = harmony.toFixed(2);
+                    document.getElementById('w-harmony-bar').style.width = `${harmony * 100}%`;
+                    
+                    const explore = state.west.exploration_level || 0;
+                    document.getElementById('w-explore-val').textContent = `${explore} / 5`;
+                    document.getElementById('w-explore-bar').style.width = `${(explore / 5) * 100}%`;
+                }
+
+                // Discovery hemisphere alerts
+                if (state.discovery) {
+                    document.getElementById('watch-status-text').textContent = " hemispheric contact established! ";
+                    document.getElementById('watch-indicator').style.background = "var(--gold)";
+                }
+
+                // Eastern Agents
+                const eastAgents = Object.values(agents).filter(a => a.hemisphere === 'east');
+                document.getElementById('east-agents').innerHTML = eastAgents.map(a => renderAgentCard(a, 'east')).join('');
+
+                // Western Agents
+                const westAgents = Object.values(agents).filter(a => a.hemisphere === 'west');
+                document.getElementById('west-agents').innerHTML = westAgents.map(a => renderAgentCard(a, 'west')).join('');
+
+                // Selectors Update
+                const eastSelect = document.getElementById('east-memory-agent');
+                const westSelect = document.getElementById('west-memory-agent');
+                
+                const currEastVal = eastSelect.value;
+                eastSelect.innerHTML = '<option value="">Select agent...</option>' + eastAgents.map(a => `<option value="east_${a.name}">${a.name}</option>`).join('');
+                if (currEastVal) eastSelect.value = currEastVal;
+
+                const currWestVal = westSelect.value;
+                westSelect.innerHTML = '<option value="">Select agent...</option>' + westAgents.map(a => `<option value="west_${a.name}">${a.name}</option>`).join('');
+                if (currWestVal) westSelect.value = currWestVal;
+
+                // Timelines with highlights on newer events
+                const renderTimeline = (containerId, events, isNew) => {
+                    const sorted = events.slice().reverse();
+                    if (sorted.length > 0 && isNew) {
+                        speakEvent(sorted[0]);
+                    }
+                    
+                    document.getElementById(containerId).innerHTML = sorted.map((e, idx) => `
+                        <div class="event-item ${idx === 0 && isNew ? 'new-event' : ''}">
+                            <div class="event-meta">
+                                <span class="tick">Tick ${e.tick}</span>
+                                <span style="color:var(--muted);">[${e.label}]</span>
+                            </div>
+                            <div class="narrative">${e.narrative}</div>
+                            <div class="agents">
+                                ${Object.entries(e.agents || {}).map(([n, a]) => `<strong>${n}:</strong> ${a.action || '—'}`).join('<br>')}
+                            </div>
+                        </div>
+                    `).join('');
+                };
+
+                renderTimeline('east-timeline', eastEvents, newEastEvent);
+                renderTimeline('west-timeline', westEvents, newWestEvent);
+
+                // Telemetry
+                document.getElementById('provider-log').innerHTML = (providers.recent_calls || []).slice().reverse().map(c => `
+                    <div class="call ${c.success ? 'success' : 'error'}">
+                        <strong>${c.agent}</strong> calling NIM provider (tick ${c.tick}) →
+                        ${c.success ? `<span style="color:var(--green)">✓ Success (${c.latency_ms || 0}ms)</span>` : `<span style="color:var(--red)">✗ Failed: ${c.error || 'NIM error'}</span>`}
+                    </div>
+                `).join('');
+
+                // Resources
+                try {
+                    const mech = await fetchJSON('/api/mechanics');
+                    if (mech.resources) {
+                        const resMap = {};
+                        mech.resources.forEach(r => { resMap[r.type] = r.amount; });
+                        document.getElementById('res-food').textContent = (resMap.food || 0).toFixed(2);
+                        document.getElementById('res-water').textContent = (resMap.water || 0).toFixed(2);
+                        document.getElementById('res-wood').textContent = (resMap.wood || 0).toFixed(2);
+                        document.getElementById('res-stone').textContent = (resMap.stone || 0).toFixed(2);
+                        document.getElementById('res-herbs').textContent = (resMap.herb || 0).toFixed(2);
+                    }
+                } catch (e) { console.error('Failed to load resources:', e); }
+
+                // Performance
+                if (providers.call_log) {
+                    const total = providers.call_log.total_calls || 0;
+                    const success = providers.call_log.successes || 0;
+                    const avgLat = providers.call_log.avg_latency_ms;
+                    document.getElementById('perf-calls').textContent = total;
+                    document.getElementById('perf-success').textContent = total > 0 ? `${Math.round((success / total) * 100)}%` : '100%';
+                    document.getElementById('perf-latency').textContent = avgLat ? `${Math.round(avgLat)}ms` : '—';
+                }
+                
+                // Uptime
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                document.getElementById('perf-uptime').textContent = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+                // Combined Event Feed
+                try {
+                    const eastEv = await fetchJSON('/api/events/east?limit=25');
+                    const westEv = await fetchJSON('/api/events/west?limit=25');
+                    const combined = [...eastEv, ...westEv].sort((a, b) => (b.tick || 0) - (a.tick || 0)).slice(0, 50);
+                    document.getElementById('combined-timeline').innerHTML = combined.map(e => `
+                        <div class="event-item">
+                            <div class="event-meta">
+                                <span class="tick">Tick ${e.tick}</span>
+                                <span style="color:var(--muted);">[${e.label}]</span>
+                                <span style="color:${e.hemisphere === 'east' ? 'var(--east-color)' : 'var(--west-color)'};">${e.hemisphere === 'east' ? '🌍 East' : '🌎 West'}</span>
+                            </div>
+                            <div class="narrative">${e.narrative}</div>
+                        </div>
+                    `).join('');
+                } catch (e) { console.error('Failed to load combined events:', e); }
+
+                // Intervention History
+                try {
+                    const interventions = await fetchJSON('/api/interventions?limit=20');
+                    if (interventions.length > 0) {
+                        document.getElementById('intervention-timeline').innerHTML = interventions.map(e => `
+                            <div class="event-item" style="border-left:3px solid var(--gold);">
+                                <div class="event-meta">
+                                    <span class="tick">Tick ${e.tick}</span>
+                                    <span style="color:var(--gold);">⚡ ${e.narrative.substring(0, 50)}...</span>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                } catch (e) { console.error('Failed to load interventions:', e); }
+
+            } catch (err) { console.error('Failed to update state details:', err); }
+        }
+
+        async function loadMemories(hemisphere) {
+            const select = document.getElementById(`${hemisphere}-memory-agent`);
+            const agentKey = select.value;
+            if (!agentKey) return;
+
+            try {
+                const data = await fetchJSON(`/api/agents/${agentKey}/memory?limit=20`);
+                const container = document.getElementById(`${hemisphere}-memories`);
+                container.innerHTML = data.memories.map(m => `
+                    <div class="memory-item">
+                        <span class="type">[${m.memory_type}]</span> tick ${m.tick}
+                        <div class="content">${m.content}</div>
+                    </div>
+                `).join('');
+            } catch (err) { console.error('Failed to load memories:', err); }
+        }
+
+        // Action Trigger endpoints
+        async function tickBoth() { await postJSON('/api/tick', { hemisphere: 'both' }); refresh(); }
+        async function tickEast() { await postJSON('/api/tick/east'); refresh(); }
+        async function tickWest() { await postJSON('/api/tick/west'); refresh(); }
+        
+        // Auto-Play watching mode
+        function toggleAutoWatch() {
+            const btn = document.getElementById('btn-watch');
+            const ind = document.getElementById('watch-indicator');
+            const statusText = document.getElementById('watch-status-text');
+
+            if (autoWatchIntervalId) {
+                // Pause
+                clearInterval(autoWatchIntervalId);
+                autoWatchIntervalId = null;
+                btn.innerHTML = '<span>▶️</span> Start Watch Mode';
+                btn.classList.remove('danger');
+                ind.classList.remove('active');
+                statusText.textContent = "STANDBY";
+            } else {
+                // Play
+                const ms = parseInt(document.getElementById('watch-speed').value, 10);
+                autoWatchIntervalId = setInterval(tickBoth, ms);
+                btn.innerHTML = '<span>⏸️</span> Pause Watching';
+                btn.classList.add('danger');
+                ind.classList.add('active');
+                statusText.textContent = "LIVE WATCH ACTIVE";
+                tickBoth(); // Immediate first tick
+            }
+        }
+
+        function changeWatchSpeed() {
+            if (autoWatchIntervalId) {
+                // Reset interval with new speed
+                toggleAutoWatch();
+                toggleAutoWatch();
+            }
+        }
+
+        // Divine interventions
+        async function triggerEvent(type) {
+            const hemis = document.getElementById('divine-hemisphere').value;
+            try {
+                const res = await postJSON('/api/intervention', {
+                    hemisphere: hemis,
+                    type: type
+                });
+                refresh();
+            } catch (err) { alert('Failed intervention: ' + err.message); }
+        }
+
+        async function sendWhisper() {
+            const msg = document.getElementById('whisper-message').value.trim();
+            if (!msg) return alert('Enter a dream/whisper message first.');
+            
+            const target = document.getElementById('whisper-target').value || null;
+            const hemis = document.getElementById('divine-hemisphere').value;
+
+            try {
+                const res = await postJSON('/api/intervention', {
+                    hemisphere: hemis,
+                    type: "whisper",
+                    agent: target,
+                    details: msg
+                });
+                document.getElementById('whisper-message').value = '';
+                refresh();
+            } catch (err) { alert('Failed whispering: ' + err.message); }
+        }
+
+        async function resetSim() { 
+            if (!confirm('Are you absolute sure you want to reset the universe? All memories and historical state will be wiped.')) return; 
+            await postJSON('/api/reset'); 
+            refresh(); 
+        }
+
+        async function addAgent() {
+            const name = document.getElementById('new-name').value.trim();
+            if (!name) return alert('Breathe a name into this character.');
+            
+            await postJSON('/api/agents', {
+                name,
+                hemisphere: document.getElementById('new-hemisphere').value,
+                role: document.getElementById('new-role').value,
+                provider: document.getElementById('new-provider').value,
+                model: document.getElementById('new-model').value || undefined,
+            });
+            document.getElementById('new-name').value = '';
+            document.getElementById('new-role').value = '';
+            refresh();
+        }
+
+        // Speech Engine (HTML5 TTS)
+        function speakEvent(event) {
+            const enabled = document.getElementById('narrator-toggle').checked;
+            if (!enabled) return;
+
+            // Prepare text
+            let text = `${event.hemisphere === 'east' ? 'East' : 'West'} Hemisphere, Tick ${event.tick}. ${event.narrative}.`;
+            
+            // Add what characters did
+            for (const [name, data] of Object.entries(event.agents || {})) {
+                if (data.action) {
+                    text += ` ${name} decides to ${data.action}`;
+                }
+            }
+
+            speechQueue.push(text);
+            processSpeechQueue();
+        }
+
+        function processSpeechQueue() {
+            if (isSpeaking || speechQueue.length === 0) return;
+
+            isSpeaking = true;
+            const textToSpeak = speechQueue.shift();
+
+            // Web Speech Synthesis
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
+            
+            // Configure a majestic voice
+            const voices = window.speechSynthesis.getVoices();
+            // Look for a deep male/neutral English narrator voice
+            const idealVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google US English') || v.name.includes('Natural') || v.name.includes('David')));
+            if (idealVoice) {
+                utterance.voice = idealVoice;
+            }
+            
+            utterance.rate = 0.9;  // Slightly slow for biblical weight
+            utterance.pitch = 0.9; // Slightly deep
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                processSpeechQueue();
+            };
+
+            utterance.onerror = () => {
+                isSpeaking = false;
+                processSpeechQueue();
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Initial fetch
+        refresh();
+        setInterval(refresh, 5000);
+        
+        // Voice loading takes a second
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+        }
+    </script>
+</body>
+</html>
