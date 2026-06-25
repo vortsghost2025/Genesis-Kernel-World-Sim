@@ -2766,3 +2766,70 @@ Adam unread = 0
 
 Phase 6N Verdict: SINGLE_LIVE_PERSISTENCE_CYCLE_PASSED
 
+## Phase 6O — Controlled Injected Whisper Persistence Cycle — CLOSED
+
+**Host / Path**
+- `srv1756620`
+- `/opt/genesis-world-sim`
+
+**Execution**
+- Ran exactly one `AgentDaemon.run_cycle(target_agent='east_adam')`
+- `dry_run=False`, `no_llm=True`
+- Daemon instance had `try_reflect` patched with injected whisper decision (no provider/model call)
+- No daemon loop, no service start, no Eve run, no commit/push
+
+**Injected decision**
+- `decision`: `whisper`
+- `target`: `east_eve`
+- `content`: `Water is 0.0. Dove and lamb are present, but no movement pattern is recorded. We should verify before treating movement as evidence.`
+- `evidence_used`: `["water is 0.0", "dove and lamb are present", "no movement pattern is recorded"]`
+- `new_goal`: `verify whether any animal movement pattern exists`
+
+**Pre‑run baseline**
+- canonical world md5: `f15271c8da11e8e2e29b71c25fccfd9e`
+- ledger md5: `6feb396c5908cb458bcff7718e33cfe9` (23 lines)
+- Adam self_state md5: `dccd7ff876b1fd12d4e73f39526c028a`
+- Eve self_state md5: `34c0de16bc8e301636231521e9a28e10`
+- Adam memories md5: `13127e7ad030f46e807f8b92d4cb7f43`
+- Eve memories md5: `6f0938478a6e0229f9c62fd8eaba17d2`
+- Eve unread before: `['whisper_east_eve_7']`
+- Adam unread before: none
+
+**Post‑run state**
+- canonical world md5 unchanged: `f15271c8da11e8e2e29b71c25fccfd9e`
+- ledger lines unchanged: 23
+- Adam self_state md5: `031d6043c70295117bc5183e391f6176`
+- Eve self_state md5 unchanged: `34c0de16bc8e301636231521e9a28e10`
+- Adam memories md5: `e17a5c303cace252f058287edb4c9425`
+- Eve memories md5: `c66135181b7251287b95bca7cc49ef87`
+- Eve unread after: `['whisper_east_eve_7', 'whisper_east_eve_8']`
+
+**Allowed writes observed**
+- `data/agents/east_adam/self_state.json` – updated cooldown, timestamps, etc.
+- `data/memories/east_eve_memories.json` – appended a single new unread whisper (`whisper_east_eve_8`)
+- `data/memories/east_adam_memories.json` – appended a single relationship memory entry via `remember_relationship(...)`
+
+**Protected state**
+- Original `whisper_east_eve_7` unchanged and still unread
+- Canonical world unchanged
+- Ledger unchanged
+- Eve self_state unchanged
+- West files unchanged
+- No daemon or service left running
+
+**Verdicts**
+- `INJECTED_WHISPER_PERSISTENCE_PASSED`
+- `EVE_MEMORY_APPEND_SINGLE_WHISPER`
+- `EVE_UNREAD_INCREMENT_PASSED`
+- `OLD_EVE_UNREAD_PRESERVED`
+- `ADAM_RELATIONSHIP_MEMORY_APPEND_EXPECTED`
+- `NO_EXTRA_ADAM_MEMORY_MUTATION`
+- `NO_PROVIDER_CALL_CONFIRMED`
+- `LEDGER_UNCHANGED`
+- `CANONICAL_WORLD_UNCHANGED`
+- `WEST_UNCHANGED`
+- `NO_DAEMON_LEFT_RUNNING`
+
+**Incident note**
+- An earlier Phase 6O probe was accidentally run on the local Windows workspace `S:\Genesis Kernel World Sim`. That run does not count toward Phase 6O and remains a separate incident. The accepted Phase 6O run is the VPS 2 run documented above. Cleanup of the local artifacts will be performed in a later phase.
+
