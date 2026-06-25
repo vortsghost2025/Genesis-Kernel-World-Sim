@@ -2833,3 +2833,71 @@ Phase 6N Verdict: SINGLE_LIVE_PERSISTENCE_CYCLE_PASSED
 **Incident note**
 - An earlier Phase 6O probe was accidentally run on the local Windows workspace `S:\Genesis Kernel World Sim`. That run does not count toward Phase 6O and remains a separate incident. The accepted Phase 6O run is the VPS 2 run documented above. Cleanup of the local artifacts will be performed in a later phase.
 
+
+
+
+## Phase 6P — Adam no-LLM Rest Persistence Cycle — CLOSED
+
+**Verdicts**
+- `PHASE_6P_D2_ADAM_NO_LLM_REST_PERSISTENCE_PASSED`
+- `PHASE_6P_D3_POSTRUN_DETAIL_CAPTURE_COMPLETE`
+
+**Host / Path**
+- `srv1756620`
+- `/opt/genesis-world-sim`
+
+**Execution**
+- Ran exactly one command: `python backend/daemon/agent_daemon.py --once --no-llm --agent east_adam`
+- No `--dry-run`
+- No provider/model call
+- No ledger write
+- No daemon loop
+- No Eve run
+- No tick container start
+- No commit/push during runtime phase
+
+**Pre-run baseline**
+- ledger md5: `6feb396c5908cb458bcff7718e33cfe9`
+- ledger lines: `23`
+- canonical world md5: `f15271c8da11e8e2e29b71c25fccfd9e`
+- Adam self_state md5: `031d6043c70295117bc5183e391f6176`
+- Eve self_state md5: `34c0de16bc8e301636231521e9a28e10`
+- Adam memories md5: `e17a5c303cace252f058287edb4c9425`
+- Eve memories md5: `c66135181b7251287b95bca7cc49ef87`
+
+**Post-run state**
+- ledger md5 unchanged: `6feb396c5908cb458bcff7718e33cfe9`
+- ledger lines unchanged: `23`
+- canonical world md5 unchanged: `f15271c8da11e8e2e29b71c25fccfd9e`
+- Adam self_state md5 changed to: `39d75bc4d1aa6e825e30472346cd24af`
+- Eve self_state md5 unchanged: `34c0de16bc8e301636231521e9a28e10`
+- Adam memories md5 unchanged: `e17a5c303cace252f058287edb4c9425`
+- Eve memories md5 unchanged: `c66135181b7251287b95bca7cc49ef87`
+
+**Adam postrun fields**
+- `last_reflection`: `{"decision": "rest", "block_reason": "no-llm", "canonical_id": "east_adam"}`
+- `last_block_reason`: `no-llm`
+- `last_wake`: `1782411559.873891`
+- `whisper_cooldown`: `0`
+- `whisper_cooldown_set_at_utc`: `1782403870.4553096`
+- `model_calls_used_this_hour`: `0`
+- `current_goal`: `verify whether any animal movement pattern exists`
+
+**Unread state**
+- Adam unread count: `0`
+- Eve unread count: `2`
+- Eve unread IDs:
+  - `whisper_east_eve_7`
+  - `whisper_east_eve_8`
+
+**Runtime safety**
+- Tick container `deploy-shim-sim-tick-1`: exited
+- World container `deploy-shim-world-sim-1`: healthy
+- `genesis-daemon.service`: inactive
+- No real tick process remained
+- `pgrep` matches were audit commands only
+
+**Result**
+- Adam no-LLM rest persistence passed.
+- Only Adam self_state changed.
+- Ledger, world, Eve files, Adam memories, Eve memories, unread state, daemon state, and tick state remained protected.
