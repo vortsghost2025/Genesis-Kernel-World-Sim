@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.world.dual_sim import DualHemisphereSim
+from backend.daemon.action_executor import execute_action, detect_action_type
 from backend.memory.persistent_memory import PersistentMemory
 
 # Setup logging
@@ -401,9 +402,11 @@ class AgentDaemon:
           1. Universal awareness (runtime self-model + memory/time/state/choice/consequence/silence)
           2. Hemisphere-scoped awareness (east_/west_ only — preserves layered discovery)
           3. Persistent runtime state (goal, topic, fatigue)
-          4. Recent memories
-          5. Unread whispers
-          6. Decision contract (strict JSON)
+          4. World state snapshot (hemisphere-scoped, read-only, observe())
+          4.5 Evidence discipline (observed vs hypothesized)
+          5. Recent memories
+          6. Unread whispers
+          7. Decision contract (strict JSON with evidence_used)
         """
         mem = agent_obj.persistent_memory
         unread_whispers = mem.get_unread_whispers()
@@ -439,14 +442,164 @@ class AgentDaemon:
         parts.append(f"topic:       {state.get('current_topic', '?')}")
         parts.append(f"fatigue:     {state.get('fatigue', {})}")
         parts.append("")
+        parts.append("=== WORLD STATE (current snapshot) ===")
+        try:
+            if hemisphere == "east":
+                w = self.sim.east.world
+                source = "east_world_state.json"
+            elif hemisphere == "west":
+                west_path = self.data_dir / "west_world_state.json"
+                if west_path.exists():
+                    w = self.sim.west.world
+                    source = "west_world_state.json"
+                else:
+                    parts.append("world_state_unavailable: west_world_state.json not found")
+                    w = None
+            else:
+                parts.append("world_state_unavailable: unknown hemisphere")
+                w = None
+
+            if w is not None:
+                obs = w.observe()
+                parts.append(f"source: {source}")
+                parts.append(f"tick: {w.tick}")
+                parts.append(f"day: {w.day}")
+                parts.append(f"time: {obs.get('time_of_day', '?')}")
+                parts.append(f"weather: {obs.get('weather', '?')}")
+                parts.append(f"garden: {obs.get('garden_condition', '?')}")
+                res = obs.get("resources", {})
+                parts.append(f"water: {res.get('water', '?')}")
+                parts.append(f"food: {res.get('food', '?')}")
+                animals = obs.get("animals_present", [])
+                parts.append(f"animals_present: {', '.join(animals)}")
+                parts.append(f"harmony: {obs.get('harmony_level', '?')}")
+        except Exception as e:
+            parts.append(f"world_state_unavailable: {e}")
+        parts.append("")
+
+        # === Layer 4.5: Evidence Discipline ===
+        # Separates observed world facts from memories/hypotheses.
+        # This prevents the model from treating agent whisper hypotheses
+        # (e.g. "dove movements indicate water") as observed world facts.
+        parts.append("=== EVIDENCE DISCIPLINE ===")
+        parts.append("Observed world facts are facts from the WORLD STATE section above.")
+        parts.append("Memories and whispers are what agents said, believed, or remembered; they may be hypotheses.")
+        parts.append("Do not treat a hypothesis from memory as an observed world fact.")
+        parts.append("")
+        if w is not None:
+            # Extract values for f-string interpolation (avoids quote conflicts)
+            _water = res.get("water", "?")
+            _food = res.get("food", "?")
+            _garden = obs.get("garden_condition", "?")
+            _animals = ", ".join(animals) if isinstance(animals, list) else str(animals)
+            _weather = obs.get("weather", "?")
+            _time = obs.get("time_of_day", "?")
+            _harmony = obs.get("harmony_level", "?")
+            parts.append("Observed now:")
+            parts.append(f"- water is {_water}")
+            parts.append(f"- food is {_food}")
+            parts.append(f"- garden is {_garden}")
+            parts.append(f"- animals present: {_animals}")
+            parts.append(f"- weather is {_weather}")
+            parts.append(f"- time is {_time}")
+            parts.append(f"- harmony is {_harmony}")
+            parts.append("")
+            parts.append("Not observed in current world state:")
+            parts.append("- no dove movement pattern is recorded")
+            parts.append("- no lamb movement pattern is recorded")
+            parts.append("- no hidden water source location is recorded")
+            parts.append("")
+            parts.append("If you discuss dove/lamb movements, mark it as a hypothesis unless the world state records an actual movement pattern.")
+        else:
+            parts.append("[world state unavailable \u2014 no observed facts to discipline]")
+        parts.append("If no new world evidence exists, prefer `goal` or `rest` over repeating the same whisper.")
+        parts.append("")
         parts.append("=== RECENT MEMORIES ===")
         parts.append(json.dumps([str(getattr(m, 'content', m)) for m in recent_memories], ensure_ascii=False))
         parts.append("")
         parts.append("=== UNREAD WHISPERS ===")
         parts.append(json.dumps([w.get('content', w) if isinstance(w, dict) else str(w) for w in unread_whispers], ensure_ascii=False))
         parts.append("")
+        # === Layer 7.5: Available Social Targets ===
+        parts.append("=== AVAILABLE SOCIAL TARGETS ===")
+        hemisphere = "east" if sim_name.startswith("east_") else ("west" if sim_name.startswith("west_") else "unknown")
+        if hemisphere == "east":
+            parts.append("east_adam  (East Adam)")
+            parts.append("east_eve  (East Eve)")
+        elif hemisphere == "west":
+            parts.append("west_adam  (West Adam)")
+            parts.append("west_eve  (West Eve)")
+        else:
+            parts.append("[no targets available]")
+        parts.append("")
+        parts.append("Target rules:")
+        parts.append('- For `decision="whisper"`, `target` is required.')
+        parts.append("- Use exactly one target from AVAILABLE SOCIAL TARGETS.")
+        parts.append('- Do not use "?", "", "unknown", "someone", or an omitted target.')
+        parts.append("- If you do not have a valid target, choose `goal` or `rest` instead.")
+        parts.append("")
         parts.append("=== DECISION CONTRACT ===")
-        parts.append('Respond ONLY in JSON: {"decision": "whisper|goal|rest|help", "target": "agent_name", "content": "message", "new_goal": "goal"}')
+        parts.append('Respond ONLY in JSON: {"decision": "whisper|goal|rest|observe|gather|help", "target": "agent_name", "content": "message", "new_goal": "goal", "evidence_used": ["observed world fact or memory/hypothesis used"]}')
+        parts.append("")
+        parts.append("When world state is available, include at least one concrete observed world fact in `evidence_used`, or use an empty array only if no world fact influenced the decision.")
+        parts.append("Do not invent evidence. If a belief comes from memory or a whisper, label it as memory/hypothesis in `evidence_used`.")
+        parts.append("")
+        parts.append("Behavioral grounding rules:")
+        parts.append("- `evidence_used` is not decorative. At least one item in `evidence_used` must influence `content` or `new_goal`.")
+        parts.append("- If your content mentions a claim that is not observed in WORLD STATE, label it as a hypothesis.")
+        parts.append("- Do not convert an unobserved hypothesis into a goal unless the goal is to verify it.")
+        parts.append("- When setting a goal about something not in WORLD STATE or memories, use conditional language: \"verify whether X exists\" not \"investigate the X\". Definite articles imply existence; use \"whether\" to maintain uncertainty.")
+        parts.append("- Do not repeat an unread whisper unless you add a new observed fact, a correction, or a concrete verification step.")
+        parts.append("- If no grounded next step is available, choose `rest` or set a verification goal instead of echoing.")
+        parts.append("")
+        parts.append("Existence-claim rules:")
+        parts.append("- Observed facts may be stated directly (e.g. \"water is 0.0\", \"dove and lamb are present\").")
+        parts.append("- Unobserved entities, locations, causes, or movement patterns must be stated as possibilities or hypotheses.")
+        parts.append("- If WORLD STATE does not record a hidden water source location, do not say \"the hidden water source\" or \"the water location.\"")
+        parts.append("- Say \"a possible water source\" or \"whether a hidden water source exists\" instead.")
+        parts.append("- Water need is observed when water is 0.0; the exact location/source is not observed unless WORLD STATE records it.")
+        parts.append("- Movement patterns are not observed unless WORLD STATE records them; say \"whether movement exists\" not \"the movement.\"")
+        parts.append("")
+        parts.append("Movement-claim rules:")
+        parts.append("- `animals_present` means the animals are present, not that they are moving.")
+        parts.append("- Do not say \"I see dove and lamb movements\" unless WORLD STATE records movement.")
+        parts.append("- Do not say animals are leading, guiding, calling, tracking, or showing a pattern unless WORLD STATE records that behavior.")
+        parts.append("- If movement is not recorded, say: \"dove and lamb are present, but no movement pattern is recorded.\"")
+        parts.append("- A valid goal is: \"verify whether any animal movement pattern exists.\"")
+        parts.append("")
+        parts.append("Observe rules:")
+        parts.append("- `observe` is read-only. It does not gather, move, drink, eat, or change the world.")
+        parts.append("- Use `observe` when you need fresh world facts before deciding.")
+        parts.append("- `observe` does not require a target or content.")
+        parts.append("")
+        parts.append("Rest rules:")
+        parts.append("- `rest` is safe. It does not gather, move, drink, eat, or change the world.")
+        parts.append("- Use `rest` when no grounded action is available.")
+        parts.append("- `rest` does not require a target or content.")
+        parts.append("")
+        parts.append("Gather rules:")
+        parts.append("- `gather` is copy-world only. It does not mutate canonical world state yet.")
+        parts.append("- `gather` runs through copy-world execution only.")
+        parts.append("- `gather` means collecting available food/materials from the current world context.")
+        parts.append("- `gather` does not create a hidden source.")
+        parts.append("- `gather` does not imply movement unless movement is recorded.")
+        parts.append("- `gather` requires grounded content or intent (e.g. \"gather food\", \"collect materials\").")
+        parts.append("- Empty gather content blocks.")
+        parts.append("- Gather from unobserved sources/locations blocks.")
+        parts.append("")
+        parts.append("Example of grounded response:")
+        parts.append('  {"decision": "goal", "content": "Water is 0.0, so water is urgent. Dove and lamb are present, but no movement pattern is recorded. We should verify whether any animal movement pattern exists before treating it as evidence.", "new_goal": "verify whether any animal movement pattern exists", "evidence_used": ["water is 0.0", "dove and lamb are present", "no dove movement pattern is recorded"]}')
+        parts.append("")
+        parts.append("Example of echoing (avoid this):")
+        parts.append('  {"decision": "whisper", "content": "Let us track the dove and lamb movements to locate water.", "new_goal": "find a pattern in dove and lamb movements", "evidence_used": ["water is 0.0", "garden is pristine"]}')
+        parts.append("")
+        parts.append("Existence-claim example:")
+        parts.append('  Bad: "The dove and lamb movements will lead us to the hidden water source."')
+        parts.append('  Better: "Water is 0.0, so we need a source. Dove and lamb are present, but no movement pattern or hidden source location is recorded. We should verify whether any animal movement pattern exists before treating it as evidence."')
+        parts.append("")
+        parts.append("Movement-claim example:")
+        parts.append('  Bad: "I see dove and lamb movements. Let us follow them to water."')
+        parts.append('  Better: "Water is 0.0. Dove and lamb are present, but no movement pattern is recorded. We should verify whether any animal movement pattern exists before treating it as evidence."')
         return "\n".join(parts)
 
     def _maybe_emit_awareness_proof(self, canonical_id: str, display: str, prompt: str) -> None:
@@ -605,19 +758,105 @@ class AgentDaemon:
                 elif target_sim:
                     target_obj = sim_agents.get(target_sim)
                     if target_obj:
-                        agent.whisper(target_obj, msg)
-                        state["whisper_cooldown"] = 60
-                        state["whisper_cooldown_set_at_utc"] = time.time()
-                        logger.info("WHISPER: %s -> %s: %s", display, target_sim, msg)
+                        # Phase 6M: gate whisper delivery behind `not self.dry_run`.
+                        # Without this, even a dry_run=true daemon could still mutate
+                        # the recipient's memory file when the model returned whisper.
+                        if self.dry_run:
+                            logger.info(
+                                "[DRY-RUN] Would deliver whisper from %s -> %s: %s",
+                                display, target_sim, msg,
+                            )
+                        else:
+                            agent.whisper(target_obj, msg)
+                            state["whisper_cooldown"] = 60
+                            state["whisper_cooldown_set_at_utc"] = time.time()
+                            logger.info("WHISPER: %s -> %s: %s", display, target_sim, msg)
                     else:
                         logger.warning("target_not_in_sim_agents: sim='%s' raw='%s' - %s", target_sim, target, display)
             elif decision == "goal":
                 state["current_goal"] = res.get("new_goal", state["current_goal"])
                 logger.info("%s updated goal: %s", display, state["current_goal"])
+            elif decision == "observe":
+                # observe is read-only; execute via action executor on copy
+                observe_result = execute_action(
+                    agent_id=canonical,
+                    action_type="observe",
+                    action_text=res.get("content", "observe world"),
+                    world_path=self.sim.data_dir / f"{agent.region}_world_state.json",
+                    copy_mode=True,
+                )
+                logger.info("[action_executor] agent=%s action=observe ok=%s world_changed=%s",
+                            canonical, observe_result.get("ok"), observe_result.get("world_changed"))
             elif decision == "help":
                 logger.warning("HELP REQUEST from %s: %s", display, res.get("content", "unknown"))
-            else:
-                logger.info("%s decided to rest.", display)
+            elif decision == "rest":
+                # rest is safe no-op; execute via action executor on copy
+                rest_result = execute_action(
+                    agent_id=canonical,
+                    action_type="rest",
+                    action_text=res.get("content", "rest"),
+                    world_path=self.sim.data_dir / f"{agent.region}_world_state.json",
+                    copy_mode=True,
+                )
+                logger.info("[action_executor] agent=%s action=rest ok=%s world_changed=%s",
+                            canonical, rest_result.get("ok"), rest_result.get("world_changed"))
+            elif decision == "gather":
+                # gather is copy-world only; execute via action executor on copy
+                gather_result = execute_action(
+                    agent_id=canonical,
+                    action_type="gather",
+                    action_text=res.get("content", "gather"),
+                    world_path=self.sim.data_dir / f"{agent.region}_world_state.json",
+                    copy_mode=True,
+                )
+                logger.info("[action_executor] agent=%s action=gather ok=%s world_changed=%s",
+                            canonical, gather_result.get("ok"), gather_result.get("world_changed"))
+
+            # === Action validity guard ===
+            # Prevent consuming unread whispers when the model returns
+            # an invalid or non-executable action.
+            action_valid = True
+            action_invalid_reason = None
+
+            if decision == "whisper":
+                target_raw = res.get("target", "")
+                content_raw = res.get("content", "")
+                if not target_raw:
+                    action_valid = False
+                    action_invalid_reason = "invalid_whisper_target: empty or missing target"
+                elif not content_raw:
+                    action_valid = False
+                    action_invalid_reason = "invalid_whisper_content: empty content"
+                else:
+                    target_sim, _, blocker = self.resolve_target(target_raw, agent.region)
+                    if blocker:
+                        action_valid = False
+                        action_invalid_reason = f"invalid_whisper_target: {blocker}"
+            elif decision == "goal":
+                new_goal = res.get("new_goal", "")
+                if not new_goal:
+                    action_valid = False
+                    action_invalid_reason = "invalid_goal: new_goal is empty"
+            elif decision == "observe":
+                # observe is always valid (read-only)
+                action_valid = True
+            elif decision == "gather":
+                # gather requires grounded content (not empty)
+                content_raw = res.get("content", "")
+                if not content_raw:
+                    action_valid = False
+                    action_invalid_reason = "invalid_gather: empty content"
+                else:
+                    content_lower = content_raw.lower()
+                    if "hidden water source" in content_lower or "water location" in content_lower:
+                        action_valid = False
+                        action_invalid_reason = "invalid_gather: unobserved source"
+
+            if not action_valid:
+                logger.warning(
+                    "[action_validation_failed] %s: %s (decision=%s, should_consume prevented)",
+                    display, action_invalid_reason, decision,
+                )
 
             should_consume = (
                 unread_before > 0
@@ -625,6 +864,7 @@ class AgentDaemon:
                 and not res.get("block_reason")
                 and not res.get("error")
                 and bool(res.get("decision"))
+                and action_valid
             )
             if should_consume:
                 consumed = agent.receive_whispers()
@@ -634,15 +874,14 @@ class AgentDaemon:
                     display, unread_before, len(consumed), unread_after,
                 )
             # Serialize for last_reflection; include block_reason so future audits can see why.
-        state["last_reflection"] = json.dumps(res, ensure_ascii=False)
-        state["last_block_reason"] = block_reason
-        state["model_calls_used_this_hour"] = self.ledger.current_count(canonical)
-        state["last_wake"] = time.time()
-        try:
-            self.save_self_state(sim_name, state)
-        except Exception as e:
-            logger.error("Failed to save state for %s: %s", display, e)
-
+            state["last_reflection"] = json.dumps(res, ensure_ascii=False)
+            state["last_block_reason"] = block_reason
+            state["model_calls_used_this_hour"] = self.ledger.current_count(canonical)
+            state["last_wake"] = time.time()
+            try:
+                self.save_self_state(sim_name, state)
+            except Exception as e:
+                logger.error("Failed to save state for %s: %s", display, e)
 
 def main():
     parser = argparse.ArgumentParser(description="Genesis Agent Daemon")
