@@ -2666,3 +2666,103 @@ One live call only after injected no-persist proof.
 
 Phase 6M Verdict: LIVE_RUN_CYCLE_DRY_RUN_PASSED
 
+---
+
+## Phase 6N — SingleLiveControlledPersistenceCycle — CLOSED
+
+**Phase:** Phase 6N — SingleLiveControlledPersistenceCycle — CLOSED
+
+**Verdicts:**
+- `SINGLE_LIVE_PERSISTENCE_CYCLE_PASSED`
+- `GOAL_PERSISTED_SINGLE_AGENT`
+- `CANONICAL_WORLD_UNCHANGED`
+- `LEDGER_APPEND_SINGLE_ENTRY_PASSED`
+- `MEMORY_UNCHANGED`
+- `EVE_UNREAD_NOT_CONSUMED`
+- `NO_DAEMON_NO_SERVICE`
+
+**Summary:**
+- One real live single-agent persistence cycle was run.
+- Target agent: `east_adam`.
+- `dry_run=False`.
+- No daemon loop.
+- No service start.
+- No `--all`.
+- No Eve run.
+- No canonical gather.
+- No West mutation.
+- No commit/push.
+
+**Live decision:**
+- Decision: `goal`
+- New goal: `verify whether any animal movement pattern exists`
+- Provider: `NvidiaNimProvider`
+- One live NIM call only.
+- Full cycle elapsed: `21648ms`
+
+**Persistence result:**
+- `data/proposals/model_calls.jsonl`:
+  - before: 22 lines
+  - after: 23 lines
+  - delta: +1
+- East Adam `self_state.json`:
+  - md5 changed
+  - field-level diff: only `last_wake` timestamp changed
+- East Eve `self_state.json`:
+  - unchanged
+- East Adam `memories.json`:
+  - unchanged
+- East Eve `memories.json`:
+  - unchanged
+- Canonical world:
+  - unchanged
+  - md5 stayed `f15271c8da11e8e2e29b71c25fccfd9e`
+- West files:
+  - unchanged
+
+**Branch audited: `goal`**
+
+*Allowed and observed:*
+- ledger +1
+- East Adam self_state update
+
+*Forbidden and not observed:*
+- canonical world mutation
+- East Adam memory write
+- East Eve memory write
+- East Eve self_state write
+- Eve unread consume
+- West mutation
+- daemon process/service remaining
+
+**Unread proof:**
+- Adam unread remained 0
+- Eve unread remained 1
+- Eve’s pre-existing unread whisper was not consumed
+- `consumed_ids=set()`
+
+**Process hygiene:**
+- one live model call only
+- no daemon process remains
+- no `genesis-daemon.service`
+- no commit/push
+
+**Carry-forward baseline:**
+- canonical world md5: `f15271c8da11e8e2e29b71c25fccfd9e`
+- ledger expected next baseline: `23 lines`
+
+**Recommended next phase:** `Phase 6O — Controlled Whisper Persistence Cycle`
+
+*Purpose:* Exercise the other real persistence branch: valid whisper delivery to Eve, while still not running Eve and not consuming Eve’s existing unread whisper.
+
+**Key carry-forward:**
+```
+Phase 6O baseline:
+world md5 = f15271c8...
+ledger = 23
+Eve unread = 1
+Adam unread = 0
+```
+
+Phase 6N Verdict: SINGLE_LIVE_PERSISTENCE_CYCLE_PASSED
+
