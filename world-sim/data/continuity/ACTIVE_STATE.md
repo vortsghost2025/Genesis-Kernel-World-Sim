@@ -3003,3 +3003,93 @@ No Eve/Adam/daemon/provider cycle was run during recovery.
 
 Runtime remains frozen until a separate post-closure review authorizes the next no-LLM or provider step.
 
+
+---
+
+## Phase 6S-D — No-LLM Runtime Re-entry Closure Entry
+
+Status: `PHASE_6S_D_ACTIVE_STATE_CLOSURE_STAGED_NO_PROVIDER`
+
+### Summary
+
+Phase 6S-C authorized a single Eve `--no-llm` verification cycle on the VPS2 runtime substrate (`srv1756620`, container `deploy-shim-world-sim-1`). This was the first runtime action since the Phase 6R split-brain recovery freeze.
+
+### Pre-run state (Phase 6S-B verified)
+
+- `data/east_world_state.json` MD5: `8b8c61d10a0540f7249beaa553a3a31f`
+- `data/agents/east_eve/self_state.json` MD5: `1a85c54ceb84fa74ca27e2a039b9fdb0`
+- `data/memories/east_eve_memories.json` MD5: `ef421a0e58ba9d5044bb3544e274b6dd`
+- `data/proposals/model_calls.jsonl`: missing (no ledger file)
+- Unread whispers: `['whisper_east_eve_7', 'whisper_east_eve_8']`
+- Container: `deploy-shim-world-sim-1` (Up 4 days, healthy)
+- Tick container: `deploy-shim-sim-tick-1` (Exited 10 hours)
+
+### Authorized action
+
+```bash
+docker exec -w /app deploy-shim-world-sim-1 sh -lc 'export PYTHONPATH=/app:/app/backend; python3 -m backend.daemon.agent_daemon --once --no-llm --agent east_eve'
+```
+
+### Run log
+
+```
+[INFO] daemon: --no-llm set: every cycle will force rest with block_reason=no-llm
+[INFO] daemon: Awareness loaded: universal=3094 chars (md5=f556b1f4), east=887 chars (md5=a625d8a2), west=870 chars (md5=835781d9)
+[INFO] daemon: Daemon wake cycle for East Eve [canonical=east_eve] max_model_calls_per_hour=4
+[INFO] daemon: [East Eve] BLOCKED: --no-llm set; forcing rest (no model call, no ledger write)
+[INFO] daemon: East Eve forcing rest via guard: no-llm (used=0/4)
+[INFO] daemon: [action_executor] agent=east_eve action=rest ok=True world_changed=False
+```
+
+### Post-run state
+
+- `data/east_world_state.json` MD5: `8b8c61d10a0540f7249beaa553a3a31f` (unchanged)
+- `data/agents/east_eve/self_state.json` MD5: `55d9999e783c53f21a7c00faf8b257f4` (changed, allowed)
+- `data/memories/east_eve_memories.json` MD5: `ef421a0e58ba9d5044bb3544e274b6dd` (unchanged)
+- `data/proposals/model_calls.jsonl`: missing (unchanged)
+- Unread whispers: `['whisper_east_eve_7', 'whisper_east_eve_8']` (preserved)
+- `run_rc`: `0`
+- `pre_rc`: `0`
+- `post_rc`: `0`
+
+### Eve self_state changes (allowed)
+
+Key fields after run:
+
+| Field | Value |
+|---|---|
+| `last_block_reason` | `'no-llm'` |
+| `last_reflection` | `'{"decision": "rest", "block_reason": "no-llm", "canonical_id": "east_eve"}'` |
+| `last_wake` | `1782444135.2023585` |
+| `current_goal` | `'Secure water to address the critical survival need.'` |
+| `model_calls_used_this_hour` | `0` |
+| `whisper_cooldown` | `0` |
+| `tick` | `1919` |
+
+### Mutation guard results
+
+| Asset | Changed? | Verdict |
+|---|---|---|
+| `data/east_world_state.json` | No | PASS |
+| `data/memories/east_eve_memories.json` | No | PASS |
+| `data/proposals/model_calls.jsonl` | No (missing) | PASS |
+| Unread whispers 7/8 | No | PASS |
+| `data/agents/east_eve/self_state.json` | Yes (allowed) | PASS |
+| `--no-llm` guard | Blocked model call | PASS |
+| No provider/daemon/tick loop | No processes | PASS |
+
+### Current runtime authority
+
+- Runtime re-entry for `--no-llm` cycles: **verified**
+- Provider/model call re-entry: **not authorized**
+- Eve provider cycles: **forbidden**
+- Adam cycles: **forbidden**
+- Daemon/scheduler/tick: **forbidden**
+
+### Recovery state preserved
+
+- Memory MD5 baseline: `ef421a0e58ba9d5044bb3544e274b6dd`
+- Allocator patch: live in container, confirmed producing `whisper_east_eve_9`
+- Phase 6M closure entry: tracked in this file
+- Commit `68bf2f3`: pushed to `origin/master`
+
