@@ -2901,3 +2901,105 @@ Phase 6N Verdict: SINGLE_LIVE_PERSISTENCE_CYCLE_PASSED
 - Adam no-LLM rest persistence passed.
 - Only Adam self_state changed.
 - Ledger, world, Eve files, Adam memories, Eve memories, unread state, daemon state, and tick state remained protected.
+
+---
+
+## Phase 6R-M � Split-Brain Recovery Closure Entry
+
+Status: `PHASE_6R_M_ACTIVE_STATE_CLOSURE_ENTRY_STAGED_NO_RUNTIME`
+
+### Summary
+
+Phase 6R discovered and froze a split-brain substrate/provenance violation affecting Eve whisper continuity.
+
+The originally expected Eve unread whispers:
+
+- `whisper_east_eve_7`
+- `whisper_east_eve_8`
+
+were documented in continuity text but were missing from the live/visible `east_eve_memories.json` substrate.
+
+### Accepted freeze stack
+
+- `PHASE_6R_B_PASS_REVOKED`
+- `PHASE_6R_C_CANONICAL_SUBSTRATE_VIOLATION_CONFIRMED`
+- `PHASE_6R_D_FORENSICS_INCONCLUSIVE_RUNTIME_FROZEN_ACCEPTED`
+- `PHASE_6R_E2_CIFS_MEMORY_CONFIRMS_WHISPERS_MISSING`
+- `PHASE_6R_F_FOUND_TEXT_ONLY_RECOVERY_CANDIDATE_REPORTED`
+- `PHASE_6R_G_PROVENANCE_GAP_CONFIRMED_TEXT_ONLY`
+- `PHASE_6R_H_RECOVERY_PATCH_PROPOSAL_NEEDS_REVISION_NO_WRITE`
+- `PHASE_6R_I_ALLOCATOR_PROPOSAL_ACCEPTED_NO_WRITE`
+- `PHASE_6R_J_ALLOCATOR_PATCH_RAW_ACCEPTED_NO_RUNTIME`
+- `PHASE_6R_K_WHISPER_RECOVERY_PATCH_APPLIED_VERIFIED_NO_RUNTIME_REPORTED`
+- `PHASE_6R_L_RECOVERY_SEMANTICS_VERIFIED_NO_RUNTIME_ACCEPTED`
+
+### Allocator patch
+
+`backend/memory/persistent_memory.py` was patched so `add_whisper()` no longer allocates whisper IDs using `len(self.whispers)`.
+
+The allocator now computes the next whisper suffix using max existing numeric suffix + 1.
+
+Reason:
+Recovered IDs 7 and 8 create a gap after existing IDs 0-3. A length-based allocator would generate ID 6 next and then collide with recovered ID 7. The max-suffix allocator correctly generates `whisper_east_eve_9`.
+
+Verification:
+
+- Syntax check: OK
+- Temp allocator test: generated `whisper_east_eve_9`
+- No daemon/runtime/provider run
+
+### Eve memory recovery
+
+Runtime file:
+
+`data/memories/east_eve_memories.json`
+
+Pre-recovery MD5:
+
+`603db9d1e7e12e0ca3314af99796fa88`
+
+Post-recovery MD5:
+
+`ef421a0e58ba9d5044bb3544e274b6dd`
+
+Recovered entries:
+
+- `whisper_east_eve_7`
+- `whisper_east_eve_8`
+
+Recovery metadata:
+
+- `from`: `Adam`
+- `read`: `false`
+- `tick`: `0`
+- `timestamp`: `0.0`
+- `importance`: `0.7`
+
+`tick=0` and `timestamp=0.0` are forensic sentinels because original tick/timestamp metadata could not be proven from persisted JSON.
+
+Preserved fields:
+
+- `agent_name`: `east_eve`
+- `next_id`: `8268`
+- `memories_count`: `104`
+- existing whispers 0-3 unchanged semantically
+- recovered whispers 7/8 unread
+
+Semantic verification:
+
+- `get_unread_whispers()` returns:
+  - `whisper_east_eve_7`
+  - `whisper_east_eve_8`
+- allocator temp test after recovery still generates:
+  - `whisper_east_eve_9`
+
+### Important provenance note
+
+`east_eve_memories.json` is runtime data and is not tracked by Git in this repo. Therefore the recovery must be preserved through this tracked continuity entry and the recorded MD5 baseline.
+
+No Eve/Adam/daemon/provider cycle was run during recovery.
+
+### Current gate
+
+Runtime remains frozen until a separate post-closure review authorizes the next no-LLM or provider step.
+

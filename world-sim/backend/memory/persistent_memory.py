@@ -238,8 +238,21 @@ class PersistentMemory:
 
     def add_whisper(self, from_agent: str, content: str, tick: int, importance: float = 0.7) -> dict[str, Any]:
         """Add a whisper received from another agent."""
+        prefix = f"whisper_{self.agent_name.lower()}_"
+        next_whisper_index = 0
+        for w in self.whispers:
+            wid = w.get("id", "")
+            if wid.startswith(prefix):
+                try:
+                    next_whisper_index = max(
+                        next_whisper_index,
+                        int(wid[len(prefix):]) + 1
+                    )
+                except ValueError:
+                    pass
+
         whisper = {
-            "id": f"whisper_{self.agent_name.lower()}_{len(self.whispers)}",
+            "id": f"{prefix}{next_whisper_index}",
             "from": from_agent,
             "content": content,
             "tick": tick,
