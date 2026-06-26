@@ -3093,3 +3093,94 @@ Key fields after run:
 - Phase 6M closure entry: tracked in this file
 - Commit `68bf2f3`: pushed to `origin/master`
 
+
+---
+
+## Phase 6T-C — Eve Single Provider Re-entry Closure Entry
+
+Status: `PHASE_6T_C_ACTIVE_STATE_PROVIDER_REENTRY_CLOSURE_STAGED_NO_RUNTIME`
+
+### Summary
+
+Phase 6T-B authorized exactly one Eve-only provider cycle on the verified VPS2 runtime substrate. This was the first clean provider re-entry after the Phase 6R recovery and Phase 6S no-LLM runtime verification.
+
+### Accepted verdict
+
+`PHASE_6T_B_EVE_SINGLE_PROVIDER_CYCLE_PASSED_ACCEPTED`
+
+### Authority boundary
+
+- `PHASE_6T_PROVIDER_REENTRY_EVE_SINGLE_CYCLE_VERIFIED`
+- `PHASE_PROVIDER_GENERAL_RUNTIME_STILL_LOCKED`
+
+This verifies one Eve provider cycle only. It does not authorize daemon loop, tick, scheduler, Adam, or repeated provider cycles.
+
+### Authorized action
+
+```bash
+docker exec -w /app deploy-shim-world-sim-1 sh -lc 'export PYTHONPATH=/app:/app/backend; python3 -m backend.daemon.agent_daemon --once --agent east_eve --max-model-calls-per-hour 1'
+```
+
+### Provider result
+
+- `run_rc`: `0`
+- Provider call: succeeded exactly once
+- Ledger delta: `+1`
+- Ledger record: `canonical_id=east_eve`, `count_after=1`, `max_per_hour=1`, `reason=ok`
+- `max_per_hour=1` respected
+
+### Mutation guard results
+
+| Asset | Pre MD5 | Post MD5 | Result |
+|---|---|---|---|
+| `data/east_world_state.json` | `8b8c61d10a0540f7249beaa553a3a31f` | `8b8c61d10a0540f7249beaa553a3a31f` | unchanged |
+| `data/agents/east_eve/self_state.json` | `55d9999e783c53f21a7c00faf8b257f4` | `9da86704f734a5b31011c5f834b6d3c5` | changed as expected |
+| `data/memories/east_eve_memories.json` | `ef421a0e58ba9d5044bb3544e274b6dd` | `16f94246e78edd9d3acd9aa685eb79c7` | changed as expected |
+| `data/agents/east_adam/self_state.json` | `0048f327301f82e5053f41836999f821` | `0048f327301f82e5053f41836999f821` | unchanged |
+| `data/memories/east_adam_memories.json` | `9bd0edf50bc8057d184ea385366fe156` | `9bd0edf50bc8057d184ea385366fe156` | unchanged |
+| `data/proposals/model_calls.jsonl` | `MISSING` | `a3b0fff8dcea8a8a125b13f9f0eb4438` | created with one line |
+
+### Eve memory result
+
+Before provider cycle:
+
+- unread: `['whisper_east_eve_7', 'whisper_east_eve_8']`
+
+After provider cycle:
+
+- unread: `[]`
+- `whisper_east_eve_7`: `read=True`
+- `whisper_east_eve_8`: `read=True`
+
+This is expected: Eve consumed both recovered unread whispers during the single provider cycle.
+
+### Eve self_state result
+
+Key observed post-cycle fields:
+
+- `last_reflection`: provider response choosing `goal`
+- `last_block_reason`: `None`
+- `current_goal`: `verify whether any animal movement pattern or hidden water source exists`
+- `model_calls_used_this_hour`: `1`
+- `whisper_cooldown`: `0`
+
+### Process safety
+
+- No daemon loop left running.
+- No tick loop left running.
+- `deploy-shim-sim-tick-1` remained exited.
+- No Docker start/stop occurred.
+
+### Current gate
+
+Provider re-entry is verified for **one Eve provider cycle only**.
+
+Still not authorized:
+
+- General provider runtime
+- Repeated Eve provider cycles
+- Adam provider cycles
+- Daemon loop
+- Tick/scheduler
+- Docker start/stop
+
