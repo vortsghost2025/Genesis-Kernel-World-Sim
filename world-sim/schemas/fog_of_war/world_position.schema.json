@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genesis.local/schemas/fog_of_war/world_position.schema.json",
+  "title": "Genesis Phase 7 Agent World Position",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "agent_id",
+    "active",
+    "continent_id",
+    "region_id",
+    "tile_id",
+    "coordinates",
+    "facing",
+    "movement_mode",
+    "travel_capabilities",
+    "last_moved_tick"
+  ],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "active": {"type": "boolean"},
+    "continent_id": {"type": ["string", "null"]},
+    "region_id": {"type": ["string", "null"]},
+    "tile_id": {"type": ["string", "null"]},
+    "coordinates": {"type": ["object", "null"]},
+    "facing": {"type": ["string", "null"]},
+    "movement_mode": {"type": "string"},
+    "travel_capabilities": {"type": "array", "items": {"type": "string"}},
+    "last_moved_tick": {"type": ["integer", "null"], "minimum": 0}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genesis.local/schemas/fog_of_war/known_map.schema.json",
+  "title": "Genesis Phase 7 Agent Known Map",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "agent_id",
+    "known_tiles",
+    "known_landmarks",
+    "named_places",
+    "routes",
+    "hypotheses",
+    "myths",
+    "contact_evidence",
+    "last_observation_tick"
+  ],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "known_tiles": {"type": "object"},
+    "known_landmarks": {"type": "object"},
+    "named_places": {"type": "object"},
+    "routes": {"type": "array"},
+    "hypotheses": {"type": "array"},
+    "myths": {"type": "array"},
+    "contact_evidence": {"type": "array"},
+    "last_observation_tick": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

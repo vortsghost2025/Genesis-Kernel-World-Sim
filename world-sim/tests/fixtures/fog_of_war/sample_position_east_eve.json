@@ -1,0 +1,13 @@
+{
+  "schema_version": "7B.1",
+  "agent_id": "east_eve",
+  "active": true,
+  "continent_id": "cont_b",
+  "region_id": "cont_b_dawn_isle",
+  "tile_id": "cont_b_origin_000",
+  "coordinates": {"x": 50, "y": 50},
+  "facing": "north",
+  "movement_mode": "walk",
+  "travel_capabilities": ["walk_local"],
+  "last_moved_tick": 0
+}

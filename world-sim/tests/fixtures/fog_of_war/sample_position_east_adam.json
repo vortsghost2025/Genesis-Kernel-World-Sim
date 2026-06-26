@@ -1,0 +1,13 @@
+{
+  "schema_version": "7B.1",
+  "agent_id": "east_adam",
+  "active": true,
+  "continent_id": "cont_a",
+  "region_id": "cont_a_origin_valley",
+  "tile_id": "cont_a_origin_000",
+  "coordinates": {"x": 0, "y": 0},
+  "facing": "north",
+  "movement_mode": "walk",
+  "travel_capabilities": ["walk_local"],
+  "last_moved_tick": 0
+}

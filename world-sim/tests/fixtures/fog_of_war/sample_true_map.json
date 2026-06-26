@@ -1,0 +1,101 @@
+{
+  "schema_version": "7B.1",
+  "world_id": "genesis_world_fixture",
+  "seed": "phase7_fixture_seed",
+  "continents": [
+    {"continent_id": "cont_a", "name": "Continent A"},
+    {"continent_id": "cont_b", "name": "Continent B"}
+  ],
+  "regions": [
+    {"region_id": "cont_a_origin_valley", "continent_id": "cont_a", "name": "Origin Valley"},
+    {"region_id": "cont_b_dawn_isle", "continent_id": "cont_b", "name": "Dawn Isle"}
+  ],
+  "tiles": [
+    {
+      "tile_id": "cont_a_origin_000",
+      "continent_id": "cont_a",
+      "region_id": "cont_a_origin_valley",
+      "coordinates": {"x": 0, "y": 0},
+      "terrain": "grassland",
+      "biome": "temperate_valley",
+      "elevation": 0.2,
+      "water": {"type": "river", "drinkable": true},
+      "resources": ["fruit", "reeds"],
+      "hazards": [],
+      "landmark_ids": ["lm_cont_a_river_001"],
+      "blocks_travel": false
+    },
+    {
+      "tile_id": "cont_a_origin_001",
+      "continent_id": "cont_a",
+      "region_id": "cont_a_origin_valley",
+      "coordinates": {"x": 1, "y": 0},
+      "terrain": "forest",
+      "biome": "temperate_forest",
+      "elevation": 0.3,
+      "water": null,
+      "resources": ["wood"],
+      "hazards": [],
+      "landmark_ids": [],
+      "blocks_travel": false
+    },
+    {
+      "tile_id": "cont_a_far_999",
+      "continent_id": "cont_a",
+      "region_id": "cont_a_origin_valley",
+      "coordinates": {"x": 10, "y": 10},
+      "terrain": "mountain",
+      "biome": "highland",
+      "elevation": 0.9,
+      "water": null,
+      "resources": ["stone"],
+      "hazards": ["steep_slope"],
+      "landmark_ids": ["lm_cont_a_peak_001"],
+      "blocks_travel": false
+    },
+    {
+      "tile_id": "cont_b_origin_000",
+      "continent_id": "cont_b",
+      "region_id": "cont_b_dawn_isle",
+      "coordinates": {"x": 50, "y": 50},
+      "terrain": "coast",
+      "biome": "warm_coast",
+      "elevation": 0.1,
+      "water": {"type": "sea", "drinkable": false},
+      "resources": ["shells", "driftwood"],
+      "hazards": [],
+      "landmark_ids": ["lm_cont_b_cove_001"],
+      "blocks_travel": false
+    }
+  ],
+  "landmarks": [
+    {
+      "landmark_id": "lm_cont_a_river_001",
+      "continent_id": "cont_a",
+      "tile_id": "cont_a_origin_000",
+      "kind": "river",
+      "hidden_name": "North Fork",
+      "description": "A narrow drinkable river."
+    },
+    {
+      "landmark_id": "lm_cont_a_peak_001",
+      "continent_id": "cont_a",
+      "tile_id": "cont_a_far_999",
+      "kind": "mountain",
+      "hidden_name": "Far Peak",
+      "description": "A distant high ridge."
+    },
+    {
+      "landmark_id": "lm_cont_b_cove_001",
+      "continent_id": "cont_b",
+      "tile_id": "cont_b_origin_000",
+      "kind": "cove",
+      "hidden_name": "Dawn Cove",
+      "description": "A quiet curve of coast."
+    }
+  ],
+  "resources": [],
+  "hazards": [],
+  "mysteries": [],
+  "travel_edges": []
+}

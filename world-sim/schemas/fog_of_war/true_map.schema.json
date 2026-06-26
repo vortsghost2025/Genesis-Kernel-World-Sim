@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genesis.local/schemas/fog_of_war/true_map.schema.json",
+  "title": "Genesis Phase 7 True Map",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "world_id",
+    "seed",
+    "continents",
+    "regions",
+    "tiles",
+    "landmarks",
+    "resources",
+    "hazards",
+    "mysteries",
+    "travel_edges"
+  ],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "world_id": {"type": "string"},
+    "seed": {"type": "string"},
+    "continents": {"type": "array", "items": {"type": "object"}},
+    "regions": {"type": "array", "items": {"type": "object"}},
+    "tiles": {"type": "array", "items": {"type": "object"}},
+    "landmarks": {"type": "array", "items": {"type": "object"}},
+    "resources": {"type": "array", "items": {"type": "object"}},
+    "hazards": {"type": "array", "items": {"type": "object"}},
+    "mysteries": {"type": "array", "items": {"type": "object"}},
+    "travel_edges": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

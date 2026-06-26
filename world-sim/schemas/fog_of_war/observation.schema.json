@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genesis.local/schemas/fog_of_war/observation.schema.json",
+  "title": "Genesis Phase 7 Local Observation Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "agent_id",
+    "position",
+    "visible_tile_ids",
+    "visible_tiles",
+    "visible_landmarks",
+    "available_actions",
+    "hypotheses"
+  ],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "position": {"type": "object"},
+    "visible_tile_ids": {"type": "array", "items": {"type": "string"}},
+    "visible_tiles": {"type": "array", "items": {"type": "object"}},
+    "visible_landmarks": {"type": "array", "items": {"type": "object"}},
+    "available_actions": {"type": "array", "items": {"type": "string"}},
+    "hypotheses": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}
