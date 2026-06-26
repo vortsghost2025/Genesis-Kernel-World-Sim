@@ -3243,3 +3243,93 @@ Still not authorized:
 - tick/scheduler
 - Docker start/stop
 
+
+---
+
+## Phase 6V-C — Adam Single Provider Re-entry Closure Entry
+
+Status: `PHASE_6V_C_ACTIVE_STATE_ADAM_PROVIDER_REENTRY_CLOSURE_STAGED_NO_RUNTIME`
+
+### Accepted verdict
+
+`PHASE_6V_B_ADAM_SINGLE_PROVIDER_CYCLE_PASSED_ACCEPTED`
+
+### Authority state
+
+- `PHASE_6V_PROVIDER_REENTRY_ADAM_SINGLE_CYCLE_VERIFIED`
+- `PHASE_PROVIDER_GENERAL_RUNTIME_STILL_LOCKED`
+
+This verifies one Adam provider cycle only. It does not authorize daemon loop, tick, scheduler, repeated provider cycles, or general provider runtime.
+
+### Authorized action
+
+```bash
+docker exec -w /app deploy-shim-world-sim-1 sh -lc 'export PYTHONPATH=/app:/app/backend; python3 -m backend.daemon.agent_daemon --once --agent adam --max-model-calls-per-hour 1'
+```
+
+### Provider result
+
+- `run_rc`: `0`
+- Ledger line count: `1 -> 2`
+- New ledger record: `canonical_id=east_adam`
+- `count_after`: `1`
+- `max_per_hour`: `1`
+- `reason`: `ok`
+- `max_per_hour=1` respected
+
+### Mutation guard results
+
+| Asset | Pre MD5 | Post MD5 | Result |
+|---|---|---|---|
+| `data/east_world_state.json` | `8b8c61d10a0540f7249beaa553a3a31f` | `8b8c61d10a0540f7249beaa553a3a31f` | unchanged |
+| `data/agents/east_eve/self_state.json` | `9da86704f734a5b31011c5f834b6d3c5` | `9da86704f734a5b31011c5f834b6d3c5` | unchanged |
+| `data/memories/east_eve_memories.json` | `16f94246e78edd9d3acd9aa685eb79c7` | `16f94246e78edd9d3acd9aa685eb79c7` | unchanged |
+| `data/agents/east_adam/self_state.json` | `0048f327301f82e5053f41836999f821` | `b1fa70b17563ed584fc411a97f7e37f8` | changed as expected |
+| `data/memories/east_adam_memories.json` | `9bd0edf50bc8057d184ea385366fe156` | `9bd0edf50bc8057d184ea385366fe156` | unchanged |
+| `data/proposals/model_calls.jsonl` | `a3b0fff8dcea8a8a125b13f9f0eb4438` | `67b774875fbcef6ea14fb4d2f5f5f95e` | changed: one Adam line appended |
+
+### Semantic result
+
+- Adam unread: `[]`
+- Eve unread: `[]`
+- Adam `last_reflection`: provider response choosing `goal`
+- Adam `last_block_reason`: `None`
+- Adam `current_goal`: `verify whether any animal movement pattern exists`
+- Adam `model_calls_used_this_hour`: `1`
+- Adam `whisper_cooldown`: `0`
+- Eve self_state unchanged
+- Eve memories unchanged
+
+### New frozen candidate baselines
+
+| Asset | MD5 / State |
+|---|---|
+| `data/east_world_state.json` | `8b8c61d10a0540f7249beaa553a3a31f` |
+| `data/agents/east_eve/self_state.json` | `9da86704f734a5b31011c5f834b6d3c5` |
+| `data/memories/east_eve_memories.json` | `16f94246e78edd9d3acd9aa685eb79c7` |
+| `data/agents/east_adam/self_state.json` | `b1fa70b17563ed584fc411a97f7e37f8` |
+| `data/memories/east_adam_memories.json` | `9bd0edf50bc8057d184ea385366fe156` |
+| `data/proposals/model_calls.jsonl` | `67b774875fbcef6ea14fb4d2f5f5f95e` |
+| model ledger lines | `2` |
+| Eve unread | `[]` |
+| Adam unread | `[]` |
+
+### Process safety
+
+- No daemon loop left running.
+- No tick loop left running.
+- `deploy-shim-sim-tick-1` remained exited.
+- No Docker start/stop occurred.
+
+### Current gate
+
+Provider re-entry is verified for one Eve provider cycle and one Adam provider cycle, both single-cycle only.
+
+Still not authorized:
+
+- General provider runtime
+- Repeated provider cycles
+- Daemon loop
+- Tick/scheduler
+- Docker start/stop
+
