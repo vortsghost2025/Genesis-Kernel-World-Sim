@@ -3429,3 +3429,80 @@ No scheduler.
 No autonomous provider loop.
 No unrestricted multi-agent execution.
 ```
+
+---
+
+## Phase 6X — Read-Only Gates Complete
+
+**Phase:** Phase 6X — Read-Only Gates Complete — CLOSED
+
+**Timestamp:** 2026-06-26
+
+**Accepted statuses:**
+
+```text
+PHASE_6X_A_POST_6W_READINESS_PREFLIGHT_READ_ONLY_PASSED_ACCEPTED
+PHASE_6X_B_CONTROLLED_DAEMON_LOOP_PLAN_READ_ONLY_REVIEW_PASSED_WITH_CORRECTIONS
+PHASE_6X_C_EVE_DAEMON_NO_LLM_DRY_RUN_ONCE_PASSED_ACCEPTED
+PHASE_6X_D_ADAM_DAEMON_NO_LLM_DRY_RUN_ONCE_PASSED_ACCEPTED
+PHASE_6X_DAEMON_ENTRYPOINT_NO_PROVIDER_NO_STATE_MUTATION_VERIFIED_FOR_BOTH_AGENTS
+PHASE_6X_E_SESSION_STATE_HYGIENE_READ_ONLY_PASSED_ACCEPTED
+PHASE_6X_F_SESSION_STATE_ARCHIVE_CLEANUP_LOCAL_ONLY_PASSED_ACCEPTED
+```
+
+### Unchanged frozen baselines (identical to 6W)
+
+```text
+world:
+8b8c61d10a0540f7249beaa553a3a31f
+
+Eve self_state:
+beb19cf59c2c5089f80557d2fb3c98e0
+
+Eve memories:
+16f94246e78edd9d3acd9aa685eb79c7
+
+Adam self_state:
+ee8491f6b9f40571f3241b45a736493e
+
+Adam memories:
+9bd0edf50bc8057d184ea385366fe156
+
+model ledger:
+83ae2b7327a9410dca2ec5da9178665f
+
+model ledger lines:
+4
+```
+
+### Safety result
+
+```text
+Eve daemon probe:   --once --no-llm --dry-run --agent east_eve  passed, run_rc=0
+Adam daemon probe:  --once --no-llm --dry-run --agent east_adam passed, run_rc=0
+Provider/model calls blocked.
+Dry-run prevented all state writes.
+Ledger stayed 4 -> 4.
+Tick container stayed exited.
+Daemon exited cleanly after each probe.
+Only /tmp/genesis-daemon.log grew.
+```
+
+### Session state hygiene
+
+- Found one stale Phase 4G -> 4H handoff (`session/20260623_0045/session_state.md`).
+- Compared against ACTIVE_STATE.md + Git HEAD `ef647e7` — entirely superseded.
+- Added archival warning header to the session file (local only; `session/` is gitignored).
+- No git commit or push involved.
+
+### Authority after 6X
+
+```text
+No provider-enabled daemon test authorized yet.
+No general daemon loop authorized.
+No tick loop authorized.
+No scheduler authorized.
+No autonomous runtime authorized.
+```
+
+Phase 6X Verdict: READ_ONLY_GATES_COMPLETE
