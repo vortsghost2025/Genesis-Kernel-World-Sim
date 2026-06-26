@@ -3184,3 +3184,62 @@ Still not authorized:
 - Tick/scheduler
 - Docker start/stop
 
+
+---
+
+## Phase 6U-B — Post-Provider Baseline Closure Entry
+
+Status: `PHASE_6U_B_ACTIVE_STATE_POST_PROVIDER_BASELINE_CLOSURE_STAGED_NO_RUNTIME`
+
+### Accepted preflight
+
+`PHASE_6U_A_POST_PROVIDER_BASELINE_PREFLIGHT_READ_ONLY_ACCEPTED`
+
+### Authority state
+
+- `PHASE_6U_POST_PROVIDER_BASELINES_FROZEN`
+- `PHASE_PROVIDER_GENERAL_RUNTIME_STILL_LOCKED`
+
+### Frozen post-provider baselines
+
+| Asset | MD5 / State |
+|---|---|
+| `data/east_world_state.json` | `8b8c61d10a0540f7249beaa553a3a31f` |
+| `data/agents/east_eve/self_state.json` | `9da86704f734a5b31011c5f834b6d3c5` |
+| `data/memories/east_eve_memories.json` | `16f94246e78edd9d3acd9aa685eb79c7` |
+| `data/agents/east_adam/self_state.json` | `0048f327301f82e5053f41836999f821` |
+| `data/memories/east_adam_memories.json` | `9bd0edf50bc8057d184ea385366fe156` |
+| `data/proposals/model_calls.jsonl` | `a3b0fff8dcea8a8a125b13f9f0eb4438` |
+| model ledger lines | `1` |
+
+### Frozen semantic state
+
+- Eve unread: `[]`
+- Adam unread: `[]`
+- Eve `model_calls_used_this_hour`: `1`
+- Eve `whisper_cooldown`: `0`
+- Adam `whisper_cooldown`: `60`
+- Tick container: exited
+- Daemon/tick loop: none
+
+### Eve post-provider state summary
+
+- `last_reflection`: provider response choosing `goal`
+- `last_block_reason`: `None`
+- `current_goal`: `verify whether any animal movement pattern or hidden water source exists`
+- `model_calls_used_this_hour`: `1`
+- `whisper_cooldown`: `0`
+
+### Current gate
+
+The first Eve provider re-entry cycle remains verified and closed, but general provider runtime remains locked.
+
+Still not authorized:
+
+- additional provider/model calls
+- repeated Eve cycles
+- Adam cycles
+- daemon loop
+- tick/scheduler
+- Docker start/stop
+
