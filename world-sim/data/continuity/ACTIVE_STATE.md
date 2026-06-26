@@ -3333,3 +3333,99 @@ Still not authorized:
 - Tick/scheduler
 - Docker start/stop
 
+## Phase 6W — Sequential Dual-Provider Re-entry Verified
+
+Status:
+
+`PHASE_6W_F_SEQUENTIAL_DUAL_PROVIDER_EXECUTION_PASSED_ACCEPTED`
+`PHASE_6W_G_POST_EXECUTION_BASELINE_FREEZE_READ_ONLY_PASSED_ACCEPTED`
+`PHASE_6W_POST_EXECUTION_BASELINES_FROZEN`
+
+Runtime host:
+
+- Hostname: `srv1756620`
+- Runtime container: `deploy-shim-world-sim-1` running, healthy
+- Tick container: `deploy-shim-sim-tick-1` exited
+- Mounts:
+  - `/app -> /srv/genesis`
+  - `/app/data -> /srv/genesis/data`
+
+Execution summary:
+
+- Sequential dual-provider execution completed.
+- Order: Eve once, then Adam once.
+- No simultaneous execution.
+- No daemon loop.
+- No tick.
+- No scheduler.
+- Each agent used `--max-model-calls-per-hour 1`.
+
+Ledger transition:
+
+- Pre-ledger lines: `2`
+- After Eve: `3`
+- After Adam: `4`
+- Line 3 canonical_id: `east_eve`
+- Line 4 canonical_id: `east_adam`
+- Both new records had:
+  - `count_after = 1`
+  - `max_per_hour = 1`
+  - `reason = ok`
+
+Frozen post-6W baselines:
+
+```text
+world:
+8b8c61d10a0540f7249beaa553a3a31f
+
+Eve self_state:
+beb19cf59c2c5089f80557d2fb3c98e0
+
+Eve memories:
+16f94246e78edd9d3acd9aa685eb79c7
+
+Adam self_state:
+ee8491f6b9f40571f3241b45a736493e
+
+Adam memories:
+9bd0edf50bc8057d184ea385366fe156
+
+model ledger:
+83ae2b7327a9410dca2ec5da9178665f
+
+model ledger lines:
+4
+```
+
+Semantic state:
+
+```text
+Eve unread = []
+Adam unread = []
+```
+
+Safety proof:
+
+- World MD5 remained unchanged throughout 6W-F.
+- Adam files remained unchanged during Eve cycle.
+- Eve files remained unchanged during Adam cycle after post-Eve baseline.
+- No daemon/tick/scheduler/provider process remained running.
+- Tick container remained exited.
+- No Docker start/stop/restart occurred during execution window.
+- No ACTIVE_STATE.md mutation occurred during provider execution.
+- No Git commit/push occurred during provider execution.
+
+Authority after Phase 6W:
+
+`PHASE_6W_DUAL_PROVIDER_SEQUENTIAL_REENTRY_VERIFIED`
+
+Still not authorized:
+
+```text
+No general runtime.
+No daemon loop.
+No tick loop.
+No scheduler.
+No autonomous provider loop.
+No unrestricted multi-agent execution.
+```
