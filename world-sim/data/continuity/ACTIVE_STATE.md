@@ -3506,3 +3506,65 @@ No autonomous runtime authorized.
 ```
 
 Phase 6X Verdict: READ_ONLY_GATES_COMPLETE
+
+## Phase 7C — Fog-of-War Safe Scaffold Complete
+
+**Phase:** Phase 7C — Fog-of-War Safe Scaffold — CLOSED
+**Timestamp:** 2026-06-26
+
+Accepted statuses:
+PHASE_7A_WORLD_MAP_AND_FOG_OF_WAR_DESIGN_READ_ONLY_PASSED_ACCEPTED
+PHASE_7B_WORLD_MAP_AND_FOG_OF_WAR_SCHEMA_PLAN_READ_ONLY_ACCEPTED
+PHASE_7C_REVIEW_BUNDLE_CONTENT_REVIEWED_ACCEPTED
+PHASE_7C_FOG_OF_WAR_SAFE_SCAFFOLD_CONTENT_ACCEPTED
+PHASE_7C_FOG_OF_WAR_SAFE_SCAFFOLD_COMMIT_CREATED_NO_RUNTIME_NO_PUSH_ACCEPTED
+PHASE_7C_FOG_OF_WAR_SAFE_SCAFFOLD_PUSHED_NO_RUNTIME_NO_PROVIDER_ACCEPTED
+PHASE_7C_CLOSURE_COMPLETE
+
+Commit:
+e651b65 Phase 7C scaffold: fog-of-war schemas and tests
+
+Pushed:
+c4cd31b..e651b65 master -> master
+
+Phase 7C files added:
+- backend/world/fog_of_war_schema.py
+- backend/world/fog_of_war.py
+- docs/phase7_fog_of_war.md
+- schemas/fog_of_war/known_map.schema.json
+- schemas/fog_of_war/observation.schema.json
+- schemas/fog_of_war/true_map.schema.json
+- schemas/fog_of_war/world_position.schema.json
+- scripts/phase7_fog_of_war_migration_audit.py
+- tests/fixtures/fog_of_war/sample_known_map_east_adam.json
+- tests/fixtures/fog_of_war/sample_position_east_adam.json
+- tests/fixtures/fog_of_war/sample_position_east_eve.json
+- tests/fixtures/fog_of_war/sample_true_map.json
+- tests/test_fog_of_war_contact.py
+- tests/test_fog_of_war_observation.py
+- tests/test_fog_of_war_schema.py
+
+Phase 7C result:
+- Hidden true-world schema scaffold added.
+- Per-agent known-map schema scaffold added.
+- World-position schema scaffold added.
+- Local observation result schema scaffold added.
+- Pure fog-of-war helper functions added.
+- Dry-run migration audit script added.
+- Fixtures and tests added.
+- Tests passed: 11 passed.
+- No canonical runtime data was changed.
+- No provider/model call occurred.
+- No Adam/Eve runtime occurred.
+- No daemon/tick/scheduler/Docker action occurred.
+
+Authority after 7C:
+Provider still locked.
+Adam/Eve runtime still locked.
+Daemon still locked.
+Tick still locked.
+Scheduler still locked.
+Canonical runtime data still untouched.
+
+Next safe gate:
+PHASE_7D_ACTIVE_STATE_7C_CLOSURE_DOCUMENTATION_REVIEW
