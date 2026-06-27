@@ -3731,3 +3731,44 @@ Daemon default behavior remains unchanged.
 
 Next safe gate:
 PHASE_7M_ACTIVE_STATE_7K_7L_CLOSURE_DOCUMENTATION_REVIEW
+## Phase 7N -- Daemon Canonical Observe Opt-In Plan -- CLOSED
+
+**Verdict:** PHASE_7N_DAEMON_CANONICAL_OBSERVE_OPT_IN_PLAN_READ_ONLY
+
+**Status:** Planning phase only -- no implementation, no runtime, no provider calls.
+
+**Scope:**
+- Plan for wiring canonical fog-of-war observe into agent_daemon.py run_cycle
+- Preserve use_canonical_fog=False default
+- No daemon/tick/scheduler mutations
+
+**Proposed Changes (Read-Only Plan):**
+
+1. **AgentDaemon.__init__ additions:**
+   - use_canonical_observe: bool = False (new, opt-in)
+   - canonical_data_root: Path | None = None (new, required when use_canonical_observe=True)
+
+2. **run_cycle() modification (observe decision path):**
+   - Lines 779-789 currently call execute_action with only copy_mode=True
+   - Would add conditional: if self.use_canonical_observe and self.canonical_data_root is set, pass use_canonical_fog=True and canonical_data_root to execute_action
+   - Fallback to copy-mode observe when canonical unavailable
+
+3. **CLI argument addition:**
+   - --use-canonical-observe flag
+   - --canonical-data-root path argument
+
+**Constraints (Must Preserve):**
+- use_canonical_observe=False default (no behavior change)
+- canonical_data_root required when use_canonical_observe=True
+- No provider/model calls
+- No daemon/tick/scheduler mutation
+- No Adam/Eve runtime mutation
+- Copy-mode observe remains fallback
+
+**Files Created:**
+- world-sim/data/continuity/PHASE_7N_DAEMON_CANONICAL_OBSERVE_PLAN.md (detailed plan)
+
+**Next Gate:**
+PHASE_7O_DAEMON_CANONICAL_OBSERVE_IMPLEMENTATION
+
+Phase 7N Verdict: DAEMON_CANONICAL_OBSERVE_OPT_IN_PLAN_READ_ONLY
