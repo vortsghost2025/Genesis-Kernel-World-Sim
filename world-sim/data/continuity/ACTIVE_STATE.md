@@ -3772,3 +3772,48 @@ PHASE_7M_ACTIVE_STATE_7K_7L_CLOSURE_DOCUMENTATION_REVIEW
 PHASE_7O_DAEMON_CANONICAL_OBSERVE_IMPLEMENTATION
 
 Phase 7N Verdict: DAEMON_CANONICAL_OBSERVE_OPT_IN_PLAN_READ_ONLY
+
+---
+
+## Phase 7O -- Daemon Canonical Observe Opt-In Code Closure -- CLOSED
+
+Accepted status:
+PHASE_7O_DAEMON_CANONICAL_OBSERVE_CODE_PUSHED_ACCEPTED
+PHASE_7O_CODE_CLOSURE_COMPLETE
+
+Code commit pushed:
+f5ed90a Phase 7O: Add daemon canonical observe opt-in with tests
+
+Phase 7O files changed:
+- world-sim/backend/daemon/agent_daemon.py
+- world-sim/tests/test_phase7o_daemon_canonical_observe.py
+
+Phase 7O result:
+- AgentDaemon now supports use_canonical_observe=False by default.
+- AgentDaemon now supports canonical_data_root=None by default.
+- CLI now exposes --use-canonical-observe and --canonical-data-root.
+- Observe decision path passes use_canonical_fog=True and canonical_data_root only when opt-in is enabled and canonical_data_root is present.
+- If daemon opt-in is enabled without canonical_data_root, observe falls back to copy-mode observe.
+- Default daemon behavior remains unchanged.
+- action_executor canonical observe behavior remains unchanged from Phase 7K.
+
+Phase 7O tests:
+- 17 tests passed.
+- 8 Phase 7O daemon canonical observe tests passed.
+- 9 Phase 7K action_executor canonical observe tests passed.
+- Default observe path does not pass canonical parameters.
+- Canonical opt-in with root passes use_canonical_fog=True and canonical_data_root.
+- Canonical opt-in without root falls back without canonical parameters.
+
+Authority after 7O:
+Provider still locked.
+Adam/Eve runtime still locked.
+Daemon still locked.
+Tick still locked.
+Scheduler still locked.
+No VPS deployment occurred.
+No Docker/container mutation occurred.
+No runtime probe occurred in Phase 7O.
+
+Next safe gate:
+PHASE_7R_ACTIVE_STATE_7O_CODE_CLOSURE_DOCUMENTATION_COMMIT_REVIEW
