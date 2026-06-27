@@ -3652,3 +3652,82 @@ Canonical fog-of-war runtime data now exists.
 
 Next safe gate:
 PHASE_7H_ACTIVE_STATE_7G_RUNTIME_MIGRATION_DOCUMENTATION_REVIEW
+
+---
+
+## Phase 7K/7L - Canonical Observe Action Executor Path Complete
+
+**Phase:** Phase 7K/7L - Canonical Observe Action Executor Wiring and Runtime Probe - CLOSED
+**Timestamp:** 2026-06-27
+
+Accepted statuses:
+PHASE_7K_ACTION_EXECUTOR_CANONICAL_OBSERVE_PUSHED_NO_RUNTIME_NO_PROVIDER_ACCEPTED
+PHASE_7K_CLOSURE_COMPLETE
+PHASE_7L_CANONICAL_OBSERVE_ACTION_EXECUTOR_RUNTIME_PROBE_ACCEPTED_NO_MUTATION_NO_PROVIDER
+PHASE_7L_CLOSURE_COMPLETE
+
+Code commit pushed:
+7b755fb Phase 7K scaffold: wire canonical observe in action executor
+
+Phase 7K files changed:
+- world-sim/backend/daemon/action_executor.py
+- world-sim/tests/test_phase7k_action_executor_canonical_observe.py
+
+Phase 7K result:
+- action_executor.execute_action supports canonical fog-of-war observe behind explicit use_canonical_fog=True.
+- use_canonical_fog defaults to False.
+- canonical_data_root is required when use_canonical_fog=True.
+- Legacy observe behavior remains unchanged when use_canonical_fog=False.
+- No daemon default behavior was changed.
+- No known_map persistence or merge was added.
+- No provider/model call occurred.
+- No Adam/Eve runtime occurred.
+- No daemon/tick/scheduler action occurred.
+
+Phase 7K tests:
+- 24 selected tests passed.
+- 9 new Phase 7K tests passed.
+- Missing canonical_data_root fails closed.
+- Missing true_map.json fails closed.
+- Missing world_position.json fails closed.
+- Missing known_map.json fails closed.
+- Known-map bytes remain unchanged.
+- West files are not created.
+
+Phase 7L runtime probe:
+- Ran inside canonical production container using action_executor.execute_action.
+- Container: deploy-shim-world-sim-1
+- Container working directory: /app
+- Canonical data root: /app/data
+- Probe used use_canonical_fog=True and canonical_data_root=/app/data.
+- Adam observe returned ok=True.
+- Eve observe returned ok=True.
+- Adam saw only cont_a tiles.
+- Eve saw only cont_b tiles.
+- Adam did not see cont_b_origin_000.
+- Eve did not see cont_a_origin_000.
+- world_changed=False for both.
+- output_path=None for both.
+- known_map hashes unchanged before/after.
+- true_map hash unchanged before/after.
+- No temp probe files remained.
+- No agent_daemon process was running.
+
+Verified hashes:
+- east_adam known_map: 8a09ba5b9d3b0079a79071dbbd1d197a
+- east_eve known_map: 8166f4ca534744eecfd062b0bccc9558
+- true_map: 857953714c2d2f8bfd6b2c7967d838db
+
+Authority after 7L:
+Provider still locked.
+Adam/Eve daemon runtime still locked.
+Daemon still locked.
+Tick still locked.
+Scheduler still locked.
+Canonical fog-of-war runtime data exists.
+Canonical observation adapter works.
+action_executor canonical observe path works in container.
+Daemon default behavior remains unchanged.
+
+Next safe gate:
+PHASE_7M_ACTIVE_STATE_7K_7L_CLOSURE_DOCUMENTATION_REVIEW
