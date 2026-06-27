@@ -8,6 +8,8 @@ ticks, or mutate Docker/VPS state.
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
 from backend.world.fog_of_war_schema import SCHEMA_VERSION
@@ -495,3 +497,44 @@ def project_legacy_map_state(
         },
         "disclaimer": "Legacy projection generated from fog-of-war schema; not canonical runtime data.",
     }
+
+
+def build_canonical_observation(
+    agent_id: str,
+    data_root: Path | str,
+    conditions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a read-only local observation from canonical fog-of-war files.
+
+    Loads the canonical fog-of-war runtime files and builds an observation
+    using the agent's current position and known map. Does not mutate any files.
+
+    Args:
+        agent_id: The canonical agent ID (e.g., "east_adam", "east_eve").
+        data_root: Root directory containing world/ and agents/ subdirs.
+        conditions: Optional conditions dict (e.g., {"radius": 1}).
+
+    Returns:
+        Observation dict from build_local_observation().
+
+    Raises:
+        FileNotFoundError: If any required canonical file is missing.
+        json.JSONDecodeError: If any file contains invalid JSON.
+    """
+    root = Path(data_root) if not isinstance(data_root, Path) else data_root
+    true_map_path = root / "world" / "true_map.json"
+    position_path = root / "agents" / agent_id / "world_position.json"
+    known_map_path = root / "agents" / agent_id / "known_map.json"
+
+    if not true_map_path.exists():
+        raise FileNotFoundError(f"Canonical true_map not found: {true_map_path}")
+    if not position_path.exists():
+        raise FileNotFoundError(f"Canonical position not found: {position_path}")
+    if not known_map_path.exists():
+        raise FileNotFoundError(f"Canonical known_map not found: {known_map_path}")
+
+    true_map = json.loads(true_map_path.read_text(encoding="utf-8"))
+    position = json.loads(position_path.read_text(encoding="utf-8"))
+    known_map = json.loads(known_map_path.read_text(encoding="utf-8"))
+
+    return build_local_observation(true_map, position, known_map, conditions)
