@@ -193,12 +193,15 @@ def execute_action(
     require_backup: bool = False,
     audit_log_path: Path | None = None,
     backup_dir: Path | None = None,
+    use_canonical_fog: bool = False,
+    canonical_data_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """
     Execute a world action with safety guards.
     
     Phase 6B: copy_mode=True is enforced. No canonical world mutations.
     Phase 6G: Canonical write gates added for controlled gather mutations.
+    Phase 7K: use_canonical_fog=True uses canonical fog-of-war observation (read-only).
 
     Args:
         agent_id: ID of the agent performing the action
@@ -210,6 +213,8 @@ def execute_action(
         require_backup: Must be True to allow canonical writes (Phase 6G)
         audit_log_path: Path to the audit log file (required for canonical)
         backup_dir: Directory for backups
+        use_canonical_fog: If True, use canonical fog-of-war observation (read-only, requires canonical_data_root)
+        canonical_data_root: Root directory for canonical fog files (world/ and agents/ subdirs)
     
     Returns:
         Result dict with ok, action_type, world_changed, before_md5, after_md5, changes, output_path
@@ -229,6 +234,58 @@ def execute_action(
             "error": f"unsupported_action: {action_type} (supported: {SUPPORTED_ACTIONS})",
         }
     
+    # Phase 7K: Canonical fog-of-war observation (read-only, no world_path needed)
+    if action_type == "observe" and use_canonical_fog:
+        if canonical_data_root is None:
+            return {
+                "ok": False,
+                "action_type": action_type,
+                "world_changed": False,
+                "before_md5": "",
+                "after_md5": "",
+                "changes": {},
+                "output_path": None,
+                "error": "use_canonical_fog=True requires canonical_data_root",
+            }
+        try:
+            from backend.world.fog_of_war import build_canonical_observation
+            root = Path(canonical_data_root) if not isinstance(canonical_data_root, Path) else canonical_data_root
+            conditions = {"radius": 1}  # Default radius for canonical observe
+            observation = build_canonical_observation(agent_id, root, conditions)
+            return {
+                "ok": True,
+                "action_type": "observe",
+                "world_changed": False,
+                "before_md5": "",
+                "after_md5": "",
+                "changes": {},
+                "output_path": None,
+                "observation": observation,
+                "error": None,
+            }
+        except FileNotFoundError as e:
+            return {
+                "ok": False,
+                "action_type": action_type,
+                "world_changed": False,
+                "before_md5": "",
+                "after_md5": "",
+                "changes": {},
+                "output_path": None,
+                "error": f"canonical_file_missing: {e}",
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "action_type": action_type,
+                "world_changed": False,
+                "before_md5": "",
+                "after_md5": "",
+                "changes": {},
+                "output_path": None,
+                "error": f"canonical_observation_error: {e}",
+            }
+
     # Enforce copy mode in Phase 6B, allow canonical with gates (Phase 6G)
     canonical_mode = False
     if not copy_mode:
