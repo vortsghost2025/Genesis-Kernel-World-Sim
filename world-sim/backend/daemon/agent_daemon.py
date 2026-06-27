@@ -163,6 +163,8 @@ class AgentDaemon:
         max_model_calls_per_hour: int = DEFAULT_MAX_MODEL_CALLS_PER_HOUR,
         ledger: ModelCallLedger | None = None,
         awareness_root: Path | None = None,
+        use_canonical_observe: bool = False,
+        canonical_data_root: Path | str | None = None,
     ):
         self.dry_run = dry_run
         self.no_llm = no_llm
@@ -177,6 +179,9 @@ class AgentDaemon:
         # Each loaded doc is stamped with md5 to prove integrity at proof-time.
         base = awareness_root if awareness_root else self.data_dir.parent
         self.awareness = self._load_awareness(base)
+        # Phase 7O: Canonical fog-of-war observe opt-in
+        self.use_canonical_observe = use_canonical_observe
+        self.canonical_data_root = Path(canonical_data_root) if canonical_data_root else None
 
     def _load_registry(self) -> dict[str, dict[str, Any]]:
         registry_path = self.data_dir / "agents" / "registry.json"
@@ -778,13 +783,21 @@ class AgentDaemon:
                 logger.info("%s updated goal: %s", display, state["current_goal"])
             elif decision == "observe":
                 # observe is read-only; execute via action executor on copy
-                observe_result = execute_action(
-                    agent_id=canonical,
-                    action_type="observe",
-                    action_text=res.get("content", "observe world"),
-                    world_path=self.sim.data_dir / f"{agent.region}_world_state.json",
-                    copy_mode=True,
-                )
+                # Phase 7O: canonical observe opt-in
+                observe_kwargs = {
+                    "agent_id": canonical,
+                    "action_type": "observe",
+                    "action_text": res.get("content", "observe world"),
+                    "world_path": self.sim.data_dir / f"{agent.region}_world_state.json",
+                    "copy_mode": True,
+                }
+                if self.use_canonical_observe:
+                    if self.canonical_data_root is None:
+                        logger.warning("[%s] use_canonical_observe=True but canonical_data_root is None; falling back to copy-mode observe", display)
+                    else:
+                        observe_kwargs["use_canonical_fog"] = True
+                        observe_kwargs["canonical_data_root"] = self.canonical_data_root
+                observe_result = execute_action(**observe_kwargs)
                 logger.info("[action_executor] agent=%s action=observe ok=%s world_changed=%s",
                             canonical, observe_result.get("ok"), observe_result.get("world_changed"))
             elif decision == "help":
@@ -896,6 +909,10 @@ def main():
                         help=(f"Hard cap on LLM calls per agent per UTC hour "
                               f"(default: {DEFAULT_MAX_MODEL_CALLS_PER_HOUR}). "
                               f"Use 0 to block all model calls."))
+    parser.add_argument("--use-canonical-observe", action="store_true",
+                        help="Enable canonical fog-of-war observe (default: False)")
+    parser.add_argument("--canonical-data-root", type=str,
+                        help="Root directory for canonical fog files (required when --use-canonical-observe is set)")
     args = parser.parse_args()
 
     if args.interval < 0:
@@ -914,6 +931,8 @@ def main():
         dry_run=args.dry_run,
         no_llm=args.no_llm,
         max_model_calls_per_hour=args.max_model_calls_per_hour,
+        use_canonical_observe=args.use_canonical_observe,
+        canonical_data_root=args.canonical_data_root,
     )
 
     while True:
