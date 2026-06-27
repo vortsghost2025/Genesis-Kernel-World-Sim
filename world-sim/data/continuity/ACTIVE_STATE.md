@@ -3568,3 +3568,87 @@ Canonical runtime data still untouched.
 
 Next safe gate:
 PHASE_7D_ACTIVE_STATE_7C_CLOSURE_DOCUMENTATION_REVIEW
+
+---
+
+## Phase 7G — Canonical Fog-of-War Runtime Data Migration Complete
+
+**Phase:** Phase 7G — Canonical Map Migration — CLOSED
+**Timestamp:** 2026-06-27
+
+Accepted statuses:
+PHASE_7E_TRUE_MAP_STAGING_SEED_PUSHED_NO_RUNTIME_NO_PROVIDER_ACCEPTED
+PHASE_7E_CLOSURE_COMPLETE
+PHASE_7F_OBSERVATION_PROBE_PUSHED_NO_RUNTIME_NO_PROVIDER_ACCEPTED
+PHASE_7F_CLOSURE_COMPLETE
+PHASE_7G_CANONICAL_HOST_VERIFICATION_READY_NO_RUNTIME_NO_PROVIDER_NO_COMMIT_ACCEPTED
+PHASE_7G_CANONICAL_MIGRATION_ACCEPTED_NO_RUNTIME_NO_PROVIDER_NO_COMMIT
+PHASE_7G_CLOSURE_COMPLETE
+
+Code/test commits already pushed:
+84e02e7 Phase 7E seed: stage hidden true map fixture
+086d02b Phase 7F probe: verify staged seed observation isolation
+
+Runtime migration:
+No Git commit was created for the runtime data migration itself.
+Phase 7G was executed inside the canonical runtime container.
+
+Canonical runtime host:
+- SSH alias: vps2
+- Hostname: srv1756620
+- Container: deploy-shim-world-sim-1
+- Container working directory: /app
+- Canonical data root: /app/data
+
+Canonical runtime files created:
+- /app/data/world/true_map.json
+- /app/data/agents/east_adam/world_position.json
+- /app/data/agents/east_adam/known_map.json
+- /app/data/agents/east_eve/world_position.json
+- /app/data/agents/east_eve/known_map.json
+
+Canonical files intentionally not created:
+- /app/data/agents/west_adam/world_position.json
+- /app/data/agents/west_adam/known_map.json
+- /app/data/agents/west_eve/world_position.json
+- /app/data/agents/west_eve/known_map.json
+
+7G verification:
+- Fixture MD5: 857953714c2d2f8bfd6b2c7967d838db
+- Canonical true_map MD5: 857953714c2d2f8bfd6b2c7967d838db
+- validate_true_map(data/world/true_map.json): {'ok': True, 'errors': []}
+- east_adam position: cont_a / cont_a_origin_000
+- east_eve position: cont_b / cont_b_origin_000
+- east_adam known_map: empty per-agent map
+- east_eve known_map: empty per-agent map
+- west_adam_known=False
+- west_adam_position=False
+- west_eve_known=False
+- west_eve_position=False
+
+Protected runtime files:
+- /app/data/map_state.json remained present and was not intentionally edited.
+- /app/data/agents/registry.json remained present and was not intentionally edited.
+- /app/data/continuity/ACTIVE_STATE.md runtime copy was not used as the tracked documentation authority for this Git commit.
+
+Phase 7G result:
+- Canonical fog-of-war true map now exists in runtime data.
+- East Adam and East Eve now have canonical starting world positions.
+- East Adam and East Eve now have empty per-agent known maps.
+- West agents remain dormant/schema-compatible and untouched.
+- No provider/model call occurred.
+- No Adam/Eve runtime occurred.
+- No daemon/tick/scheduler action occurred.
+- No Docker compose/up/down/restart/build occurred.
+- No Git commit or push occurred during runtime migration.
+
+Authority after 7G:
+Provider still locked.
+Adam/Eve runtime still locked.
+Daemon still locked.
+Tick still locked.
+Scheduler still locked.
+Canonical fog-of-war runtime data now exists.
+
+Next safe gate:
+PHASE_7H_ACTIVE_STATE_7G_RUNTIME_MIGRATION_DOCUMENTATION_REVIEW
