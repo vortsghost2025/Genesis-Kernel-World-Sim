@@ -518,6 +518,14 @@ class AgentDaemon:
         else:
             parts.append("[world state unavailable \u2014 no observed facts to discipline]")
         parts.append("If no new world evidence exists, prefer `goal` or `rest` over repeating the same whisper.")
+        # Phase 8AE: observe-preference when current_goal asks to observe/refresh world facts
+        goal_text = (state.get("current_goal") or "").lower()
+        _observe_triggers = ("observe", "refresh", "fresh world fact", "world fact", "canonical world fact", "current world state")
+        if any(trigger in goal_text for trigger in _observe_triggers):
+            parts.append(
+                "- Your current goal explicitly asks you to observe or refresh world facts. "
+                'Prefer `decision="observe"` to gather fresh world facts before deciding.'
+            )
         parts.append("")
         parts.append("=== RECENT MEMORIES ===")
         parts.append(json.dumps([str(getattr(m, 'content', m)) for m in recent_memories], ensure_ascii=False))
