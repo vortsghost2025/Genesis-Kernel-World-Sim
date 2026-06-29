@@ -1,0 +1,103 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+
+  // Public example only. Copy this file to kilo.jsonc for local use.
+  // The real kilo.jsonc is gitignored because it may contain private provider
+  // topology, local routes, machine-specific models, and secret environment names.
+  // Never commit real API keys, bearer tokens, provider secrets, or private routes.
+
+  "model": "openai/gpt-4o-mini",
+  "small_model": "openai/gpt-4o-mini",
+  "default_agent": "code",
+
+  "provider": {
+    "openai": {
+      "name": "OpenAI Example",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.openai.com/v1",
+        "apiKey": "${OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-4o-mini": { "name": "GPT-4o mini" }
+      }
+    },
+    "nvidia": {
+      "name": "NVIDIA Example",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "${NVIDIA_API_KEY}"
+      },
+      "models": {
+        "openai/gpt-oss-20b": { "name": "GPT-OSS 20B" }
+      }
+    },
+    "openrouter": {
+      "name": "OpenRouter Example",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "${OPENROUTER_API_KEY}"
+      },
+      "models": {
+        "google/gemini-2.5-flash": { "name": "Gemini 2.5 Flash" }
+      }
+    }
+  },
+
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "todowrite": "allow",
+    "todoread": "allow",
+    "skill": "allow",
+    "task": "ask",
+    "bash": "ask",
+    "edit": "ask",
+    "external_directory": "deny"
+  },
+
+  "agent": {
+    "orchestrator": {
+      "model": "openai/gpt-4o-mini",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "task": "ask",
+        "bash": "ask",
+        "edit": "ask",
+        "todowrite": "allow",
+        "todoread": "allow",
+        "skill": "allow"
+      }
+    },
+    "code": {
+      "model": "openai/gpt-4o-mini",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "bash": "ask",
+        "edit": "ask",
+        "todowrite": "allow",
+        "todoread": "allow",
+        "skill": "allow"
+      }
+    }
+  },
+
+  // Project-specific reusable subagents can live in .kilo/agent/*.md.
+  // Project-specific commands can live in .kilo/command/*.md.
+
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "snapshot": false
+}

@@ -1,0 +1,7 @@
+# Local Kilo runtime/dependency artifacts
+node_modules/
+package-lock.json
+package.json
+
+# Local operational state; commit accepted-state-ledger.example.md instead
+state/accepted-state-ledger.md

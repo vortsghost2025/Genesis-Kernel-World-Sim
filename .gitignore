@@ -1,1 +1,8 @@
 catalog.txt
+
+# Kilo local/private orchestration state
+kilo.jsonc
+.kilo/state/accepted-state-ledger.md
+.kilo/node_modules/
+.kilo/package-lock.json
+.kilo/package.json
