@@ -47,3 +47,37 @@ If any required section cannot be produced, the subagent must set `VERDICT: BLOC
 - Generating or assuming evidence that is not verifiable.
 
 *All subagents operate under the principle of least privilege; the orchestrator validates each return against this policy before committing any change.*
+
+## PHASE KILO C: COUNCIL PROOF AND OUTPUT HYGIENE
+
+### Proof Hygiene (False-Success Prevention)
+1. **Readback proof**: Before declaring success, read back every modified file and confirm the intended change is present. Do not rely on tool return values alone.
+2. **Git status proof**: After any file mutation, run `git status --short` and verify only intended files appear. If untracked or unexpected files appear, report as `RISK` before proceeding.
+3. **Diff proof**: Run `git diff --name-status` to confirm the change surface matches expectations. Run `git diff --check` to catch whitespace errors.
+4. **Staged-set proof**: Before committing, verify the staged set matches the intended set (`git diff --cached --name-status`). Never stage unverified files.
+5. **Post-commit proof**: After commit, confirm `git status --short` is empty and `git log --oneline -1` shows the intended commit message.
+6. **Private/runtime boundary check**: Before any mutation, confirm the target path is not in the private/runtime block: `kilo.jsonc`, `.kilo/state/accepted-state-ledger.md`, `world-sim/data`, `ACTIVE_STATE.md`.
+
+### Output-Surface Hygiene (Noise Prevention)
+1. **Clean plain-text output**: Subagent responses must be clean plain text. Do not include markdown skill listings, tool catalog dumps, CLIXML, router noise, or any non-response artifact in the return.
+2. **No invisible contamination**: Before returning, verify the response text does not contain `/skill`, `<skill`, `skill name=`, tool definition blocks, or raw YAML/frontmatter from internal configuration.
+3. **EVIDENCE section rules**:
+   - Must quote actual file content or command output verbatim.
+   - Must include file paths and line numbers for any claimed change.
+   - Must not fabricate or paraphrase evidence.
+   - If evidence cannot be produced (e.g., tool output unavailable), set `EVIDENCE: UNAVAILABLE` and `VERDICT: BLOCKED`.
+
+### Return Format Hardening
+The subagent return sections are extended:
+```
+AGENT: <agent-name>
+SUMMARY
+FILES_CHANGED
+COMMANDS_RUN
+VERIFIED_EVIDENCE    (quoted file content or command output — required)
+AGENT_CLAIMS         (inferences or summaries drawn from evidence — optional)
+RISKS
+VERDICT
+```
+- `VERIFIED_EVIDENCE` is **required**. If the agent cannot produce quoted evidence, it must set `VERDICT: BLOCKED`.
+- `AGENT_CLAIMS` is **optional** and explicitly labeled as unverified inference. The orchestrator must not treat `AGENT_CLAIMS` as proof.

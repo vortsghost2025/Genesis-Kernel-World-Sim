@@ -48,7 +48,7 @@ Selection rules:
 1. Construct the subagent prompt with:
    - The parsed **intent** and **scope** from Phase 1.
    - The **authority block**: which paths the agent may touch (from routing policy `Allowed Mutations`).
-   - The **mandatory return format** (AGENT label + 6 sections: SUMMARY, FILES_CHANGED, COMMANDS_RUN, EVIDENCE, RISKS, VERDICT).
+   - The **mandatory return format** (AGENT label + 7 sections: SUMMARY, FILES_CHANGED, COMMANDS_RUN, VERIFIED_EVIDENCE, AGENT_CLAIMS, RISKS, VERDICT). `VERIFIED_EVIDENCE` is required proof; `AGENT_CLAIMS` is optional inference and the orchestrator must not treat it as proof.
    - The **ledger reference**: instruct the subagent to read `.kilo/state/accepted-state-ledger.md` if it needs filesystem context.
 2. Launch the subagent via the Kilo Task tool using the `subagent_type` matching the selected agent.
 3. Wait for return. If timeout or error, set `VERDICT: BLOCKED — subagent failure`.
@@ -65,6 +65,14 @@ Selection rules:
    - Attempt re-routing to the next cheapest safe subagent (Phase 2, skip the failed agent).
    - If no remaining agents can satisfy the task: report `VERDICT: BLOCKED — no remaining subagent`, halt.
 6. If all checks pass: proceed to Phase 5.
+
+### Phase 4.5: Proof Verification
+1. **Readback proof**: Read back every file listed in `FILES_CHANGED` and confirm the intended change is present. Do not rely solely on the subagent's claim.
+2. **Git status proof**: Run `git status --short`. Verify only the expected files appear. If unexpected files appear, set `VERDICT: BLOCKED — unexpected changes` and escalate.
+3. **Diff proof**: Run `git diff --name-status` and `git diff --check`. Confirm the change surface is confined to the authority block. Reject if any file outside the authority block was touched.
+4. **Private/runtime boundary check**: Confirm no changed file path matches the private/runtime block: `kilo.jsonc`, `.kilo/state/accepted-state-ledger.md`, `world-sim/data`, `ACTIVE_STATE.md`.
+5. **Output-surface hygiene check**: Scan the subagent return for `/skill`, `<skill`, `skill name=`, tool definition blocks, CLIXML, or raw YAML frontmatter. If found, flag as `RISK: output contamination` and request a clean resubmission before accepting.
+6. Only after all proofs pass, proceed to Phase 5 (Ledger Update).
 
 ### Phase 5: Ledger Update
 1. Append a new entry to `.kilo/state/accepted-state-ledger.md`:
