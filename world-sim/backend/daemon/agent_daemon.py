@@ -42,6 +42,94 @@ def _utc_hour_bucket(now_ts: float | None = None) -> str:
     return time.strftime("%Y-%m-%dT%H", time.gmtime(ts))
 
 
+# Helper functions for CLI parsing and daemon loop
+
+def _positive_int_arg(value: str) -> int:
+    try:
+        iv = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid integer value: {value}")
+    if iv <= 0:
+        raise argparse.ArgumentTypeError(f"Value must be positive integer, got {iv}")
+    return iv
+
+def _positive_float_arg(value: str) -> float:
+    try:
+        fv = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid float value: {value}")
+    if fv <= 0:
+        raise argparse.ArgumentTypeError(f"Value must be positive number, got {fv}")
+    return fv
+
+def _parse_bounded_agents(raw: str) -> list[str]:
+    # Enforce exact "Adam,Eve" order.
+    if raw != "Adam,Eve":
+        raise argparse.ArgumentTypeError("--agents must be exactly 'Adam,Eve' in this order.")
+    return ["Adam", "Eve"]
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Genesis Agent Daemon")
+    parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Log actions without mutating state; does not disable model/provider calls. Use --no-llm to skip LLM calls.")
+    parser.add_argument("--no-llm", action="store_true", help="Skip LLM calls, force rest")
+    # Mutually exclusive agent selection
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--agent", type=str, help="Run only for a specific agent")
+    group.add_argument("--agents", type=_parse_bounded_agents, help="Comma-separated list of agents (bounded to Adam and Eve only)")
+    parser.add_argument("--interval", type=int, default=DEFAULT_WAKE_INTERVAL,
+                        help=f"Wake interval in seconds (default: {DEFAULT_WAKE_INTERVAL})")
+    parser.add_argument("--max-model-calls-per-hour", type=int,
+                        default=DEFAULT_MAX_MODEL_CALLS_PER_HOUR,
+                        help=(f"Hard cap on LLM calls per agent per UTC hour "
+                              f"(default: {DEFAULT_MAX_MODEL_CALLS_PER_HOUR}). "
+                              f"Use 0 to block all model calls."))
+    parser.add_argument("--max-cycles", type=_positive_int_arg, help="Maximum number of full daemon cycles before exiting")
+    parser.add_argument("--max-runtime-seconds", type=_positive_float_arg,
+                        help="Maximum runtime in seconds before exiting")
+    parser.add_argument("--use-canonical-observe", action="store_true",
+                        help="Enable canonical fog-of-war observe (default: False)")
+    parser.add_argument("--canonical-data-root", type=str,
+                        help="Root directory for canonical fog files (required when --use-canonical-observe is set)")
+    args = parser.parse_args(argv)
+    # Set parsed_agents based on '--agents' if provided (type conversion already handled by argparse)
+    if getattr(args, 'agents', None) is not None:
+        args.parsed_agents = args.agents
+    else:
+        args.parsed_agents = None
+    return args
+
+def run_daemon_loop(daemon: "AgentDaemon", args: argparse.Namespace,
+                    monotonic=time.monotonic, sleep=time.sleep) -> int:
+    cycles = 0
+    start = monotonic()
+    while True:
+        # Runtime guard at top of each iteration (covers post‑sleep bound)
+        if getattr(args, 'max_runtime_seconds', None) is not None and (monotonic() - start) >= args.max_runtime_seconds:
+            break
+
+        if args.parsed_agents is not None:
+            daemon.run_cycle(target_agents=args.parsed_agents)
+        else:
+            daemon.run_cycle(target_agent=args.agent)
+        cycles += 1
+
+        if args.once:
+            break
+        if getattr(args, 'max_cycles', None) is not None and cycles >= args.max_cycles:
+            break
+
+        if args.interval > 0:
+            # If sleeping would exceed the max runtime, break before sleeping.
+            if getattr(args, 'max_runtime_seconds', None) is not None and (monotonic() - start + args.interval) >= args.max_runtime_seconds:
+                break
+            sleep(args.interval)
+        else:
+            logger.warning("--interval=0 without --once is unsafe; exiting to prevent runaway")
+            break
+    return cycles
+
 class ModelCallLedger:
     """
     In-memory + on-disk rate limiter for LLM calls.
@@ -53,7 +141,6 @@ class ModelCallLedger:
         is appended to disk and no files are written.
       - 'no-llm' short-circuits caller before any check (handled by AgentDaemon).
     """
-
     def __init__(self, ledger_path: Path, dry_run: bool = False, max_per_hour: int = DEFAULT_MAX_MODEL_CALLS_PER_HOUR):
         self.ledger_path = ledger_path
         self.dry_run = dry_run
@@ -717,9 +804,14 @@ class AgentDaemon:
                 return {"decision": "rest", "block_reason": "non-json-response", "canonical_id": canonical_id}
         return parsed
 
-    def run_cycle(self, target_agent: str | None = None):
+    def run_cycle(self, target_agent: str | None = None, target_agents: list[str] | None = None):
+        if target_agent and target_agents:
+            raise ValueError("Both target_agent and target_agents provided; only one allowed.")
         sim_agents = {**self.sim.east.agents, **self.sim.west.agents}
-        agents_to_process = [target_agent] if target_agent else list(sim_agents.keys())
+        if target_agents is not None:
+            agents_to_process = target_agents
+        else:
+            agents_to_process = [target_agent] if target_agent else list(sim_agents.keys())
 
         for name_or_id in agents_to_process:
             sim_name, entry = self.resolve_agent(name_or_id)
@@ -905,30 +997,13 @@ class AgentDaemon:
                 logger.error("Failed to save state for %s: %s", display, e)
 
 def main():
-    parser = argparse.ArgumentParser(description="Genesis Agent Daemon")
-    parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
-    parser.add_argument("--dry-run", action="store_true", help="Log actions without mutating state")
-    parser.add_argument("--no-llm", action="store_true", help="Skip LLM calls, force rest")
-    parser.add_argument("--agent", type=str, help="Run only for a specific agent")
-    parser.add_argument("--interval", type=int, default=DEFAULT_WAKE_INTERVAL,
-                        help=f"Wake interval in seconds (default: {DEFAULT_WAKE_INTERVAL})")
-    parser.add_argument("--max-model-calls-per-hour", type=int,
-                        default=DEFAULT_MAX_MODEL_CALLS_PER_HOUR,
-                        help=(f"Hard cap on LLM calls per agent per UTC hour "
-                              f"(default: {DEFAULT_MAX_MODEL_CALLS_PER_HOUR}). "
-                              f"Use 0 to block all model calls."))
-    parser.add_argument("--use-canonical-observe", action="store_true",
-                        help="Enable canonical fog-of-war observe (default: False)")
-    parser.add_argument("--canonical-data-root", type=str,
-                        help="Root directory for canonical fog files (required when --use-canonical-observe is set)")
-    args = parser.parse_args()
+    args = parse_args()
 
     if args.interval < 0:
-        parser.error("--interval must be >= 0")
+        raise SystemExit("--interval must be >= 0")
     if args.max_model_calls_per_hour < 0:
-        parser.error("--max-model-calls-per-hour must be >= 0")
+        raise SystemExit("--max-model-calls-per-hour must be >= 0")
     if args.max_model_calls_per_hour == 0:
-        # 0 means "block everything by design".
         logger.warning("--max-model-calls-per-hour=0 means NO model calls will be allowed.")
     if args.no_llm:
         logger.info("--no-llm set: every cycle will force rest with block_reason=no-llm")
@@ -943,19 +1018,7 @@ def main():
         canonical_data_root=args.canonical_data_root,
     )
 
-    while True:
-        daemon.run_cycle(target_agent=args.agent)
-        if args.once:
-            break
-        # Enforce interval by sleeping until next cycle boundary.
-        if args.interval > 0:
-            logger.debug("Sleeping %d seconds until next wake cycle", args.interval)
-            time.sleep(args.interval)
-        else:
-            # interval=0 means "no sleep, run-until-broken" which is unsafe;
-            # treat as a request to exit after first cycle when --once is not set.
-            logger.warning("--interval=0 without --once is unsafe; exiting to prevent runaway")
-            break
+    run_daemon_loop(daemon, args)
 
 if __name__ == "__main__":
     main()
