@@ -23,3 +23,8 @@ data/stream/
 data/scenes/
 session/
 test_write.txt
+
+# Private runtime / deployment notes (not part of public repo)
+AGENT_RUNTIME_PRIVATE.md
+PRIVATE_RUNTIME.md
+runtime-private.md

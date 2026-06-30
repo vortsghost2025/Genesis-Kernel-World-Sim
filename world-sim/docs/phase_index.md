@@ -10,7 +10,7 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10J | Done | Add Genesis canon and boundaries specification | `b3095d9` | Specification only; no runtime code or data changes | Defines evidence categories, claim scopes, founding-agent continuity, lens semantics, forbidden-inference rules, and minimum event schema for 10K |
 | 10K | Done | Add pure world event ledger | `d9a2b00` | No runtime impact — module is deliberately not wired into daemon | Implements `validate_event()`, `append_event()`, `read_events()` over JSONL; enforces schema, evidence categories, claim scopes, before/after refs for mutations, and hidden-water/animal-guidance boundaries; 13 tempdir-only tests |
 | 10L | Done | Add pure candidate event mapper | `9727954` | No runtime impact — returns candidate dicts only, never writes files | Translates observe/rest/gather/whisper/goal/help results into candidate events; rejects unsafe gathers and private paths; 16 tempdir-only tests pass |
-| 10M | In progress | Public README and phase index documentation | (current working tree) | None — documentation only | Creates root README.md and this phase index; no code, test, daemon, or data changes |
+| 10M | Done | Public README and phase index documentation | `b5b1b3e` | None — documentation only | Creates root README.md and this phase index; no code, test, daemon, or data changes |
 
 ## Legend
 

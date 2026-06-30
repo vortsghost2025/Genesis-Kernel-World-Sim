@@ -1,89 +1,25 @@
-# Canonical Runtime / Host Map
+# Agent Instructions
 
-This project has multiple valid environments. Do not treat “a shell somewhere” as canonical runtime access.
+This project has multiple environments. Do not treat "a shell somewhere" as canonical runtime access.
 
-### WE — Windows local host
-
-- Hostname: `WE`
-- User: `we\seand`
-- Role: Sean’s Windows workstation / local working copy
-- Canonical local repo path:
-  - `S:\Genesis Kernel World Sim\world-sim`
-- Notes:
-  - Windows Docker Desktop may be unavailable.
-  - If hostname is `WE`, this is not the VPS2 runtime host.
-  - Do not run runtime-provider gates from WE.
-  - Do not attempt to rename or “correct” WE to `srv1756620`.
+Canonical runtime identity, connection labels, runtime service identifiers, mount layout, and current baselines are documented in private runtime notes (`AGENT_RUNTIME_PRIVATE.md` or `PRIVATE_RUNTIME.md`). Those files are git-ignored and must be verified on the runtime substrate — they are not part of the public repository.
 
 ### GitHub
 
-- Repo:
-  - `vortsghost2025/Genesis-Kernel-World-Sim`
-- Default branch:
-  - `master`
-- Repo path convention:
-  - GitHub root contains `world-sim/...`
-- Current required closure commit after Phase 6V:
-  - `32dacbf Phase 6V closure: Adam provider re-entry verified`
-- Notes:
-  - GitHub verifies tracked code/continuity.
-  - Runtime JSON files may be untracked and must be verified on the runtime substrate.
-
-### VPS1 — federation-vps
-
-- SSH alias:
-  - `federation-vps`
-- Hostname:
-  - `srv1345984`
-- Role:
-  - Federation containers / federation-game host
-- Important:
-  - This is not the Genesis Kernel World Sim runtime host for 6W gates.
-  - If hostname is `srv1345984`, abort Genesis runtime verification.
-
-### VPS2 — canonical Genesis runtime host
-
-- SSH alias may be:
-  - `vps2`
-- Hostname:
-  - `srv1756620`
-- Role:
-  - Canonical Genesis Kernel World Sim runtime host
-- Required host identity:
-  - `hostname = srv1756620`
-- Required runtime containers:
-  - `deploy-shim-world-sim-1` = running
-  - `deploy-shim-sim-tick-1` = exited
-- Required bind mounts:
-  - `/app -> /srv/genesis`
-  - `/app/data -> /srv/genesis/data`
-- Canonical in-container working directory:
-  - `/app`
-- Canonical in-container data root:
-  - `/app/data`
-
-### Headless Ubuntu laptop
-
-- SSH alias:
-  - `headless`
-- Role:
-  - Separate Ubuntu laptop / lane-worker / repo host
-- Important:
-  - Not the canonical VPS2 runtime host for 6W provider gates.
-  - If hostname is not `srv1756620`, abort Genesis runtime verification.
+- Repo: `Genesis-Kernel-World-Sim` (default branch: `master`)
+- GitHub root contains `world-sim/...`
+- GitHub verifies tracked code and continuity. Runtime data files may be untracked and must be verified on the runtime substrate.
 
 ## Runtime Verification Rule
 
-Before any Genesis runtime phase, provider phase, daemon phase, tick phase, or dual-agent phase, prove canonical identity first.
+Before any runtime phase, provider phase, daemon phase, tick phase, or dual-agent phase, prove canonical identity first.
 
 Required proof:
 
 ```text
-hostname = srv1756620
-deploy-shim-world-sim-1 = running
-deploy-shim-sim-tick-1 = exited
-docker inspect proves /app -> /srv/genesis
-docker inspect proves /app/data -> /srv/genesis/data
+verified_machine = <CANONICAL_RUNTIME_NODE>
+<CANONICAL_RUNTIME_CONTAINER> = running
+docker inspect proves mount paths
 ```
 
 If the agent cannot prove this, return only:
@@ -93,44 +29,16 @@ PHASE_TOOLING_LOST_CANONICAL_RUNTIME_CONTEXT
 PHASE_TOOLING_ACCESS_GAP_RUNTIME_NOT_VERIFIED
 ```
 
-Do not ask Sean to manually compensate.
+Do not ask the operator to manually compensate.
 
-## Phase 6W Correct Baseline Map
+## Runtime Baselines
 
-Do not compare `ACTIVE_STATE.md` to the world-state MD5.
+Runtime baselines (file MD5 checksums, container state, data snapshots) are maintained in the private runtime notes. They must be verified against the actual runtime substrate — do not assume stale values from public documentation or prior sessions.
 
-Correct map:
-
-```text
-/app/data/east_world_state.json
-MD5 = 8b8c61d10a0540f7249beaa553a3a31f
-
-/app/data/agents/east_eve/self_state.json
-MD5 = 9da86704f734a5b31011c5f834b6d3c5
-
-/app/data/memories/east_eve_memories.json
-MD5 = 16f94246e78edd9d3acd9aa685eb79c7
-
-/app/data/agents/east_adam/self_state.json
-MD5 = b1fa70b17563ed584fc411a97f7e37f8
-
-/app/data/memories/east_adam_memories.json
-MD5 = 9bd0edf50bc8057d184ea385366fe156
-
-/app/data/proposals/model_calls.jsonl
-MD5 = 67b774875fbcef6ea14fb4d2f5f5f95e
-lines = 2
-
-/app/data/continuity/ACTIVE_STATE.md
-expected: exists and contains Phase 6V closure markers
-assigned MD5 baseline: none for 6W-A
-```
-
-Semantic checks:
+Semantic checks for a clean baseline:
 
 ```text
-Eve unread = []
-Adam unread = []
+Agent unread queues = []
 No daemon/tick/provider process running
 ```
 
@@ -139,19 +47,17 @@ No daemon/tick/provider process running
 Abort if any of these are true:
 
 ```text
-hostname != srv1756620
-Docker host cannot inspect deploy-shim-world-sim-1
-/app mount cannot be proven
-/app/data mount cannot be proven
+verified_machine != <CANONICAL_RUNTIME_NODE>
+Docker host cannot inspect <CANONICAL_RUNTIME_CONTAINER>
+<CANONICAL_RUNTIME_DATA_ROOT> mount cannot be proven
 baseline file-to-MD5 map is mixed up
-agent is running from WE, srv1345984, headless, or an unknown host
+agent is running from an unverified or non-canonical host
 ```
 
-Forbidden without explicit phase authorization:
+## Forbidden Without Explicit Phase Authorization
 
 ```text
-No Eve.
-No Adam.
+No agent (Eve, Adam, or any simulation agent).
 No provider.
 No dual-provider.
 No daemon.
@@ -161,3 +67,12 @@ No Docker start/stop.
 No copy/restore/manual injection.
 No commit/push.
 ```
+
+## Output Hygiene
+
+Human-facing output must not contain:
+
+- `/skill` references or skill catalog entries
+- CLIXML or PowerShell XML output wrappers
+- Router noise, hidden metadata, or unrelated tool listings
+- Private runtime details such as machine identifiers, filesystem locations, service identifiers, or credential material
