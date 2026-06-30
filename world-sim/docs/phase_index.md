@@ -14,7 +14,8 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10N | Done | Sanitize public agent runtime boundaries | `012e85d` | None — file edits only | Removes private deployment identifiers, machine labels, local filesystem references, runtime service identifiers, mount details, and state checksums from `world-sim/AGENT.md`; adds git-ignore patterns for private runtime notes; updates phase index |
 | 10O | Pushed / CI pending | Public CI, security, and contributing docs | `6d24773` | None — documentation only | Adds `.github/workflows/pure-tests.yml`, `SECURITY.md`, `CONTRIBUTING.md`, `world-sim/docs/public_runtime_boundaries.md`; CI runner never started due to account billing lock; cannot mark Done until CI green |
 | 10P | Blocked | CI verification — check pure tests pass in GitHub Actions | Not started | None — CI verification only | Workflow YAML accepted by GitHub; runner never started due to account billing lock; resubmit when billing clears |
-| 10Q | Draft | Future phases plan documentation | Not started | None — documentation only | Creates `world-sim/docs/future_phases_plan.md` with roadmap, dependency map, and phase prerequisites; no code, test, daemon, or data changes |
+| 10Q | Done | Future phases plan documentation | `c86e882` | None — documentation only | Creates `world-sim/docs/future_phases_plan.md` with roadmap, dependency map, and phase prerequisites; no code, test, daemon, or data changes |
+| 10R | In progress | Persistent agent habitat principles | Not committed | None — principles document only | Defines persistence invariants, memory provenance taxonomy, collaboration model, buildable primitives table bridging felt concepts to system primitives; no code, test, daemon, or data changes |
 
 ## Legend
 
