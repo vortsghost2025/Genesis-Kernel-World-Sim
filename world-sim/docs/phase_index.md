@@ -15,7 +15,7 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10O | Pushed / CI pending | Public CI, security, and contributing docs | `6d24773` | None — documentation only | Adds `.github/workflows/pure-tests.yml`, `SECURITY.md`, `CONTRIBUTING.md`, `world-sim/docs/public_runtime_boundaries.md`; CI runner never started due to account billing lock; cannot mark Done until CI green |
 | 10P | Blocked | CI verification — check pure tests pass in GitHub Actions | Not started | None — CI verification only | Workflow YAML accepted by GitHub; runner never started due to account billing lock; resubmit when billing clears |
 | 10Q | Done | Future phases plan documentation | `c86e882` | None — documentation only | Creates `world-sim/docs/future_phases_plan.md` with roadmap, dependency map, and phase prerequisites; no code, test, daemon, or data changes |
-| 10R | In progress | Persistent agent habitat principles | Not committed | None — principles document only | Defines persistence invariants, memory provenance taxonomy, collaboration model, buildable primitives table bridging felt concepts to system primitives; no code, test, daemon, or data changes |
+| 10R | Done | Persistent agent habitat principles | `06086f5` | None — principles document only | Defines persistence invariants, memory provenance taxonomy, collaboration model, buildable primitives table bridging felt concepts to system primitives; no code, test, daemon, or data changes |
 
 ## Legend
 
