@@ -11,6 +11,8 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10K | Done | Add pure world event ledger | `d9a2b00` | No runtime impact — module is deliberately not wired into daemon | Implements `validate_event()`, `append_event()`, `read_events()` over JSONL; enforces schema, evidence categories, claim scopes, before/after refs for mutations, and hidden-water/animal-guidance boundaries; 13 tempdir-only tests |
 | 10L | Done | Add pure candidate event mapper | `9727954` | No runtime impact — returns candidate dicts only, never writes files | Translates observe/rest/gather/whisper/goal/help results into candidate events; rejects unsafe gathers and private paths; 16 tempdir-only tests pass |
 | 10M | Done | Public README and phase index documentation | `b5b1b3e` | None — documentation only | Creates root README.md and this phase index; no code, test, daemon, or data changes |
+| 10N | Done | Sanitize public agent runtime boundaries | `012e85d` | None — file edits only | Removes private deployment identifiers, machine labels, local filesystem references, runtime service identifiers, mount details, and state checksums from `world-sim/AGENT.md`; adds git-ignore patterns for private runtime notes; updates phase index |
+| 10O | In progress | Public CI, security, and contributing docs | (current working tree) | None — documentation only | Adds `.github/workflows/pure-tests.yml`, `SECURITY.md`, `CONTRIBUTING.md`, `world-sim/docs/public_runtime_boundaries.md`; no code, test, daemon, or data changes |
 
 ## Legend
 

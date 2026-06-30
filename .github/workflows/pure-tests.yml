@@ -1,0 +1,30 @@
+name: Pure tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  pure-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: world-sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run pure 10K and 10L module tests
+        run: |
+          python -m pytest \
+            tests/test_phase10k_world_event_ledger_append_only.py \
+            tests/test_phase10k_world_event_ledger_boundaries.py \
+            tests/test_phase10k_world_event_ledger_schema.py \
+            tests/test_phase10l_candidate_mapper_observe_rest.py \
+            tests/test_phase10l_candidate_mapper_gather.py \
+            tests/test_phase10l_candidate_mapper_social.py \
+            tests/test_phase10l_candidate_mapper_boundaries.py \
+            -v
