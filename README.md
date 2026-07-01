@@ -41,15 +41,26 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-**Phase 10L complete.** The stack up through the pure candidate event mapper has been implemented, tested (16 passing tests, all tempdir-only, no runtime dependencies), and pushed.
+The public pure-module stack is implemented through Phase 10V.
 
-**Phase 10M in progress.** Public documentation only — this README and the phase index. No code changes. No daemon changes.
+Completed locally:
+- 10K: pure world event ledger
+- 10L: pure candidate event mapper
+- 10T: pure event verifier
+- 10U: pure event aggregator
+- 10V: pure event exporter
 
-A later planned phase may connect the ledger and mapper into daemon and action-execution paths. That work is not part of this documentation phase.
+Documentation phases:
+- 10M: public README and phase index
+- 10N: public runtime-boundary sanitization
+- 10O: public CI/security/contribution docs
+- 10Q–10S: future plan, persistent habitat principles, and runtime wiring architecture
+
+CI status: GitHub Actions may show pending or failed while account-level restrictions prevent CI runners from starting. Pure-module tests are designed to run locally without runtime infrastructure.
 
 ## Safe Local Verification
 
-You can run the pure-module tests for the completed ledger and mapper phases without any daemon, provider, tick, or runtime infrastructure:
+You can run the completed pure-module tests without any daemon, provider, tick, or runtime infrastructure:
 
 ```bash
 cd world-sim
