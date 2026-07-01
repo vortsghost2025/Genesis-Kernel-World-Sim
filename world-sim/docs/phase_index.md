@@ -16,6 +16,7 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10P | Blocked | CI verification — check pure tests pass in GitHub Actions | Not started | None — CI verification only | Workflow YAML accepted by GitHub; runner never started due to account billing lock; resubmit when billing clears |
 | 10Q | Done | Future phases plan documentation | `c86e882` | None — documentation only | Creates `world-sim/docs/future_phases_plan.md` with roadmap, dependency map, and phase prerequisites; no code, test, daemon, or data changes |
 | 10R | Done | Persistent agent habitat principles | `06086f5` | None — principles document only | Defines persistence invariants, memory provenance taxonomy, collaboration model, buildable primitives table bridging felt concepts to system primitives; no code, test, daemon, or data changes |
+| 10S | Draft | Runtime wiring architecture | Not committed | None — documentation only | Creates `world-sim/docs/runtime_wiring_architecture.md`; describes future gated wiring between pure modules and runtime ticks while preserving ledger, candidate, provenance, phase-gate, and public/private boundary rules; no code, test, daemon, scheduler, provider, Docker, runtime, or live data changes |
 
 ## Legend
 
