@@ -41,30 +41,48 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public pure-module stack is implemented through Phase 10V.
+The public stack now reaches Phase 10Y, the first executable heartbeat proof.
 
-Completed locally:
+Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
 - 10T: pure event verifier
 - 10U: pure event aggregator
 - 10V: pure event exporter
+- 10Y: single-tick event-ingress harness – the first executable heartbeat proof (observe → verifier → temporary ledger append → read‑back → exporter)
 
-Documentation phases:
+Documentation/spec phases:
 - 10M: public README and phase index
-- 10N: public runtime-boundary sanitization
+- 10N: public runtime‑boundary sanitization
 - 10O: public CI/security/contribution docs
+- 10W: egress sanitizer specification
+- 10X: runtime wiring pilot spec / first‑heartbeat contract
 - 10Q–10S: future plan, persistent habitat principles, and runtime wiring architecture
 
 CI status: GitHub Actions may show pending or failed while account-level restrictions prevent CI runners from starting. Pure-module tests are designed to run locally without runtime infrastructure.
 
 ## Safe Local Verification
 
-You can run the completed pure-module tests without any daemon, provider, tick, or runtime infrastructure:
+You can run the mixed local verification suite—including the completed pure‑module tests and the Phase 10Y single‑tick ingress harness—without any daemon, provider, tick, or runtime infrastructure:
 
 ```bash
 cd world-sim
-python -m pytest tests/test_phase10k_world_event_ledger_schema.py tests/test_phase10k_world_event_ledger_append_only.py tests/test_phase10k_world_event_ledger_boundaries.py tests/test_phase10l_candidate_mapper_observe_rest.py tests/test_phase10l_candidate_mapper_gather.py tests/test_phase10l_candidate_mapper_social.py tests/test_phase10l_candidate_mapper_boundaries.py -v
+python -m pytest \
+    tests/test_phase10k_world_event_ledger_schema.py \
+    tests/test_phase10k_world_event_ledger_append_only.py \
+    tests/test_phase10k_world_event_ledger_boundaries.py \
+    tests/test_phase10l_candidate_mapper_observe_rest.py \
+    tests/test_phase10l_candidate_mapper_gather.py \
+    tests/test_phase10l_candidate_mapper_social.py \
+    tests/test_phase10l_candidate_mapper_boundaries.py \
+    tests/test_phase10t_event_verifier_duplicate.py \
+    tests/test_phase10t_event_verifier_contradiction.py \
+    tests/test_phase10t_event_verifier_reference.py \
+    tests/test_phase10t_event_verifier_consistency.py \
+    tests/test_phase10t_event_verifier_accept.py \
+    tests/test_phase10u_event_aggregator.py \
+    tests/test_phase10v_event_exporter.py \
+    tests/test_phase10y_single_tick_ingress.py -v
 ```
 
 All tests use temporary directories only. They do not:
