@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AE, the public egress boundary harness that proves exported world-event output passes through the sanitizer before becoming public-facing text.
+The public stack now reaches Phase 10AF, the hidden planet substrate contract that proves a hidden world can exist behind fog-of-war without leaking into public export.
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -55,6 +55,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AC: replay/audit harness – proves replay order stability, event ID distinctness, claim-scope preservation, world_event provenance resolution, no observed-truth inheritance, deterministic export across repeated reads, and stable aggregator summaries
 - 10AD: pure public egress sanitizer – deterministic regex-based redaction of Windows paths, credentials, IPs/runtime markers, agent trace markers, and slash-skill contamination; recursive mapping with dict-key sanitization; 32 tempdir-only tests
 - 10AE: public egress boundary harness – proves exported world-event output (JSON/JSONL/CSV) passes through the egress sanitizer; plants harmless fake leak markers and proves them redacted; proves all five redaction markers appear, world terms survive, idempotent, no mutation, and both pre-export and post-export sanitization eliminate leaks; 18 tempdir-only tests
+- 10AF: hidden planet substrate contract – proves a hidden true_map (3 regions, 3 tiles, 3 landmarks, resources, hazards) exists behind fog-of-war; agent at Misty Vale observes only the local slice; ledger records only observed data; hidden region/landmark/resource names absent from JSON/JSONL/CSV export; sanitizer redacts fake leak markers in observed data while preserving world language; full pipeline proof (observe→ledger→export→sanitize) with and without leaks; 41 tempdir-only tests
 
 Documentation/spec phases:
 - 10M: public README and phase index
@@ -93,7 +94,8 @@ python -m pytest \
     tests/test_phase10ab_two_agent_echo_rejections.py \
     tests/test_phase10ac_replay_audit_harness.py \
     tests/test_phase10ad_public_egress_sanitizer.py \
-    tests/test_phase10ae_public_egress_boundary_harness.py -v
+    tests/test_phase10ae_public_egress_boundary_harness.py \
+    tests/test_phase10af_hidden_planet_substrate.py -v
 ```
 
 All tests use temporary directories only. They do not:
