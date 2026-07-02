@@ -69,12 +69,19 @@ def test_unrelated_existing_events_accepts():
 
 
 def test_accepts_speech_with_agent_speech():
-    """speech scope with agent_speech evidence → accepted."""
+    """speech scope with agent_speech + world_event evidence → accepted.
+
+    Under the echo model (10AB) all whisper events require world_event
+    provenance in addition to agent_speech evidence.
+    """
     candidate = make_event(
         action_type="whisper",
         claim_scope="speech",
         summary="hello",
-        evidence_refs=[{"category": "agent_speech", "ref": "whisper"}],
+        evidence_refs=[
+            {"category": "agent_speech", "ref": "whisper"},
+            {"category": "world_event", "ref": "prior_event_id"},
+        ],
     )
     result = verify_candidate_event(candidate, [])
     assert result["accepted"]

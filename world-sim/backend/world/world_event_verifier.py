@@ -180,6 +180,34 @@ def verify_candidate_event(
         # rejected unrecognized scopes, so this branch is defensive only.
         pass
 
+    # Step 6: Echo-specific rules (whisper action_type only)
+    if candidate.get("action_type") == "whisper":
+        scope = candidate.get("claim_scope")
+
+        # Rule 6a: whisper must not claim observed scope
+        if scope == "observed":
+            errors.append(
+                "echo: whisper action must not claim observed scope"
+            )
+        # Rule 6b: speech echo requires both agent_speech and world_event
+        elif scope == "speech":
+            if "agent_speech" not in evidence_cats:
+                errors.append(
+                    "echo: speech echo requires agent_speech evidence"
+                )
+            if "world_event" not in evidence_cats:
+                errors.append(
+                    "echo: speech echo requires world_event provenance "
+                    "evidence"
+                )
+            # Rule 6c: speech echo must not include observed_world_fact
+            # as truth transfer
+            if "observed_world_fact" in evidence_cats:
+                errors.append(
+                    "echo: speech echo must not include "
+                    "observed_world_fact evidence (truth transfer)"
+                )
+
     return {
         "accepted": len(errors) == 0,
         "errors": errors,

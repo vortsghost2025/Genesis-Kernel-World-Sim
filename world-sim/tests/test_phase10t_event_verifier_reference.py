@@ -138,11 +138,18 @@ def test_mutation_missing_before_ref_rejected_by_validate_event():
 
 
 def test_non_mutation_skips_before_after_validation():
-    """Non-mutation action_type with empty before/after → passes."""
+    """Non-mutation action_type with empty before/after → passes.
+
+    Under the echo model (10AB) all whisper events require world_event
+    provenance in addition to agent_speech evidence.
+    """
     candidate = valid_event(
         action_type="whisper",
         summary="hello",
-        evidence_refs=[{"category": "agent_speech", "ref": "whisper"}],
+        evidence_refs=[
+            {"category": "agent_speech", "ref": "whisper"},
+            {"category": "world_event", "ref": "prior_event_id"},
+        ],
         claim_scope="speech",
         before_ref="",
         after_ref="",
