@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10Z, the first remembered‑heartbeat contract (docs‑only/spec‑only).
+The public stack now reaches Phase 10AA, the first executable two‑agent echo harness.
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -50,6 +50,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10U: pure event aggregator
 - 10V: pure event exporter
 - 10Y: single-tick event-ingress harness – the first executable heartbeat proof (observe → verifier → temporary ledger append → read‑back → exporter)
+- 10AA: two-agent echo harness – the first executable remembered-heartbeat proof (Adam observe → Eve speech echo → provenance-preserving export)
 
 Documentation/spec phases:
 - 10M: public README and phase index
@@ -64,7 +65,7 @@ CI status: GitHub Actions may show pending or failed while account-level restric
 
 ## Safe Local Verification
 
-You can run the mixed local verification suite—including the completed pure‑module tests and the Phase 10Y single‑tick ingress harness—without any daemon, provider, tick, or runtime infrastructure:
+You can run the mixed local verification suite—including the completed pure‑module tests, the Phase 10Y single‑tick ingress harness, and the Phase 10AA two‑agent echo harness—without any daemon, provider, tick, or runtime infrastructure:
 
 ```bash
 cd world-sim
@@ -83,7 +84,8 @@ python -m pytest \
     tests/test_phase10t_event_verifier_accept.py \
     tests/test_phase10u_event_aggregator.py \
     tests/test_phase10v_event_exporter.py \
-    tests/test_phase10y_single_tick_ingress.py -v
+    tests/test_phase10y_single_tick_ingress.py \
+    tests/test_phase10aa_two_agent_echo_harness.py -v
 ```
 
 All tests use temporary directories only. They do not:
@@ -101,10 +103,10 @@ Do not run daemon, provider, tick, or dual-agent phases unless you have verified
 
 This repository explicitly excludes the following from agent-visible simulation scope:
 
-- Hostnames, SSH targets, VPS details, and deployment infrastructure
+- Hostnames, remote access targets, VPS details, and deployment infrastructure
 - API keys, provider routes, billing, and credentials
 - Git remotes, commits, branch state, and local operator workflow
-- Private configuration files and personal family details
+- Private configuration files and household operator details
 - Operator-only safety gates and internal runtime notes
 
 Agents may not act on outside-world information unless a future phase deliberately translates it into an in-world artifact or event.
