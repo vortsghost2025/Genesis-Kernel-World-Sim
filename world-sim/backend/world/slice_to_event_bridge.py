@@ -1,4 +1,5 @@
 """Phase 10AG — Observed Slice to World Event Candidate Bridge.
+Phase 10AH — Hardened tick/scope/validation for observation bridge.
 
 This module bridges the planet track (fog-of-war + hidden true_map from 10AF)
 into the event system (candidate mapper + verifier + ledger from 10K/10L/10T).
@@ -31,12 +32,21 @@ from typing import Any
 
 from backend.world.world_event_candidate_mapper import candidate_from_observe_result
 
+# Observation keys required for a valid bridge call.
+_REQUIRED_OBSERVATION_KEYS: frozenset[str] = frozenset({
+    "position",
+    "visible_tile_ids",
+    "visible_tiles",
+    "visible_landmarks",
+    "agent_id",
+})
+
 
 def observation_slice_to_candidate(
     observation: dict[str, Any],
     actor_id: str | None = None,
     *,
-    tick: int | None = None,
+    tick: int,
     timestamp_utc: str | None = None,
 ) -> dict[str, Any]:
     """Convert a ``build_local_observation`` result into a candidate event.
@@ -45,15 +55,16 @@ def observation_slice_to_candidate(
     ----------
     observation:
         The dictionary returned by ``fog_of_war.build_local_observation``.
-        Expected keys: ``position`` (with ``region_id``, ``tile_id``,
-        ``continent_id``, ``coordinates``), ``visible_tile_ids``,
-        ``visible_tiles``, ``visible_landmarks``, ``landmark_ids``,
-        ``available_actions``.
+        Required keys: ``position``, ``visible_tile_ids``, ``visible_tiles``,
+        ``visible_landmarks``, ``agent_id``.
+        Within ``position``: ``region_id``, ``tile_id``, ``continent_id``,
+        ``coordinates`` are expected.
     actor_id:
         Override for the actor performing the observation.  If ``None``,
         the value from ``observation["agent_id"]`` is used.
     tick:
-        Optional simulation tick number.
+        **Required.** Simulation tick number.  Must be a non-negative integer.
+        Used by the verifier for duplicate detection.
     timestamp_utc:
         Optional ISO-8601 timestamp.  Auto-generated if omitted.
 
@@ -62,7 +73,26 @@ def observation_slice_to_candidate(
     dict
         A candidate event dictionary that satisfies ``validate_event``
         and can be passed to ``verify_candidate_event``.
+
+    Raises
+    ------
+    ValueError
+        If ``tick`` is ``None`` or negative, or if ``observation`` is missing
+        required keys.
     """
+    # --- Validate tick (required for verifier duplicate detection) ---
+    if tick is None or (isinstance(tick, int) and tick < 0):
+        raise ValueError(
+            f"tick is required and must be a non-negative integer, got {tick!r}"
+        )
+
+    # --- Validate observation dict has required keys ---
+    missing = _REQUIRED_OBSERVATION_KEYS - observation.keys()
+    if missing:
+        raise ValueError(
+            f"observation missing required keys: {sorted(missing)}"
+        )
+
     # --- Extract position information ---
     position = observation.get("position", {})
     region_id = position.get("region_id", "")
@@ -143,6 +173,8 @@ def observation_slice_to_candidate(
                 "observation_detail": safe_observation_detail,
             }
         ],
+        # Explicit claim_scope — bypasses mapper heuristic
+        "claim_scope": "observed",
     }
 
     # --- Delegate to the Phase 10L candidate mapper ---

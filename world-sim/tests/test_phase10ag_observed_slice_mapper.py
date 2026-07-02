@@ -211,7 +211,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_produces_valid_candidate(self):
         """Contract claim 1: bridge output passes validate_event."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         result = validate_event(candidate)
         assert result["ok"], (
             f"Candidate failed validation: {result['errors']}"
@@ -220,7 +220,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_produces_valid_candidate_grotto(self):
         """Same as above but from a different region."""
         observation = self._build_observation(_make_grotto_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         result = validate_event(candidate)
         assert result["ok"], (
             f"Grotto candidate failed validation: {result['errors']}"
@@ -231,12 +231,12 @@ class TestBridgeConvertsObservation:
     def test_bridge_preserves_territory_vale(self):
         """Contract claim 2: candidate territory_ref matches observed region."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         assert candidate["territory_ref"] == "reg_vale"
 
     def test_bridge_preserves_territory_grotto(self):
         observation = self._build_observation(_make_grotto_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         assert candidate["territory_ref"] == "reg_grotto"
 
     # ── 3. Evidence construction ─────────────────────────────────────────
@@ -244,7 +244,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_evidence_has_observed_world_fact(self):
         """Contract claim 3: evidence includes observed_world_fact category."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         categories = {
             ev["category"]
             for ev in candidate.get("evidence_refs", [])
@@ -256,7 +256,7 @@ class TestBridgeConvertsObservation:
         """Evidence tile_ids are exactly the visible tile IDs."""
         observation = self._build_observation(_make_misty_vale_position())
         visible_ids = set(observation.get("visible_tile_ids", []))
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         for ev in candidate.get("evidence_refs", []):
             if isinstance(ev, dict) and ev.get("category") == "observed_world_fact":
                 evidence_ids = set(ev.get("tile_ids", []))
@@ -271,13 +271,13 @@ class TestBridgeConvertsObservation:
     def test_bridge_sets_observed_scope(self):
         """Candidate claim_scope is 'observed' when observation has data."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         assert candidate["claim_scope"] == "observed"
 
     def test_bridge_actor_id_fallback(self):
         """When no actor_id is given, bridge uses agent_id from observation."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         assert candidate["actor_id"] == "test_agent_ag"
 
     def test_bridge_actor_id_override(self):
@@ -291,7 +291,7 @@ class TestBridgeConvertsObservation:
 
     def test_bridge_action_type_is_observe(self):
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         assert candidate["action_type"] == "observe"
 
     # ── 4. Hidden data does not leak ──────────────────────────────────────
@@ -299,7 +299,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_hidden_tile_ids_not_in_evidence(self):
         """Contract claim 4: hidden tile IDs are absent from evidence."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         for ev in candidate.get("evidence_refs", []):
             if isinstance(ev, dict):
                 for tid in ev.get("tile_ids", []):
@@ -310,7 +310,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_hidden_landmark_ids_not_in_evidence(self):
         """Hidden landmark IDs are absent from evidence observation_detail."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         # Check the observation_detail JSON for landmark IDs
         for ev in candidate.get("evidence_refs", []):
             if isinstance(ev, dict) and "observation_detail" in ev:
@@ -323,7 +323,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_summary_contains_no_hidden_region_names(self):
         """The summary JSON mentions only the observed region, not hidden ones."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         summary_text = candidate["summary"]
         for hidden in _hidden_region_names():
             assert hidden not in summary_text, (
@@ -333,7 +333,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_summary_contains_no_hidden_resource_kinds(self):
         """Resources from hidden regions are absent from summary."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         summary_text = candidate["summary"]
         for kind in _hidden_resource_kinds():
             assert kind not in summary_text, (
@@ -343,7 +343,7 @@ class TestBridgeConvertsObservation:
     def test_bridge_summary_contains_observed_data(self):
         """The summary contains the observed region_id and tile count."""
         observation = self._build_observation(_make_misty_vale_position())
-        candidate = observation_slice_to_candidate(observation)
+        candidate = observation_slice_to_candidate(observation, tick=1)
         summary_text = candidate["summary"]
         assert "reg_vale" in summary_text
         assert "tile_vale_1" in summary_text

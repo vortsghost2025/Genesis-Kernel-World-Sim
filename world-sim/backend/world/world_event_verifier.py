@@ -39,7 +39,10 @@ def _find_duplicate(
     candidate: dict[str, Any],
     existing_events: list[dict[str, Any]],
 ) -> str | None:
-    """Check for a logical duplicate by tick + actor_id + action_type.
+    """Check for a logical duplicate by tick + actor_id + action_type + territory_ref.
+
+    Includes ``territory_ref`` so that an agent observing two different
+    territories in the same tick is not falsely flagged as a duplicate.
 
     Returns the matching event_id or None.
     """
@@ -48,10 +51,12 @@ def _find_duplicate(
         return None
     actor = candidate.get("actor_id")
     action = candidate.get("action_type")
+    territory = candidate.get("territory_ref")
     for e in existing_events:
         if (e.get("tick") == tick
                 and e.get("actor_id") == actor
-                and e.get("action_type") == action):
+                and e.get("action_type") == action
+                and e.get("territory_ref") == territory):
             return str(e.get("event_id", "unknown"))
     return None
 
@@ -142,13 +147,14 @@ def verify_candidate_event(
             errors.append(f"duplicate event_id: {candidate_id}")
             break
 
-    # Step 3: Logical duplicate (tick + actor_id + action_type)
+    # Step 3: Logical duplicate (tick + actor_id + action_type + territory_ref)
     dup_id = _find_duplicate(candidate, existing_events)
     if dup_id is not None:
         errors.append(
             f"duplicate: tick {candidate.get('tick')}, "
             f"actor {candidate.get('actor_id')}, "
-            f"action {candidate.get('action_type')} "
+            f"action {candidate.get('action_type')}, "
+            f"territory {candidate.get('territory_ref')} "
             f"already recorded as event {dup_id}"
         )
 

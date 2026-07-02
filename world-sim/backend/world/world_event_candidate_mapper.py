@@ -58,7 +58,13 @@ def infer_lens(actor_id: str) -> str:
 
 
 def candidate_from_observe_result(actor_id: str, action_text: str, result: dict, *, tick: Optional[int] = None, timestamp_utc: Optional[str] = None) -> dict:
-    """Map an ``observe`` executor result into a candidate event."""
+    """Map an ``observe`` executor result into a candidate event.
+
+    The ``result`` dict may contain an optional ``"claim_scope"`` key.
+    If present and is a valid claim scope, it is used directly (overriding
+    heuristic inference).  This allows callers (such as the Phase 10AG bridge)
+    to explicitly assert ``"observed"`` scope.
+    """
     lens = infer_lens(actor_id)
     territory_ref = result.get("territory_ref", "")
     evidence_used = result.get("evidence_used", [])
@@ -66,7 +72,12 @@ def candidate_from_observe_result(actor_id: str, action_text: str, result: dict,
     for ev in evidence_used:
         if isinstance(ev, dict) and ev.get("category") in ALLOWED_EVIDENCE_CATEGORIES:
             evidence_refs.append(ev)
-    claim_scope = "observed" if any(ev.get("category") == "observed_world_fact" for ev in evidence_refs) else "hypothesis"
+    # Use explicit claim_scope from result if present, else infer from evidence
+    explicit_scope = result.get("claim_scope")
+    if explicit_scope is not None and explicit_scope in ALLOWED_CLAIM_SCOPES:
+        claim_scope = explicit_scope
+    else:
+        claim_scope = "observed" if any(ev.get("category") == "observed_world_fact" for ev in evidence_refs) else "hypothesis"
     return _make_event(actor_id=actor_id, action_type="observe", summary=action_text, claim_scope=claim_scope, evidence_refs=evidence_refs, lens=lens, territory_ref=territory_ref, before_ref="", after_ref="", tick=tick, timestamp_utc=timestamp_utc)
 
 
