@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10Y, the first executable heartbeat proof.
+The public stack now reaches Phase 10Z, the first remembered‑heartbeat contract (docs‑only/spec‑only).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -57,6 +57,7 @@ Documentation/spec phases:
 - 10O: public CI/security/contribution docs
 - 10W: egress sanitizer specification
 - 10X: runtime wiring pilot spec / first‑heartbeat contract
+- 10Z: first remembered‑heartbeat contract (docs‑only/spec‑only)
 - 10Q–10S: future plan, persistent habitat principles, and runtime wiring architecture
 
 CI status: GitHub Actions may show pending or failed while account-level restrictions prevent CI runners from starting. Pure-module tests are designed to run locally without runtime infrastructure.
