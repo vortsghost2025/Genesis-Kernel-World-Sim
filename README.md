@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AG, the observed slice event bridge that connects the hidden planet substrate through the full event pipeline — fog-of-war observation, candidate mapper, verifier, ledger, export, and sanitizer — without leaking hidden data.
+The public stack now reaches Phase 10AH, the observed slice bridge hardening that tightens the bridge/verifier seam with explicit tick requirements, explicit claim_scope, and territory-aware duplicate detection.
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -57,6 +57,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AE: public egress boundary harness – proves exported world-event output (JSON/JSONL/CSV) passes through the egress sanitizer; plants harmless fake leak markers and proves them redacted; proves all five redaction markers appear, world terms survive, idempotent, no mutation, and both pre-export and post-export sanitization eliminate leaks; 18 tempdir-only tests
 - 10AF: hidden planet substrate contract – proves a hidden true_map (3 regions, 3 tiles, 3 landmarks, resources, hazards) exists behind fog-of-war; agent at Misty Vale observes only the local slice; ledger records only observed data; hidden region/landmark/resource names absent from JSON/JSONL/CSV export; sanitizer redacts fake leak markers in observed data while preserving world language; full pipeline proof (observe→ledger→export→sanitize) with and without leaks; 41 tempdir-only tests
 - 10AG: observed slice event bridge – converts a fog-of-war `build_local_observation()` result into a world event candidate via `candidate_from_observe_result()`, bridging the hidden planet substrate into the event system through verifier, ledger, export, and sanitizer without leaking hidden substrate; 28 tempdir-only tests
+- 10AH: observed slice bridge hardening – hardens bridge/verifier seam: tick required (ValueError for None/negative); explicit claim_scope="observed" passed through mapper; duplicate key includes territory_ref enabling same-tick cross-region observations; input validation rejects malformed observation dicts; 19 tempdir-only tests
 
 Documentation/spec phases:
 - 10M: public README and phase index
@@ -97,7 +98,8 @@ python -m pytest \
     tests/test_phase10ad_public_egress_sanitizer.py \
     tests/test_phase10ae_public_egress_boundary_harness.py \
     tests/test_phase10af_hidden_planet_substrate.py \
-    tests/test_phase10ag_observed_slice_mapper.py -v
+    tests/test_phase10ag_observed_slice_mapper.py \
+    tests/test_phase10ah_observed_slice_bridge_hardening.py -v
 ```
 
 All tests use temporary directories only. They do not:
