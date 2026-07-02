@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AA, the first executable two‑agent echo harness.
+The public stack now reaches Phase 10AC, the replay/audit harness that proves ledger replay stability and deterministic export/aggregation for the two‑agent echo model.
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -51,6 +51,8 @@ Completed locally (mixed pure modules and harness proof):
 - 10V: pure event exporter
 - 10Y: single-tick event-ingress harness – the first executable heartbeat proof (observe → verifier → temporary ledger append → read‑back → exporter)
 - 10AA: two-agent echo harness – the first executable remembered-heartbeat proof (Adam observe → Eve speech echo → provenance-preserving export)
+- 10AB: two-agent echo rejection guardrails – rejects whispered claims of observed scope, missing agent_speech or world_event provenance, and observed_world_fact truth-transfer attempts
+- 10AC: replay/audit harness – proves replay order stability, event ID distinctness, claim-scope preservation, world_event provenance resolution, no observed-truth inheritance, deterministic export across repeated reads, and stable aggregator summaries
 
 Documentation/spec phases:
 - 10M: public README and phase index
@@ -85,7 +87,9 @@ python -m pytest \
     tests/test_phase10u_event_aggregator.py \
     tests/test_phase10v_event_exporter.py \
     tests/test_phase10y_single_tick_ingress.py \
-    tests/test_phase10aa_two_agent_echo_harness.py -v
+    tests/test_phase10aa_two_agent_echo_harness.py \
+    tests/test_phase10ab_two_agent_echo_rejections.py \
+    tests/test_phase10ac_replay_audit_harness.py -v
 ```
 
 All tests use temporary directories only. They do not:
