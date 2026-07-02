@@ -35,6 +35,7 @@ EXPORT_FIELDS: tuple[str, ...] = (
     "territory_ref",
     "action_type",
     "summary",
+    "evidence_refs",
     "claim_scope",
     "verification_status",
     "before_ref",
