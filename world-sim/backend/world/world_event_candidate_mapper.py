@@ -155,6 +155,49 @@ def candidate_from_goal_decision(actor_id: str, decision: dict, *, tick: Optiona
     return _make_event(actor_id=actor_id, action_type="goal", summary=summary, claim_scope=claim_scope, evidence_refs=evidence_refs, lens=lens, territory_ref=decision.get("territory_ref", ""), before_ref="", after_ref="", tick=tick, timestamp_utc=timestamp_utc)
 
 
+def candidate_from_move_result(actor_id: str, action_text: str, result: dict, *, tick: Optional[int] = None, timestamp_utc: Optional[str] = None) -> Optional[dict]:
+    """Map a ``move_local`` resolution result into a candidate event.
+
+    Returns ``None`` if the result indicates the move was not successful
+    (``result.get("ok")`` is not truthy).
+
+    The candidate carries:
+    - ``action_type`` = ``"move_local"``
+    - ``claim_scope`` = ``"observed"``
+    - ``evidence_refs`` with category ``agent_action``
+    - ``before_ref`` / ``after_ref`` from the source/destination tiles
+    - ``territory_ref`` set to the destination region
+    """
+    if not result.get("ok"):
+        return None
+    lens = infer_lens(actor_id)
+    territory_ref = result.get("territory_ref", "")
+    before_ref = result.get("before_ref", "")
+    after_ref = result.get("after_ref", "")
+    evidence_refs: List[Dict[str, Any]] = [
+        {
+            "category": "agent_action",
+            "action": "move_local",
+            "from_tile": result.get("previous_tile_id", ""),
+            "to_tile": result.get("tile_id", ""),
+        }
+    ]
+    return _make_event(
+        actor_id=actor_id,
+        action_type="move_local",
+        summary=action_text,
+        claim_scope="observed",
+        evidence_refs=evidence_refs,
+        lens=lens,
+        territory_ref=territory_ref,
+        before_ref=before_ref,
+        after_ref=after_ref,
+        consequence=result.get("error", ""),
+        tick=tick,
+        timestamp_utc=timestamp_utc,
+    )
+
+
 def candidate_from_help_decision(actor_id: str, decision: dict, *, tick: Optional[int] = None, timestamp_utc: Optional[str] = None) -> dict:
     """Map a ``help`` request decision into a candidate event (speech)."""
     lens = infer_lens(actor_id)
