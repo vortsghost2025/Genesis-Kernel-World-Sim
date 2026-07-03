@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AH, the observed slice bridge hardening that tightens the bridge/verifier seam with explicit tick requirements, explicit claim_scope, and territory-aware duplicate detection.
+The public stack now reaches Phase 10AI, the local movement contract that proves an agent can move locally inside the hidden planet substrate without exposing hidden map data.
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -58,6 +58,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AF: hidden planet substrate contract – proves a hidden true_map (3 regions, 3 tiles, 3 landmarks, resources, hazards) exists behind fog-of-war; agent at Misty Vale observes only the local slice; ledger records only observed data; hidden region/landmark/resource names absent from JSON/JSONL/CSV export; sanitizer redacts fake leak markers in observed data while preserving world language; full pipeline proof (observe→ledger→export→sanitize) with and without leaks; 41 tempdir-only tests
 - 10AG: observed slice event bridge – converts a fog-of-war `build_local_observation()` result into a world event candidate via `candidate_from_observe_result()`, bridging the hidden planet substrate into the event system through verifier, ledger, export, and sanitizer without leaking hidden substrate; 28 tempdir-only tests
 - 10AH: observed slice bridge hardening – hardens bridge/verifier seam: tick required (ValueError for None/negative); explicit claim_scope="observed" passed through mapper; duplicate key includes territory_ref enabling same-tick cross-region observations; input validation rejects malformed observation dicts; 19 tempdir-only tests
+- 10AI: local movement contract – proves an agent can move locally inside the hidden planet substrate; `resolve_local_move()` supports 8 directions, `destination_tile_id`, coordinate adjacency (Manhattan ≤ 1), `blocks_travel` rejection, tick validation, and `before_ref`/`after_ref` as `"tile:<id>"`; `candidate_from_move_result()` bridges move result into candidate event; 38 tempdir-only tests covering movement, candidate mapping, verifier, ledger, post-move observation, and full pipeline
 
 Documentation/spec phases:
 - 10M: public README and phase index
@@ -99,7 +100,8 @@ python -m pytest \
     tests/test_phase10ae_public_egress_boundary_harness.py \
     tests/test_phase10af_hidden_planet_substrate.py \
     tests/test_phase10ag_observed_slice_mapper.py \
-    tests/test_phase10ah_observed_slice_bridge_hardening.py -v
+    tests/test_phase10ah_observed_slice_bridge_hardening.py \
+    tests/test_phase10ai_local_movement_contract.py -v
 ```
 
 All tests use temporary directories only. They do not:
