@@ -41,8 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AI, the local movement contract that proves an agent can move locally inside the hidden planet substrate without exposing hidden map data.
-
+The public stack now reaches Phase 10AJ, the known‑map accumulation contract (Phase 10AI was the local movement contract).
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
@@ -59,6 +58,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AG: observed slice event bridge – converts a fog-of-war `build_local_observation()` result into a world event candidate via `candidate_from_observe_result()`, bridging the hidden planet substrate into the event system through verifier, ledger, export, and sanitizer without leaking hidden substrate; 28 tempdir-only tests
 - 10AH: observed slice bridge hardening – hardens bridge/verifier seam: tick required (ValueError for None/negative); explicit claim_scope="observed" passed through mapper; duplicate key includes territory_ref enabling same-tick cross-region observations; input validation rejects malformed observation dicts; 19 tempdir-only tests
 - 10AI: local movement contract – proves an agent can move locally inside the hidden planet substrate; `resolve_local_move()` supports 8 directions, `destination_tile_id`, coordinate adjacency (Manhattan ≤ 1), `blocks_travel` rejection, tick validation, and `before_ref`/`after_ref` as `"tile:<id>"`; `candidate_from_move_result()` bridges move result into candidate event; 38 tempdir-only tests covering movement, candidate mapping, verifier, ledger, post-move observation, and full pipeline
+- 10AJ: known-map accumulation contract – proves an agent can accumulate and retain known_map data across ticks; `known_map` persists across moves, enabling map building; contract implementation and candidate mapping; 27 tempdir-only tests; regression suite 209 passed; safety scan PASS; network scan PASS; commit `5b6c13d Phase 10AJ: add known-map accumulation contract`
 
 Documentation/spec phases:
 - 10M: public README and phase index
