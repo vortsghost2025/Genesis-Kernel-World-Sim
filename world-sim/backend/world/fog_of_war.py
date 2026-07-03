@@ -353,10 +353,11 @@ def merge_observation_into_known_map(
         tile_id = tile["tile_id"]
         existing = known_map["known_tiles"].get(tile_id)
         if existing:
-            existing["last_observed_tick"] = tick
-            existing["visit_count"] += 1
-            existing["observed_resources"] = sorted(set(existing.get("observed_resources", [])) | set(tile.get("resources", [])))
-            existing["observed_hazards"] = sorted(set(existing.get("observed_hazards", [])) | set(tile.get("hazards", [])))
+            if existing["last_observed_tick"] != tick:
+                existing["last_observed_tick"] = tick
+                existing["visit_count"] += 1
+                existing["observed_resources"] = sorted(set(existing.get("observed_resources", [])) | set(tile.get("resources", [])))
+                existing["observed_hazards"] = sorted(set(existing.get("observed_hazards", [])) | set(tile.get("hazards", [])))
         else:
             known_map["known_tiles"][tile_id] = {
                 "tile_id": tile_id,
@@ -375,7 +376,8 @@ def merge_observation_into_known_map(
         landmark_id = landmark["true_landmark_id"]
         existing = known_map["known_landmarks"].get(landmark_id)
         if existing:
-            existing["last_observed_tick"] = tick
+            if existing["last_observed_tick"] != tick:
+                existing["last_observed_tick"] = tick
         else:
             known_map["known_landmarks"][landmark_id] = {
                 "true_landmark_id": landmark_id,
@@ -385,7 +387,8 @@ def merge_observation_into_known_map(
                 "confidence": 1.0,
                 "description": landmark.get("description", ""),
             }
-    known_map["last_observation_tick"] = tick
+    if known_map.get("last_observation_tick", 0) != tick:
+        known_map["last_observation_tick"] = tick
     return known_map
 
 
