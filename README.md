@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AO, the ledger replay verifier (Phase 10AN was the bounded sequence-to-ledger bridge; Phase 10AM was the bounded heartbeat sequence runner).
+The public stack now reaches Phase 10AP, the public state projector (Phase 10AO is the ledger replay verifier; Phase 10AN was the bounded sequence-to-ledger bridge; Phase 10AM was the bounded heartbeat sequence runner).
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
@@ -64,6 +64,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AM: bounded heartbeat sequence runner – chains a finite heartbeat plan through 10AL, advancing across ordered heartbeat boundaries until the plan is exhausted, then stops; it is not a daemon, not a scheduler, not a runtime, and not an infinite loop; it calls the 10AL tiny local heartbeat harness once per boundary in the plan and terminates when the plan ends; pure local execution only, no daemon, scheduler, provider, Docker, or runtime loop; 10AM tests: 12 passed; 10AM + 10AL + 10AK + 10AJ + 10AI regression: 98 passed; cached diff check PASS; safety scan PASS; network scan PASS; commit `57797d1 Phase 10AM: add bounded heartbeat sequence runner`
 - 10AN: bounded sequence-to-ledger bridge – transforms public 10AM heartbeat sequence output into verified temp-ledger events and sanitized export proof; it never accepts, reads, returns, exports, or infers hidden true_map; ledger path is caller-supplied temp directory only; pure local execution only, no daemon, scheduler, provider, Docker, runtime, network, or live data; 10AN tests: 11 passed; 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 109 passed; diff check PASS; contamination scan PASS; network/runtime scan PASS; commit `883115d Phase 10AN: add bounded sequence-to-ledger bridge`
 - 10AO: ledger replay verifier – deterministic replay summary from accepted public ledger events; audit replay only, not state projection, not memory export; derives agent_id, final public position, observed tile ids, movement chain, tick range, accepted/ignored counts, and safe errors from accepted ledger events; 10AO tests: 19 passed; 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 128 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `b2bd52e Phase 10AO: add ledger replay verifier`
+- 10AP: Public State Projector – accepted public ledger events -> current public world-state read model; projector/read model only, not memory export, not known_map rebuild, not route planning, not runtime, not daemon, not multi-agent merge; 10AP targeted tests: 16 passed; 10AP + 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 144 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `0c8a604 Phase 10AP: add public state projector`
 
 Documentation/spec phases:
 - 10M: public README and phase index
