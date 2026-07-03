@@ -36,6 +36,7 @@ Public index of implemented and planned phases for the Genesis Kernel World Sim 
 | 10AJ | Done | Known‑map accumulation contract | `5b6c13d` | Public contract – accumulation of known_map across ticks; no runtime impact | 27 tests passed; regression 209 passed; safety scan PASS; network scan PASS |
 | 10AK | Done | Multi‑tick exploration loop contract | `7c57efc` | Pure modules – no runtime, daemon, provider, or Docker impact | 13 tests passed; regression 222 passed; cached diff check PASS |
 | 10AL | Done | Tiny local heartbeat harness | `e56ad8b` | Pure local execution only — not a daemon, not a scheduler, not a runtime loop | Tiny local heartbeat harness; calls 10AK once per heartbeat boundary then stops; no daemon, scheduler, provider, Docker, or live data; 10AL tests: 8 passed; 10AL + regression: 230 passed; diff check PASS; cached diff check PASS; safety scan PASS; network scan PASS |
+| 10AM | Done | Bounded heartbeat sequence runner | `57797d1` | Pure local execution only — not a daemon, not a scheduler, not a runtime, not an infinite loop | Bounded heartbeat sequence runner; chains a finite heartbeat plan through 10AL, calling 10AL once per boundary in the plan and stopping when the plan ends; no daemon, scheduler, provider, Docker, runtime, or live data; 10AM tests: 12 passed; 10AM + 10AL + 10AK + 10AJ + 10AI regression: 98 passed; cached diff check PASS; safety scan PASS; network scan PASS |
 
 ## Legend
 
