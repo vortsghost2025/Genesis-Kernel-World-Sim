@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AM, the bounded heartbeat sequence runner (Phase 10AL was the tiny local heartbeat harness; Phase 10AK was the multi‑tick exploration loop contract).
+The public stack now reaches Phase 10AN, the bounded sequence-to-ledger bridge (Phase 10AM was the bounded heartbeat sequence runner; Phase 10AL was the tiny local heartbeat harness; Phase 10AK was the multi-tick exploration loop contract).
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
@@ -62,6 +62,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AK: multi‑tick exploration loop contract – proves an agent can perform multi‑tick exploration, gather observations across successive ticks, and integrate them into a coherent world event; pure modules only, no runtime, daemon, provider, or Docker impact; 13 tests passed; regression suite 222 passed; cached diff check PASS; commit `7c57efc Phase 10AK: add multi-tick exploration loop contract`
 - 10AL: tiny local heartbeat harness – a small, bounded harness that drives one heartbeat boundary at a time; it is not a daemon, not a scheduler, and not a runtime loop; it calls the 10AK multi‑tick exploration loop once per heartbeat boundary and stops; pure local execution only, no daemon, scheduler, provider, Docker, or runtime loop; 10AL tests: 8 passed; 10AL + regression: 230 passed; diff check PASS; cached diff check PASS; safety scan PASS; network scan PASS; commit `e56ad8b Phase 10AL: add tiny local heartbeat harness`
 - 10AM: bounded heartbeat sequence runner – chains a finite heartbeat plan through 10AL, advancing across ordered heartbeat boundaries until the plan is exhausted, then stops; it is not a daemon, not a scheduler, not a runtime, and not an infinite loop; it calls the 10AL tiny local heartbeat harness once per boundary in the plan and terminates when the plan ends; pure local execution only, no daemon, scheduler, provider, Docker, or runtime loop; 10AM tests: 12 passed; 10AM + 10AL + 10AK + 10AJ + 10AI regression: 98 passed; cached diff check PASS; safety scan PASS; network scan PASS; commit `57797d1 Phase 10AM: add bounded heartbeat sequence runner`
+- 10AN: bounded sequence-to-ledger bridge – transforms public 10AM heartbeat sequence output into verified temp-ledger events and sanitized export proof; it never accepts, reads, returns, exports, or infers hidden true_map; ledger path is caller-supplied temp directory only; pure local execution only, no daemon, scheduler, provider, Docker, runtime, network, or live data; 10AN tests: 11 passed; 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 109 passed; diff check PASS; contamination scan PASS; network/runtime scan PASS; commit `883115d Phase 10AN: add bounded sequence-to-ledger bridge`
 
 Documentation/spec phases:
 - 10M: public README and phase index
