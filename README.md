@@ -41,7 +41,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 ## Current Status
 
-The public stack now reaches Phase 10AJ, the known‑map accumulation contract (Phase 10AI was the local movement contract).
+The public stack now reaches Phase 10AL, the tiny local heartbeat harness (Phase 10AK was the multi‑tick exploration loop contract).
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
@@ -60,6 +60,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AI: local movement contract – proves an agent can move locally inside the hidden planet substrate; `resolve_local_move()` supports 8 directions, `destination_tile_id`, coordinate adjacency (Manhattan ≤ 1), `blocks_travel` rejection, tick validation, and `before_ref`/`after_ref` as `"tile:<id>"`; `candidate_from_move_result()` bridges move result into candidate event; 38 tempdir-only tests covering movement, candidate mapping, verifier, ledger, post-move observation, and full pipeline
 - 10AJ: known-map accumulation contract – proves an agent can accumulate and retain known_map data across ticks; `known_map` persists across moves, enabling map building; contract implementation and candidate mapping; 27 tempdir-only tests; regression suite 209 passed; safety scan PASS; network scan PASS; commit `5b6c13d Phase 10AJ: add known-map accumulation contract`
 - 10AK: multi‑tick exploration loop contract – proves an agent can perform multi‑tick exploration, gather observations across successive ticks, and integrate them into a coherent world event; pure modules only, no runtime, daemon, provider, or Docker impact; 13 tests passed; regression suite 222 passed; cached diff check PASS; commit `7c57efc Phase 10AK: add multi-tick exploration loop contract`
+- 10AL: tiny local heartbeat harness – a small, bounded harness that drives one heartbeat boundary at a time; it is not a daemon, not a scheduler, and not a runtime loop; it calls the 10AK multi‑tick exploration loop once per heartbeat boundary and stops; pure local execution only, no daemon, scheduler, provider, Docker, or runtime loop; 10AL tests: 8 passed; 10AL + regression: 230 passed; diff check PASS; cached diff check PASS; safety scan PASS; network scan PASS; commit `e56ad8b Phase 10AL: add tiny local heartbeat harness`
 
 Documentation/spec phases:
 - 10M: public README and phase index
