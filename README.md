@@ -56,13 +56,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AX — Shared Public Territory Ref Contract
 10AY — Shared Public Snapshot Hash Equality Contract   (current)
 10AZ — Shared Public Tick-Range Equality Contract   (current)
+10BA — Shared Public Tick Label Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10AZ, the shared public tick-range equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AS was the two-agent public merge).
+The public stack now reaches Phase 10BA, the shared public tick label equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AZ was the shared public tick-range equality contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
