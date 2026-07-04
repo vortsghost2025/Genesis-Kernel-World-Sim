@@ -56,14 +56,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AX — Shared Public Territory Ref Contract
 10AY — Shared Public Snapshot Hash Equality Contract   (current)
 10AZ — Shared Public Tick-Range Equality Contract   (current)
-10BA — Shared Public Tick Label Contract   (current)
+10BB — Shared Public State Hash Equality Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10BA, the shared public tick label equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AZ was the shared public tick-range equality contract; 10AS was the two-agent public merge).
+The public stack now reaches Phase 10BB, the shared public state hash equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AZ was the shared public tick-range equality contract; 10BA was the shared public tick label equality contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -99,6 +99,8 @@ Completed locally (mixed pure modules and harness proof):
 - 10AX: Shared Public Territory Ref Contract - deterministic sanitized public territory-ref sharing contract over a valid 10AS merge artifact or caller-supplied territory ref overrides; territory ref fields (`territory_ref`) compared only; `same_territory_ref` True when both non-empty and equal; `shared_territory_ref` populated only when `same_territory_ref` is True; `agent_a_only_territory_ref` / `agent_b_only_territory_ref` populated when only one side has a non-empty ref; caller-supplied overrides treated as known public declarations when sanitized territory ref is non-empty; no proximity inference, no timing/window inference, no co-presence; targeted tests: 28 passed; 10AI through 10AX regression: 356 passed; commit `5d2600f`
 - 10AY: Shared Public Snapshot Hash Equality Contract - deterministic sanitized snapshot-hash equality contract over a valid 10AS merge artifact; snapshot hash equality (`snapshot_hash`) and snapshot id fields (`snapshot_id`) compared only; `same_snapshot_hash` True when both non-empty and equal; `shared_snapshot_hash` populated only when `same_snapshot_hash` is True; `agent_a_snapshot_hash` / `agent_b_snapshot_hash` / `agent_a_snapshot_id` / `agent_b_snapshot_id` always propagated; tests inject snapshot hash/id fields into 10AS bundles after merge creation (10AS code untouched); no knowledge inference, no communication inference, no co-presence; targeted tests: 25 passed; 10AI through 10AY regression: 525 passed; commit `df25233`
 - 10AZ: Shared Public Tick-Range Equality Contract - deterministic sanitized tick-range equality contract over a valid 10AS merge artifact; tick ranges (`first_tick`, `last_tick`) are caller-supplied optional arguments, not read from 10AS bundles; `same_first_tick`, `same_last_tick`, `same_tick_range` computed by pure mechanical equality only; no temporal overlap calculation, no co-presence inference, no active-at-same-time claim, no window inference; missing/None tick fields produce ok=True with None fields and equality booleans False; contract_id preserves A/B agent orientation (not sorted); targeted tests: 26 passed; 10AI through 10AZ regression: 551 passed; commit `e6ee66c`
+- 10BA: Shared Public Tick Label Contract - deterministic sanitized shared-public-tick-label contract over a valid 10AS merge artifact; caller-supplied optional tick label lists (`agent_a_tick_labels`, `agent_b_tick_labels`); 10AS merge is provenance/agent identity source only; no temporal overlap, no co-presence, no ordering/sequence inference; targeted tests: 29 passed; 10AI through 10BA regression: 436 passed; commit `5b3423d`
+- 10BB: Shared Public State Hash Equality Contract - deterministic sanitized shared-public-state-hash-equality contract over a valid 10AS merge artifact; caller-supplied optional public state hash strings (`agent_a_public_state_hash`, `agent_b_public_state_hash`); 10AS merge is provenance/agent identity source only; no state inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 28 passed; 10AI through 10BB regression: 464 passed; commit `eb61ca1`
 
 Documentation/spec phases:
 - 10M: public README and phase index
