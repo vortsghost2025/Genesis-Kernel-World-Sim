@@ -23,11 +23,13 @@ Roadmap of planned phases after 10O/10P. Each phase is tagged with its prerequis
 | 10O | Pushed / CI pending | GitHub billing lock must clear before Done | DOCS |
 | 10P | Blocked | GitHub billing clearance | CI verification |
 | 10Q | Draft | None | DOCS |
-| 10R | Planned | 10Q complete | DOCS |
-| 10S | Planned | 10P green, 10R complete | PURE |
-| 10T | Planned | 10S complete | PURE |
-| 10U | Planned | 10T complete | PURE |
-| — | Planned | 10U complete | RUNTIME + GATE |
+| ~~10R~~ | ~~Planned~~ | ~~10Q complete~~ | ~~DOCS~~ |
+| ~~10S~~ | ~~Superseded~~ | ~~10P green, 10R complete~~ | ~~PURE~~ |
+| ~~10T~~ | ~~Superseded~~ | ~~10S complete~~ | ~~PURE~~ |
+| ~~10U~~ | ~~Superseded~~ | ~~10T complete~~ | ~~PURE~~ |
+| 10AT | Done | 10AS complete | PURE |
+| — | Next candidate | 10AT complete | TBD |
+| — | Planned | All pure phases complete, operator present | RUNTIME + GATE |
 
 ---
 
@@ -86,39 +88,33 @@ or trigger a new push/PR. If green, update 10O status to Done in `phase_index.md
 
 ---
 
-### 10S — Pure Event Verification Module
+### ~~10S — Pure Event Verification Module~~ (superseded)
 
-**Purpose:** Implement a pure `world_event_verifier.py` that validates a candidate event against the current ledger state before the daemon commits it. Catches contradictions, duplicate timestamps, and boundary violations before they reach the append-only ledger.
+**Purpose:** Original plan for a pure `world_event_verifier.py`.
+
+**Status:** Superseded. Implemented as `world-sim/backend/world/world_event_verifier.py` (10T commit `0b8133d`) with 33/33 tests passing. Retained here for lineage only.
 
 **Type:** PURE
-**Prerequisites:** 10P green (CI passing), 10R complete (design agreed)
-**Files affected:** `world-sim/backend/world/world_event_verifier.py`, plus test file
-
-**Constraints:**
-- No runtime dependencies
-- Tempdir-only tests
-- No daemon or provider calls
-- Must pass CI before merging
 
 ---
 
-### 10T — Pure Event Aggregation Module
+### ~~10T — Pure Event Aggregation Module~~ (superseded)
 
-**Purpose:** Implement a pure `world_event_aggregator.py` that produces summaries and derived state from the event ledger (e.g., recent event count by category, agent activity windows, world-state deltas over time). Useful for dashboards and decision support without hitting the live sim.
+**Purpose:** Original plan for a pure `world_event_aggregator.py`.
+
+**Status:** Superseded. Implemented as `world-sim/backend/world/world_event_aggregator.py` (10U commit `321a443`) with 25/25 tests passing. Retained here for lineage only.
 
 **Type:** PURE
-**Prerequisites:** 10P green, 10R complete
-**Files affected:** `world-sim/backend/world/world_event_aggregator.py`, plus test file
 
 ---
 
-### 10U — Pure Event Export Module
+### ~~10U — Pure Event Export Module~~ (superseded)
 
-**Purpose:** Implement a pure `world_event_exporter.py` that serializes ledger events to portable formats (JSON, JSONL, CSV) for offline analysis, debugging, and audit trails. Read-only — never modifies the ledger.
+**Purpose:** Original plan for a pure `world_event_exporter.py`.
+
+**Status:** Superseded. Implemented as `world-sim/backend/world/world_event_exporter.py` (10V commit `02ded83`) with 28/28 tests passing. Retained here for lineage only.
 
 **Type:** PURE
-**Prerequisites:** 10P green, 10R complete
-**Files affected:** `world-sim/backend/world/world_event_exporter.py`, plus test file
 
 ---
 
@@ -127,7 +123,7 @@ or trigger a new push/PR. If green, update 10O status to Done in `phase_index.md
 **Purpose:** Connect the pure pipeline (ledger → verifier → aggregator → exporter) into the daemon's action-execution path. This is the first phase that touches live simulation state.
 
 **Type:** RUNTIME + GATE
-**Prerequisites:** All pure phases (10S–10U) complete and passing CI, design from 10R reviewed and approved, operator present on canonical runtime host
+**Prerequisites:** All pure phases (10T–10V, 10AT, and any 10AU+) complete and passing CI, design reviewed and approved, operator present on canonical runtime host
 
 **Constraints:**
 - Must not run from CI
@@ -141,13 +137,13 @@ or trigger a new push/PR. If green, update 10O status to Done in `phase_index.md
 ## Dependency Map
 
 ```
-10O (docs) ──> 10P (CI verify) ──> 10S (verifier) ──+
-                   ^                                  │
-                   │                                  │
-10Q (docs) ──> 10R (architecture) ────────────────────+──> Runtime Wiring
-                                                        │
-                                                  10T (aggregator) ──+
-                                                  10U (exporter) ─────+
+10O (docs) ──> 10P (CI verify) ──> 10S (verifier, done) ─+
+                   ^                                      │
+                   │                                      │
+10Q (docs) ──> 10R (architecture, superseded) ────────────+──> Runtime Wiring
+                                                                 │
+10AT (shared observation contract, done)                           │
+10AU (TBD) ───────────────────────────────────────────────────────+
 ```
 
 ---
@@ -170,3 +166,16 @@ Regardless of billing or phase status, the following are always safe:
 - Starting or stopping Docker containers
 - Executing remote shell commands on the canonical runtime host
 - Accessing provider APIs or models
+---
+
+## Next Candidate: 10AU (TBD)
+
+No implementation. No scope contract yet. Placeholder only.
+
+The public-observation contract stack (10AP → 10AQ → 10AR → 10AS → 10AT) is complete and committed.  Before defining 10AU, the operator and agent should agree on whether the next rung should address:
+
+- Temporal shared-observation windows (when, not just where, do two agents' public surfaces overlap)
+- Public anchor / reference sharing (which public landmarks, event refs, or territory refs do both agents cite)
+- Observation depth contracts (how deeply each agent observed shared tiles, without exposing private observation depth)
+
+Any 10AU scope must follow the established pattern: pure module, tempdir-only tests, no runtime, no daemon, no `world-sim/data`, no private-inference claims, and a scope contract in `world-sim/docs/` before any code is written.
