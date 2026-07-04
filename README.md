@@ -53,14 +53,15 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AU — Shared Public Anchor Contract   (current)
 10AV — Shared Public Event Ref Contract   (current)
 10AW — Shared Public Route Destination Contract   (current)
-10AX — Shared Public Territory Ref Contract   (current)
+10AX — Shared Public Territory Ref Contract
+10AY — Shared Public Snapshot Hash Equality Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10AX, the shared public territory ref contract (10AU was the shared public anchor contract; 10AT was the shared public observation contract; 10AS was the two-agent public merge).
+The public stack now reaches Phase 10AY, the shared public snapshot hash equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -93,7 +94,8 @@ Completed locally (mixed pure modules and harness proof):
 - 10AU: Shared Public Anchor Contract - deterministic sanitized public anchor/reference sharing contract over a valid 10AS merge artifact or caller-supplied public anchor lists.
 - 10AV: Shared Public Event Ref Contract - deterministic sanitized public event-reference sharing contract over a valid 10AS merge artifact or caller-supplied public event ref lists; targeted tests: 26 passed; 10AI through 10AV regression: 302 passed; commit `ba3c8b6`.
 - 10AW: Shared Public Route Destination Contract - deterministic sanitized public route-destination sharing contract over a valid 10AS merge artifact or caller-supplied route destination overrides; route destination fields (`route_destination_tile_id`, `route_destination_known`) compared only; `shared_route_destination_tile_id` populated only when both `route_destination_known` are True AND destinations equal; caller-supplied overrides treated as known public declarations when sanitized destination is non-empty; no path inference, no timing/window inference, no co-presence; targeted tests: 26 passed; 10AI through 10AW regression: 328 passed; commit `727f20e`.
-- 10AX: Shared Public Territory Ref Contract - deterministic sanitized public territory-ref sharing contract over a valid 10AS merge artifact or caller-supplied territory ref overrides; territory ref fields (`territory_ref`) compared only; `same_territory_ref` True when both non-empty and equal; `shared_territory_ref` populated only when `same_territory_ref` is True; `agent_a_only_territory_ref` / `agent_b_only_territory_ref` populated when only one side has a non-empty ref; caller-supplied overrides treated as known public declarations when sanitized territory ref is non-empty; no proximity inference, no timing/window inference, no co-presence; targeted tests: 28 passed; 10AI through 10AX regression: 356 passed; commit pending.
+- 10AX: Shared Public Territory Ref Contract - deterministic sanitized public territory-ref sharing contract over a valid 10AS merge artifact or caller-supplied territory ref overrides; territory ref fields (`territory_ref`) compared only; `same_territory_ref` True when both non-empty and equal; `shared_territory_ref` populated only when `same_territory_ref` is True; `agent_a_only_territory_ref` / `agent_b_only_territory_ref` populated when only one side has a non-empty ref; caller-supplied overrides treated as known public declarations when sanitized territory ref is non-empty; no proximity inference, no timing/window inference, no co-presence; targeted tests: 28 passed; 10AI through 10AX regression: 356 passed; commit `5d2600f`
+- 10AY: Shared Public Snapshot Hash Equality Contract - deterministic sanitized snapshot-hash equality contract over a valid 10AS merge artifact; snapshot hash equality (`snapshot_hash`) and snapshot id fields (`snapshot_id`) compared only; `same_snapshot_hash` True when both non-empty and equal; `shared_snapshot_hash` populated only when `same_snapshot_hash` is True; `agent_a_snapshot_hash` / `agent_b_snapshot_hash` / `agent_a_snapshot_id` / `agent_b_snapshot_id` always propagated; tests inject snapshot hash/id fields into 10AS bundles after merge creation (10AS code untouched); no knowledge inference, no communication inference, no co-presence; targeted tests: 25 passed; 10AI through 10AY regression: 525 passed; commit `df25233`
 
 Documentation/spec phases:
 - 10M: public README and phase index
