@@ -53,13 +53,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AU — Shared Public Anchor Contract   (current)
 10AV — Shared Public Event Ref Contract   (current)
 10AW — Shared Public Route Destination Contract   (current)
+10AX — Shared Public Territory Ref Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10AW, the shared public route destination contract (10AU was the shared public anchor contract; 10AT was the shared public observation contract; 10AS was the two-agent public merge).
+The public stack now reaches Phase 10AX, the shared public territory ref contract (10AU was the shared public anchor contract; 10AT was the shared public observation contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -91,7 +92,8 @@ Completed locally (mixed pure modules and harness proof):
 - 10AT: Shared Public Observation Contract - deterministic sanitized time-windowed public observation contract over a valid 10AS two-agent public merge artifact; consumes 10AS merge + shared_window + optional public anchors/refs only; no 10AP/10AQ/10AR direct inputs, no parent-body rehashing, no full route-intent revalidation, no meeting/awareness/co-presence/relationship/route inference; 10AT targeted tests: 44 passed; 10AI through 10AT regression: 250 passed; diff check PASS; commit `5177342 Phase 10AT: add shared public observation contract`
 - 10AU: Shared Public Anchor Contract - deterministic sanitized public anchor/reference sharing contract over a valid 10AS merge artifact or caller-supplied public anchor lists.
 - 10AV: Shared Public Event Ref Contract - deterministic sanitized public event-reference sharing contract over a valid 10AS merge artifact or caller-supplied public event ref lists; targeted tests: 26 passed; 10AI through 10AV regression: 302 passed; commit `ba3c8b6`.
-- 10AW: Shared Public Route Destination Contract - deterministic sanitized public route-destination sharing contract over a valid 10AS merge artifact or caller-supplied route destination overrides; route destination fields (`route_destination_tile_id`, `route_destination_known`) compared only; `shared_route_destination_tile_id` populated only when both `route_destination_known` are True AND destinations equal; caller-supplied overrides treated as known public declarations when sanitized destination is non-empty; no path inference, no timing/window inference, no co-presence; targeted tests: 26 passed; 10AI through 10AW regression: 328 passed; commit pending.
+- 10AW: Shared Public Route Destination Contract - deterministic sanitized public route-destination sharing contract over a valid 10AS merge artifact or caller-supplied route destination overrides; route destination fields (`route_destination_tile_id`, `route_destination_known`) compared only; `shared_route_destination_tile_id` populated only when both `route_destination_known` are True AND destinations equal; caller-supplied overrides treated as known public declarations when sanitized destination is non-empty; no path inference, no timing/window inference, no co-presence; targeted tests: 26 passed; 10AI through 10AW regression: 328 passed; commit `727f20e`.
+- 10AX: Shared Public Territory Ref Contract - deterministic sanitized public territory-ref sharing contract over a valid 10AS merge artifact or caller-supplied territory ref overrides; territory ref fields (`territory_ref`) compared only; `same_territory_ref` True when both non-empty and equal; `shared_territory_ref` populated only when `same_territory_ref` is True; `agent_a_only_territory_ref` / `agent_b_only_territory_ref` populated when only one side has a non-empty ref; caller-supplied overrides treated as known public declarations when sanitized territory ref is non-empty; no proximity inference, no timing/window inference, no co-presence; targeted tests: 28 passed; 10AI through 10AX regression: 356 passed; commit pending.
 
 Documentation/spec phases:
 - 10M: public README and phase index
