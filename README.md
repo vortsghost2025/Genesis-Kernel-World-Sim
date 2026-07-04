@@ -47,14 +47,15 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AO — replay custody trail (audit summary)
 10AP — current public state read model (public_state projection)
 10AQ — known map snapshot export (portable sanitized snapshot)
-10AR — Route Intent Contract   (next: planned, not yet started)
+10AR — route intent contract (deterministic sanitized intent artifact)
+10AS — Two-Agent Public Merge   (next: planned, not yet started)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10AQ, the known map snapshot export (Phase 10AP is the public state projector; Phase 10AO is the ledger replay verifier; Phase 10AN was the bounded sequence-to-ledger bridge; Phase 10AM was the bounded heartbeat sequence runner).
+The public stack now reaches Phase 10AR, the route intent contract (Phase 10AQ was the known map snapshot export; Phase 10AP is the public state projector; Phase 10AO is the ledger replay verifier; Phase 10AN was the bounded sequence-to-ledger bridge; Phase 10AM was the bounded heartbeat sequence runner).
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
@@ -79,6 +80,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AO: ledger replay verifier – deterministic replay summary from accepted public ledger events; audit replay only, not state projection, not memory export; derives agent_id, final public position, observed tile ids, movement chain, tick range, accepted/ignored counts, and safe errors from accepted ledger events; 10AO tests: 19 passed; 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 128 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `b2bd52e Phase 10AO: add ledger replay verifier`
 - 10AP: Public State Projector – accepted public ledger events -> current public world-state read model; projector/read model only, not memory export, not known_map rebuild, not route planning, not runtime, not daemon, not multi-agent merge; 10AP targeted tests: 16 passed; 10AP + 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 144 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `0c8a604 Phase 10AP: add public state projector`
 - 10AQ: Known Map Snapshot Export – consumes the 10AP public_state projection and exports a deterministic, sanitized, portable known-map snapshot; pure transform only — no true map lookup, no route planning, no route intent, no movement execution, no runtime/daemon/scheduler/provider/Docker/network, no diff functions, no `world-sim/data`; canonical sanitized projection JSON hashed via sha256 to produce `source_projection_hash`; `snapshot_id = "10AQ-" + hash[:32]`; `known_tile_ids = sorted(union(observed_tile_ids, visited_tile_ids))`; public functions `create_known_map_snapshot(public_state)`, `export_known_map_snapshot(snapshot)`, `snapshot_ledger_file(ledger_path)`; 10AQ targeted tests: 15 passed; 10AQ + 10AP + 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 159 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `e35b844 Phase 10AQ: add known map snapshot export`
+- 10AR: Route Intent Contract – consumes a 10AQ known-map snapshot and emits a deterministic, sanitized route-intent contract artifact; contract only — no path, no route steps, no route edges, no adjacency inference, no pathfinding, no movement execution, no ledger write, no candidate-event mapping, no verifier dependency, no mapper dependency, no true map lookup, no runtime/daemon/scheduler/provider/Docker/network, no `world-sim/data`; validates `destination_tile_id ∈ known_tile_ids` → `destination_known`; sanitizes `destination_tile_id` before any use; `claim_scope = "intent_only"`; `intent_id = "10AR-" + sha256(canonical intent material)[:32]`; canonical intent material is `{source_snapshot_hash, agent_id, from_tile_id, destination_tile_id, claim_scope, reason?}`; public functions `create_route_intent_contract(snapshot, destination_tile_id, *, reason=None)`, `export_route_intent_contract(contract)`, `contract_snapshot_file(snapshot_json_path, destination_tile_id, *, reason=None)`; tests: `world-sim/tests/test_phase10ar_route_intent_contract.py`; 10AR targeted tests: 17 passed; 10AR + 10AQ + 10AP + 10AO + 10AN + 10AM + 10AL + 10AK + 10AJ + 10AI regression: 176 passed; diff check PASS; forbidden marker/runtime scan PASS; commit `d19225d Phase 10AR: add route intent contract`
 
 Documentation/spec phases:
 - 10M: public README and phase index
