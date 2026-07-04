@@ -57,7 +57,7 @@ Each rung of the ladder is a pure module: it consumes the previous rung's output
 
 ## Current Status
 
-The public stack now reaches Phase 10AU, the shared public anchor contract (10AT was the shared public observation contract; 10AS was the two-agent public merge; 10AR was the route intent contract).
+The public stack now reaches Phase 10AV, the shared public event ref contract (10AU was the shared public anchor contract; 10AT was the shared public observation contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -88,6 +88,7 @@ Completed locally (mixed pure modules and harness proof):
 
 - 10AT: Shared Public Observation Contract - deterministic sanitized time-windowed public observation contract over a valid 10AS two-agent public merge artifact; consumes 10AS merge + shared_window + optional public anchors/refs only; no 10AP/10AQ/10AR direct inputs, no parent-body rehashing, no full route-intent revalidation, no meeting/awareness/co-presence/relationship/route inference; 10AT targeted tests: 44 passed; 10AI through 10AT regression: 250 passed; diff check PASS; commit `5177342 Phase 10AT: add shared public observation contract`
 - 10AU: Shared Public Anchor Contract - deterministic sanitized public anchor/reference sharing contract over a valid 10AS merge artifact or caller-supplied public anchor lists.
+- 10AV: Shared Public Event Ref Contract - deterministic sanitized public event-reference sharing contract over a valid 10AS merge artifact or caller-supplied public event ref lists; targeted tests: 26 passed; 10AI through 10AV regression: 302 passed; commit `ba3c8b6`.
 
 Documentation/spec phases:
 - 10M: public README and phase index
