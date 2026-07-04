@@ -49,14 +49,15 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AQ — known map snapshot export (portable sanitized snapshot)
 10AR — route intent contract (deterministic sanitized intent artifact)
 10AS — two-agent public merge
-10AT — Shared Public Observation Contract   (next: planned, not yet started)
+10AT — Shared Public Observation Contract
+10AU — Shared Public Anchor Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10AT, the shared public observation contract (Phase 10AR was the route intent contract; Phase 10AQ was the known map snapshot export; Phase 10AP is the public state projector; Phase 10AO is the ledger replay verifier; Phase 10AN was the bounded sequence-to-ledger bridge; Phase 10AM was the bounded heartbeat sequence runner).
+The public stack now reaches Phase 10AU, the shared public anchor contract (10AT was the shared public observation contract; 10AS was the two-agent public merge; 10AR was the route intent contract).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -86,6 +87,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10AS: Two-Agent Public Merge – combines two agents' already-public surfaces (10AP public_state + 10AQ known-map snapshot + optional 10AR route-intent contract, per agent) into a deterministic sanitized two-agent public merge artifact; targeted tests: 30 passed; regression stack: 206 passed; public functions `create_two_agent_public_merge(public_state_a, snapshot_a, public_state_b, snapshot_b, route_intent_a=None, route_intent_b=None)`, `export_two_agent_public_merge(merge)`, `merge_public_surface_files(public_state_a_path, snapshot_a_path, public_state_b_path, snapshot_b_path, route_intent_a_path=None, route_intent_b_path)`; canonical merge material hashed via sha256 to produce `merge_id = "10AS-" + hash[:32]`; `claim_scope = "public_only"`; agent bundles include `agent_id`, `public_state_hash`, `snapshot_id`, `snapshot_hash`, `current_tile_id`, `known_tile_ids`, `route_intent_id`, `route_destination_tile_id`, `route_destination_known`; allowed comparisons `shared_known_tile_ids`, `agent_a_only_known_tile_ids`, `agent_b_only_known_tile_ids`, `same_current_tile`, `both_have_route_intent`; strict route-intent validation requires `ok=True`, `intent_type="route_intent_contract"`, matching `agent_id`, matching `source_snapshot_id`, `claim_scope="intent_only"`, and `destination_known=True`; invalid or internally inconsistent route intents return `ok=False` with safe errors; all inputs deep-copied before reading; all inputs sanitized via `sanitize_public_mapping`; route destination fields sanitized before output; private markers must never reach merge output or exported JSON; boundary: 10AS may say "These two public surfaces overlap on tiles X/Y/Z.", but 10AS may not say "The agents know each other, met, communicated, trust each other, cooperate, conflict, are aware of each other, or can travel between those tiles."; commit `afc79f7`
 
 - 10AT: Shared Public Observation Contract - deterministic sanitized time-windowed public observation contract over a valid 10AS two-agent public merge artifact; consumes 10AS merge + shared_window + optional public anchors/refs only; no 10AP/10AQ/10AR direct inputs, no parent-body rehashing, no full route-intent revalidation, no meeting/awareness/co-presence/relationship/route inference; 10AT targeted tests: 44 passed; 10AI through 10AT regression: 250 passed; diff check PASS; commit `5177342 Phase 10AT: add shared public observation contract`
+- 10AU: Shared Public Anchor Contract - deterministic sanitized public anchor/reference sharing contract over a valid 10AS merge artifact or caller-supplied public anchor lists.
 
 Documentation/spec phases:
 - 10M: public README and phase index
