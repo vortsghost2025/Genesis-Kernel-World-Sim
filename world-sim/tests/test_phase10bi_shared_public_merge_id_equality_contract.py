@@ -770,3 +770,23 @@ class TestMergeIdScalarOnly:
             assert field not in contract, (
                 "10BI is scalar-only; id field " + field + " must not exist"
             )
+
+    # 22. contract_id changes when merge content changes (source_merge_hash sensitivity)
+    def test_contract_id_changes_when_merge_content_changes(self):
+        merge = _build_merge()
+        c1 = create_shared_merge_id_equality_contract(
+            merge,
+            agent_a_merge_id="10AS-abc123",
+            agent_b_merge_id="10AS-abc123",
+        )
+        # Mutate merge content while keeping caller-supplied IDs identical
+        mutated = copy.deepcopy(merge)
+        mutated["agent_a"]["current_tile_id"] = "tile_mutated"
+        c2 = create_shared_merge_id_equality_contract(
+            mutated,
+            agent_a_merge_id="10AS-abc123",
+            agent_b_merge_id="10AS-abc123",
+        )
+        assert c1["contract_id"] != c2["contract_id"], (
+            "contract_id must change when merge content changes"
+        )

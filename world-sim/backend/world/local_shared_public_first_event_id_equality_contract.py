@@ -305,6 +305,7 @@ def create_shared_first_event_id_equality_contract(
         "contract_schema_version": _CONTRACT_SCHEMA_VERSION,
         "claim_scope": _CLAIM_SCOPE,
         "source_merge_id": source_merge_id or "",
+        "source_merge_hash": source_merge_hash,
         "agent_a_id": agent_a_id,
         "agent_b_id": agent_b_id,
         "agent_a_first_event_id": a_event_id if a_event_id is not None else "",

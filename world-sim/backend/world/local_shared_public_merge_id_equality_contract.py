@@ -307,6 +307,7 @@ def create_shared_merge_id_equality_contract(
         "contract_schema_version": _CONTRACT_SCHEMA_VERSION,
         "claim_scope": _CLAIM_SCOPE,
         "source_merge_id": source_merge_id or "",
+        "source_merge_hash": source_merge_hash,
         "agent_a_id": agent_a_id,
         "agent_b_id": agent_b_id,
         "agent_a_merge_id": a_merge_id if a_merge_id is not None else "",
