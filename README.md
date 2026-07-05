@@ -57,13 +57,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10AY — Shared Public Snapshot Hash Equality Contract   (current)
 10AZ — Shared Public Tick-Range Equality Contract   (current)
 10BC - Shared Public Observation Count Equality Contract   (current)
+10BD - Shared Public Movement Count Equality Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10BC, the shared public observation count equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AZ was the shared public tick-range equality contract; 10BA was the shared public tick label equality contract; 10BB was the shared public state hash equality contract; 10AS was the two-agent public merge).
+The public stack now reaches Phase 10BD, the shared public movement count equality contract (10AU was the shared public anchor contract; 10AV was the shared public event ref contract; 10AW was the shared public route destination contract; 10AX was the shared public territory ref contract; 10AY was the shared public snapshot hash equality contract; 10AZ was the shared public tick-range equality contract; 10BA was the shared public tick label equality contract; 10BB was the shared public state hash equality contract; 10BC was the shared public observation count equality contract; 10AS was the two-agent public merge).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
@@ -102,6 +103,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10BA: Shared Public Tick Label Contract - deterministic sanitized shared-public-tick-label contract over a valid 10AS merge artifact; caller-supplied optional tick label lists (`agent_a_tick_labels`, `agent_b_tick_labels`); 10AS merge is provenance/agent identity source only; no temporal overlap, no co-presence, no ordering/sequence inference; targeted tests: 29 passed; 10AI through 10BA regression: 436 passed; commit `5b3423d`
 - 10BB: Shared Public State Hash Equality Contract - deterministic sanitized shared-public-state-hash-equality contract over a valid 10AS merge artifact; caller-supplied optional public state hash strings (`agent_a_public_state_hash`, `agent_b_public_state_hash`); 10AS merge is provenance/agent identity source only; no state inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 28 passed; 10AI through 10BB regression: 464 passed; commit `eb61ca1`
 - 10BC: Shared Public Observation Count Equality Contract - deterministic sanitized shared-public-observation-count-equality contract over a valid 10AS merge artifact; caller-supplied optional observation count integers (`agent_a_observation_count`, `agent_b_observation_count`); 10AS merge is provenance/agent identity source only; 10AS bundles do not expose `observation_count`; no observation-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 23 passed; 10AI through 10BC regression: 487 passed; commit `414b780`
+- 10BD: Shared Public Movement Count Equality Contract - deterministic sanitized shared-public-movement-count-equality contract over a valid 10AS merge artifact; caller-supplied optional movement count integers (`agent_a_movement_count`, `agent_b_movement_count`); 10AS merge is provenance/agent identity source only; 10AS bundles do not expose `movement_count`; no movement-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 23 passed; 10AI through 10BD regression: 510 passed; commit `76267b8`
 
 Documentation/spec phases:
 - 10M: public README and phase index
