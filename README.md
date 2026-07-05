@@ -72,13 +72,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10BL - Shared Public Known Tile IDs Set Equality Contract   (current)
 10BM - Public Ladder Reassessment & Runtime Wiring Readiness Gate   (current)
 10BN — Public Observation Depth Boundary Contract   (current)
+10BO — Post-10BN Depth Surface Readiness Audit   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10BL, the shared public known tile IDs set equality contract (10AS was the two-agent public merge; 10AU was the shared public anchor contract; 10AW was the shared public route destination contract; 10AY was the shared public snapshot hash equality contract; 10AZ through 10BK added scalar public equality contracts, 10BL closes the current 10AS equality ladder with set equality, Phase 10BM — Public Ladder Reassessment & Runtime Wiring Readiness Gate (`world-sim/docs/phase_10bm_public_ladder_reassessment_readiness_gate_spec.md`) establishes the readiness gate that any future rung must satisfy without crossing into same map knowledge, exploration, observation-event, co-presence, route/path/destination/timing/plan, or relationship inference, and Phase 10BN — Public Observation Depth Boundary Contract (`world-sim/docs/phase_10bn_public_observation_depth_boundary_contract_spec.md`) introduces a new dimension (observation depth) but does not create an equality rung and does not reopen any 10AS bundle scalar).
+The public stack now reaches Phase 10BL, the shared public known tile IDs set equality contract (10AS was the two-agent public merge; 10AU was the shared public anchor contract; 10AW was the shared public route destination contract; 10AY was the shared public snapshot hash equality contract; 10AZ through 10BK added scalar public equality contracts, 10BL closes the current 10AS equality ladder with set equality, Phase 10BM — Public Ladder Reassessment & Runtime Wiring Readiness Gate (`world-sim/docs/phase_10bm_public_ladder_reassessment_readiness_gate_spec.md`) establishes the readiness gate that any future rung must satisfy without crossing into same map knowledge, exploration, observation-event, co-presence, route/path/destination/timing/plan, or relationship inference, Phase 10BN — Public Observation Depth Boundary Contract (`world-sim/docs/phase_10bn_public_observation_depth_boundary_contract_spec.md`) introduces a new dimension (observation depth) but does not create an equality rung and does not reopen any 10AS bundle scalar, and Phase 10BO — Post-10BN Depth Surface Readiness Audit (`world-sim/docs/phase_10bo_post_10bn_depth_surface_readiness_audit_spec.md`) closes the depth surface at 10BN unless a future rung introduces a new non-comparative dimension beyond depth).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
