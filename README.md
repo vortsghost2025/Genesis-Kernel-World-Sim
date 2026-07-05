@@ -70,13 +70,14 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10BJ - Shared Public Current Tile ID Equality Contract   (current)
 10BK - Shared Public Route Intent ID Equality Contract   (current)
 10BL - Shared Public Known Tile IDs Set Equality Contract   (current)
+10BM - Public Ladder Reassessment & Runtime Wiring Readiness Gate   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
 ## Current Status
 
-The public stack now reaches Phase 10BL, the shared public known tile IDs set equality contract (10AS was the two-agent public merge; 10AU was the shared public anchor contract; 10AW was the shared public route destination contract; 10AY was the shared public snapshot hash equality contract; 10AZ through 10BK added scalar public equality contracts, and 10BL closes the current 10AS equality ladder with set equality without crossing into same map knowledge, exploration, observation-event, co-presence, route/path/destination/timing/plan, or relationship inference).
+The public stack now reaches Phase 10BL, the shared public known tile IDs set equality contract (10AS was the two-agent public merge; 10AU was the shared public anchor contract; 10AW was the shared public route destination contract; 10AY was the shared public snapshot hash equality contract; 10AZ through 10BK added scalar public equality contracts, 10BL closes the current 10AS equality ladder with set equality, and Phase 10BM — Public Ladder Reassessment & Runtime Wiring Readiness Gate (`world-sim/docs/phase_10bm_public_ladder_reassessment_readiness_gate_spec.md`) establishes the readiness gate that any future rung must satisfy without crossing into same map knowledge, exploration, observation-event, co-presence, route/path/destination/timing/plan, or relationship inference).
 
 Completed locally (mixed pure modules and harness proof):
 - 10K: pure world event ledger
