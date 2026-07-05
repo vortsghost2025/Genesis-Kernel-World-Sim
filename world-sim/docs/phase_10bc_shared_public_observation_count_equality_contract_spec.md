@@ -4,14 +4,14 @@
 
 10BC is a pure public observation-count equality contract over a valid 10AS merge artifact.
 
-10BC consumes a valid 10AS merge as its only input. It reads only:
+10BC consumes a valid 10AS merge for provenance and agent identity only.
 
-- provenance fields
-- agent ids
-- `agent_a.observation_count`
-- `agent_b.observation_count`
+Observation counts are caller-supplied optional scalar kwargs:
 
-No caller-supplied arguments are needed. 10BC emits a deterministic, sanitized contract that compares the agents' public observation counts mechanically.
+- `agent_a_observation_count`
+- `agent_b_observation_count`
+
+10BC does not read `observation_count` from 10AS bundles because 10AS bundles do not expose that field.  Caller-supplied observation counts are validated as non-negative integers; missing, non-integer, or negative values are treated as `None`.  10BC emits a deterministic, sanitized contract that compares the agents' public observation counts mechanically.
 
 `observation_count` is a non-negative integer representing how many observations an agent has reported on its public state surface. It is a metadata counter, not a temporal claim, not a spatial claim, and not a claim about what was observed. Comparing observation counts does not imply temporal overlap, co-presence, awareness, or any kind of relationship.
 
@@ -33,7 +33,7 @@ No caller-supplied arguments are needed. 10BC emits a deterministic, sanitized c
 
 ## Allowed Comparisons
 
-10BC compares only `observation_count` fields from the 10AS agent bundles:
+10BC compares only `observation_count` values supplied as caller kwargs:
 
 - `agent_a_observation_count` vs `agent_b_observation_count` → `same_observation_count` (True only when both are non-None and equal)
 - `shared_observation_count` — populated only when `same_observation_count` is True
@@ -80,7 +80,7 @@ No caller-supplied arguments are needed. 10BC emits a deterministic, sanitized c
 
 ## Public Functions
 
-- `create_shared_observation_count_equality_contract(merge)` — build contract from a valid 10AS merge dict; reads `observation_count` from each agent bundle
+- `create_shared_observation_count_equality_contract(merge, *, agent_a_observation_count=None, agent_b_observation_count=None)` — build contract from a valid 10AS merge dict; accepts optional caller-supplied observation counts
 - `export_shared_observation_count_equality_contract(contract)` — deterministic sanitized JSON string
 - `contract_observation_count_equality_file(merge_json_path)` — read merge JSON from path, build contract, return result dict
 
@@ -109,16 +109,15 @@ The material block is hashed via sha256; `contract_id = "10BC-" + hash[:32]`.
 
 ## Missing / None Handling
 
-- Missing or non-integer `observation_count` fields in agent bundles are treated as `None`
+- Missing, non-integer, or negative caller-supplied `observation_count` values are treated as `None`
 - When either count is `None`, `same_observation_count` is False and `shared_observation_count` is None
-- Negative counts (if present in malformed bundles) are treated as `None`
 
 ## Test Plan
 
-1. Happy path: both bundles carry equal `observation_count` → `same_observation_count` is True
-2. Different observation counts → `same_observation_count` is False
-3. One bundle missing `observation_count` → `same_observation_count` is False
-4. Both bundles missing `observation_count` → `same_observation_count` is False
+1. Happy path: both caller-supplied observation counts equal → `same_observation_count` is True
+2. Different caller-supplied observation counts → `same_observation_count` is False
+3. One caller-supplied observation count missing/None → `same_observation_count` is False
+4. Both caller-supplied observation counts missing/None → `same_observation_count` is False
 5. Output has exactly required top-level fields; no forbidden fields
 6. `contract_id` deterministic across repeated calls
 7. `contract_id` changes when observation count changes
@@ -153,7 +152,7 @@ After 10BC, additional singular-field equality contracts over other 10AS-exposed
 - 10AZ compares tick ranges (first_tick, last_tick) as caller-supplied optional kwargs
 - 10BA compares tick label sets as caller-supplied optional kwargs
 - 10BB compares public state hash strings (10AP layer) as caller-supplied optional kwargs
-- 10BC compares observation_count values (10AP layer) read directly from 10AS bundles
+- 10BC compares observation_count values (10AP layer) as caller-supplied optional kwargs
 - All consume 10AS as their only input
 - None infer temporal overlap, co-presence, awareness, or any kind of relationship
 - Together they provide orthogonal mechanical comparisons over public metadata without crossing into forbidden inference
