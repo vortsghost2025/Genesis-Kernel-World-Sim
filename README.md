@@ -1,5 +1,9 @@
 # Genesis Kernel World Sim
 
+Genesis Kernel World Sim is a proof-of-concept for applying Rosetta Stone's self-correcting constraint theory to agent-based civilization simulation.
+
+The current milestone is not autonomous civilization yet. It is the verified epistemic kernel that prevents known multi-agent failure modes before autonomy is turned loose.
+
 A civilization-simulation kernel that models persistent agents, their perceptions, memories, actions, and the evidence-backed world events they produce.
 
 This project is a **simulation engine**, not a real-world claim. The founding agents — Adam and Eve — are simulation entities with canonical identities, continuity across cycles, and bounded perception. They are not religious figures, real-world authorities, or conscious beings.
@@ -60,6 +64,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10BD - Shared Public Movement Count Equality Contract   (current)
 10BE - Shared Public Accepted Event Count Equality Contract   (current)
 10BF - Shared Public Ignored Event Count Equality Contract   (current)
+10BG - Shared Public Last Event ID Equality Contract   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route intent, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
@@ -108,6 +113,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10BD: Shared Public Movement Count Equality Contract - deterministic sanitized shared-public-movement-count-equality contract over a valid 10AS merge artifact; caller-supplied optional movement count integers (`agent_a_movement_count`, `agent_b_movement_count`); 10AS merge is provenance/agent identity source only; 10AS bundles do not expose `movement_count`; no movement-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 23 passed; 10AI through 10BD regression: 510 passed; commit `76267b8`
 - 10BE: Shared Public Accepted Event Count Equality Contract - deterministic sanitized shared-public-accepted-event-count-equality contract over a valid 10AS merge artifact; caller-supplied optional accepted event count integers (`agent_a_accepted_event_count`, `agent_b_accepted_event_count`); 10AS merge is provenance/agent identity source only; 10AS bundles do not expose `accepted_event_count`; no event-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 23 passed; 10AI through 10BE regression: 533 passed; commit `4cddfe7`
 - 10BF: Shared Public Ignored Event Count Equality Contract - deterministic sanitized shared-public-ignored-event-count-equality contract over a valid 10AS merge artifact; caller-supplied optional ignored event count integers (`agent_a_ignored_event_count`, `agent_b_ignored_event_count`); 10AS merge is provenance/agent identity source only; 10AS bundles do not expose `ignored_event_count`; no event-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; scalar-only (no lists, no deduplication, no set algebra); targeted tests: 23 passed; 10AI through 10BF regression: 556 passed; commit `9b58dbd`
+- 10BG: Shared Public Last Event ID Equality Contract - deterministic sanitized shared-public-last-event-id-equality contract over a valid 10AS merge artifact; caller-supplied optional scalar string kwargs (`agent_a_last_event_id`, `agent_b_last_event_id`); 10AS bundles do not expose `last_event_id`; scalar string equality only (no lists, no deduplication, no set algebra); `contract_id` preserves A/B agent orientation (not sorted); `_sanitize_event_id` returns None for non-string, empty, or `[REDACTED`-containing values to prevent sanitizer-collapse false equality; no event-content inference, no temporal overlap, no co-presence, no meeting/interaction inference, no relationship inference; targeted tests: 23 passed; 10AI through 10BG regression: 579 passed; commit `4463045`
 
 Documentation/spec phases:
 - 10M: public README and phase index
