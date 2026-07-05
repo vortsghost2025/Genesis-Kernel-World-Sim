@@ -137,7 +137,7 @@ Documentation/spec phases:
 - 10Z: first remembered‑heartbeat contract (docs‑only/spec‑only)
 - 10Q–10S: future plan, persistent habitat principles, and runtime wiring architecture
 
-CI status: GitHub Actions may show pending or failed while account-level restrictions prevent CI runners from starting. Pure-module tests are designed to run locally without runtime infrastructure.
+CI status: GitHub Actions pure-tests workflow is passing (10K/10L modules). Budget billing lock resolved. Pure-module tests also run locally without runtime infrastructure.
 
 ## Safe Local Verification
 
