@@ -61,4 +61,14 @@ jobs:
             tests/test_phase10az_shared_public_tick_range_equality_contract.py \
             tests/test_phase10ba_shared_public_tick_label_contract.py \
             tests/test_phase10bb_shared_public_state_hash_equality_contract.py \
+            tests/test_phase10bc_shared_public_observation_count_equality_contract.py \
+            tests/test_phase10bd_shared_public_movement_count_equality_contract.py \
+            tests/test_phase10be_shared_public_accepted_event_count_equality_contract.py \
+            tests/test_phase10bf_shared_public_ignored_event_count_equality_contract.py \
+            tests/test_phase10bg_shared_public_last_event_id_equality_contract.py \
+            tests/test_phase10bh_shared_public_first_event_id_equality_contract.py \
+            tests/test_phase10bi_shared_public_merge_id_equality_contract.py \
+            tests/test_phase10bj_shared_public_current_tile_id_equality_contract.py \
+            tests/test_phase10bk_shared_public_route_intent_id_equality_contract.py \
+            tests/test_phase10bl_shared_public_known_tile_ids_set_equality_contract.py \
             -v
