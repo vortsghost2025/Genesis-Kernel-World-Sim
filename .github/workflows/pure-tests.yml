@@ -31,4 +31,5 @@ jobs:
             tests/test_phase10l_candidate_mapper_gather.py \
             tests/test_phase10l_candidate_mapper_social.py \
             tests/test_phase10l_candidate_mapper_boundaries.py \
+            tests/test_pure_integration_harness.py \
             -v
