@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest
-      - name: Run pure 10K and 10L module tests
+      - name: Run pure module tests (10K/10L plus verifier/aggregator/exporter/sanitizer)
         run: |
           python -m pytest \
             tests/test_phase10k_world_event_ledger_append_only.py \
@@ -31,5 +31,13 @@ jobs:
             tests/test_phase10l_candidate_mapper_gather.py \
             tests/test_phase10l_candidate_mapper_social.py \
             tests/test_phase10l_candidate_mapper_boundaries.py \
+            tests/test_phase10t_event_verifier_duplicate.py \
+            tests/test_phase10t_event_verifier_contradiction.py \
+            tests/test_phase10t_event_verifier_reference.py \
+            tests/test_phase10t_event_verifier_consistency.py \
+            tests/test_phase10t_event_verifier_accept.py \
+            tests/test_phase10u_event_aggregator.py \
+            tests/test_phase10v_event_exporter.py \
+            tests/test_phase10ad_public_egress_sanitizer.py \
             tests/test_pure_integration_harness.py \
             -v
