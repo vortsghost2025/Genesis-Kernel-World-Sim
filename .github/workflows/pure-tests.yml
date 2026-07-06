@@ -52,4 +52,13 @@ jobs:
             tests/test_phase10aq_known_map_snapshot_export.py \
             tests/test_phase10ar_route_intent_contract.py \
             tests/test_phase10as_two_agent_public_merge.py \
+            tests/test_phase10at_shared_public_observation_contract.py \
+            tests/test_phase10au_shared_public_anchor_contract.py \
+            tests/test_phase10av_shared_public_event_ref_contract.py \
+            tests/test_phase10aw_shared_public_route_destination_contract.py \
+            tests/test_phase10ax_shared_public_territory_ref_contract.py \
+            tests/test_phase10ay_shared_public_snapshot_hash_equality_contract.py \
+            tests/test_phase10az_shared_public_tick_range_equality_contract.py \
+            tests/test_phase10ba_shared_public_tick_label_contract.py \
+            tests/test_phase10bb_shared_public_state_hash_equality_contract.py \
             -v
