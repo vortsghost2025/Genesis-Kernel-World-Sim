@@ -137,7 +137,7 @@ Documentation/spec phases:
 - 10Z: first remembered‑heartbeat contract (docs‑only/spec‑only)
 - 10Q–10S: future plan, persistent habitat principles, and runtime wiring architecture
 
-CI status: GitHub Actions pure-tests workflow is passing (10K/10L/10T/10U/10V/10AD/10Y/10AA/10AB/10AC/10AE/10AF/10AG/10AH modules plus pure integration harness). Budget billing lock resolved. Pure-module tests also run locally without runtime infrastructure.
+CI status: GitHub Actions pure-tests workflow is passing (10K/10L/10T/10U/10V/10AD/10Y/10AA/10AB/10AC/10AE/10AF/10AG/10AH/10AP/10AQ modules plus pure integration harness). Budget billing lock resolved. Pure-module tests also run locally without runtime infrastructure.
 
 ## Safe Local Verification
 
