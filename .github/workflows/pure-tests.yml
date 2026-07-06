@@ -50,4 +50,6 @@ jobs:
             tests/test_phase10ah_observed_slice_bridge_hardening.py \
             tests/test_phase10ap_public_state_projector.py \
             tests/test_phase10aq_known_map_snapshot_export.py \
+            tests/test_phase10ar_route_intent_contract.py \
+            tests/test_phase10as_two_agent_public_merge.py \
             -v
