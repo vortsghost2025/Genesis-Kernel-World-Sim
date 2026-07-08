@@ -141,14 +141,16 @@ CI status: GitHub Actions pure-tests workflow is passing (10K/10L/10T/10U/10V/10
 
 ## Safe Local Verification
 
+The canonical pure-test manifest is `.github/workflows/pure-tests.yml`; keep this README block synchronized with CI.
+
 You can run the mixed local verification suite—including the completed pure‑module tests, the Phase 10Y single‑tick ingress harness, and the Phase 10AA two‑agent echo harness—without any daemon, provider, tick, or runtime infrastructure:
 
 ```bash
 cd world-sim
 python -m pytest \
-    tests/test_phase10k_world_event_ledger_schema.py \
     tests/test_phase10k_world_event_ledger_append_only.py \
     tests/test_phase10k_world_event_ledger_boundaries.py \
+    tests/test_phase10k_world_event_ledger_schema.py \
     tests/test_phase10l_candidate_mapper_observe_rest.py \
     tests/test_phase10l_candidate_mapper_gather.py \
     tests/test_phase10l_candidate_mapper_social.py \
@@ -160,16 +162,47 @@ python -m pytest \
     tests/test_phase10t_event_verifier_accept.py \
     tests/test_phase10u_event_aggregator.py \
     tests/test_phase10v_event_exporter.py \
+    tests/test_phase10ad_public_egress_sanitizer.py \
+    tests/test_pure_integration_harness.py \
     tests/test_phase10y_single_tick_ingress.py \
     tests/test_phase10aa_two_agent_echo_harness.py \
     tests/test_phase10ab_two_agent_echo_rejections.py \
     tests/test_phase10ac_replay_audit_harness.py \
-    tests/test_phase10ad_public_egress_sanitizer.py \
     tests/test_phase10ae_public_egress_boundary_harness.py \
     tests/test_phase10af_hidden_planet_substrate.py \
     tests/test_phase10ag_observed_slice_mapper.py \
     tests/test_phase10ah_observed_slice_bridge_hardening.py \
-    tests/test_phase10ai_local_movement_contract.py -v
+    tests/test_phase10ap_public_state_projector.py \
+    tests/test_phase10aq_known_map_snapshot_export.py \
+    tests/test_phase10ar_route_intent_contract.py \
+    tests/test_phase10as_two_agent_public_merge.py \
+    tests/test_phase10at_shared_public_observation_contract.py \
+    tests/test_phase10au_shared_public_anchor_contract.py \
+    tests/test_phase10av_shared_public_event_ref_contract.py \
+    tests/test_phase10aw_shared_public_route_destination_contract.py \
+    tests/test_phase10ax_shared_public_territory_ref_contract.py \
+    tests/test_phase10ay_shared_public_snapshot_hash_equality_contract.py \
+    tests/test_phase10az_shared_public_tick_range_equality_contract.py \
+    tests/test_phase10ba_shared_public_tick_label_contract.py \
+    tests/test_phase10bb_shared_public_state_hash_equality_contract.py \
+    tests/test_phase10bc_shared_public_observation_count_equality_contract.py \
+    tests/test_phase10bd_shared_public_movement_count_equality_contract.py \
+    tests/test_phase10be_shared_public_accepted_event_count_equality_contract.py \
+    tests/test_phase10bf_shared_public_ignored_event_count_equality_contract.py \
+    tests/test_phase10bg_shared_public_last_event_id_equality_contract.py \
+    tests/test_phase10bh_shared_public_first_event_id_equality_contract.py \
+    tests/test_phase10bi_shared_public_merge_id_equality_contract.py \
+    tests/test_phase10bj_shared_public_current_tile_id_equality_contract.py \
+    tests/test_phase10bk_shared_public_route_intent_id_equality_contract.py \
+    tests/test_phase10bl_shared_public_known_tile_ids_set_equality_contract.py \
+    tests/test_phase10ai_local_movement_contract.py \
+    tests/test_phase10aj_known_map_accumulation.py \
+    tests/test_phase10ak_multi_tick_exploration_loop.py \
+    tests/test_phase10al_tiny_local_heartbeat_harness.py \
+    tests/test_phase10am_bounded_heartbeat_sequence.py \
+    tests/test_phase10an_bounded_sequence_to_ledger.py \
+    tests/test_phase10ao_ledger_replay_verifier.py \
+    -v
 ```
 
 All tests use temporary directories only. They do not:
