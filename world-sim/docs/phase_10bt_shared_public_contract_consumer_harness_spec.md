@@ -130,7 +130,7 @@ When `contract_type` is a non-empty string but not yet wired up:
 - `consumer_scope` remains `"record_public_equality_signal_only"`
 - All four runtime flags remain **False**
 
-The harness remains open to future contracts (10BJ, 10BK, 10BL, and others) without modification; the consumer simply records the contract type "unknown" until an explicit future rung teaches the consumer how to extract a signal from it.
+The harness remains open to future contracts (10BK, 10BL, 10BG, 10BH, 10BI, and others) without modification; the consumer simply records the contract type "unknown" until an explicit future rung teaches the consumer how to extract a signal from it.
 
 ### Currently Recognised Contract Vocabulary
 
@@ -140,8 +140,29 @@ The consumer harness has explicit signal-extraction branches for:
 |---|---|---|---|
 | `shared_public_snapshot_id_equality_contract` (10BP) | `"snapshot_id_equality"` | `contract["same_snapshot_id"]` | `contract["shared_snapshot_id"]` (sanitized) when present-true, else `None` |
 | `shared_snapshot_hash_equality_contract` (10AY) | `"snapshot_hash_equality"` | `contract["same_snapshot_hash"]` | `contract["shared_snapshot_hash"]` (sanitized) when present-true, else `None` |
+| `shared_public_current_tile_id_equality_contract` (10BJ) | `"current_tile_id_equality"` | `contract["same_current_tile_id"]` | `contract["shared_current_tile_id"]` (sanitized) when present-true, else `None` |
 
 Adding a new recognised contract is a small extension to `_extract_equality_signal` in the 10BT module only; the public-facing decision envelope (21 fields), `consumer_scope`, `claim_boundary`, `decision_schema_version`, and the hard-coded runtime/daemon/scheduler/network block do **not** change between recognitions.
+
+### 10BJ-Specific Boundary (Hard)
+
+A same current_tile_id equality signal is a **public equality signal only**. It MUST NOT, and DOES NOT, imply:
+
+- co-presence
+- same time
+- same observation
+- proximity
+- awareness
+- interaction
+- relationship
+- meeting
+- collision
+- shared visit
+- shared journey
+- having navigated to each other
+- being "together"
+
+The 10BT envelope must never expose any of those keys, tokens, or phrases at the public surface. The `claim_boundary` field names a configurable fixed list of these forbidden concepts (co-presence, awareness, relationship, timing) so that a downstream consumer reading the export may verify the boundary is intact. The 10BX test suite explicitly scans the exported decision JSON for the forbidden keys, tokens, and phrases; any future regression that re-introduces them will fail the test.
 
 ---
 

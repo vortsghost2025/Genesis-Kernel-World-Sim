@@ -44,6 +44,9 @@ from backend.world.local_shared_public_contract_consumer_harness import (
     create_shared_public_contract_consumer_decision,
     export_shared_public_contract_consumer_decision,
 )
+from backend.world.local_shared_public_current_tile_id_equality_contract import (
+    create_shared_current_tile_id_equality_contract,
+)
 from backend.world.local_shared_public_snapshot_hash_equality_contract import (
     create_shared_snapshot_hash_equality_contract,
 )
@@ -260,6 +263,35 @@ def _build_10ay_contract(
     contract = create_shared_snapshot_hash_equality_contract(merge)
     assert contract["ok"] is True, (
         "fixture 10AY contract must be ok=True; got: "
+        + repr(contract.get("errors"))
+    )
+    return contract
+
+
+def _build_merge_for_10bj(
+    *,
+    a_current: str = TILE_A,
+    b_current: str = TILE_B,
+) -> dict:
+    merge = _build_merge(
+        a_current=a_current,
+        b_current=b_current,
+    )
+    return merge
+
+
+def _build_10bj_contract(
+    *,
+    a_current: str = TILE_A,
+    b_current: str = TILE_B,
+) -> dict:
+    merge = _build_merge_for_10bj(
+        a_current=a_current,
+        b_current=b_current,
+    )
+    contract = create_shared_current_tile_id_equality_contract(merge)
+    assert contract["ok"] is True, (
+        "fixture 10BJ contract must be ok=True; got: "
         + repr(contract.get("errors"))
     )
     return contract
@@ -779,6 +811,251 @@ class Test10AYExpansion:
         )
 
 
+class Test10BXExpansion:
+    """10BX expansion: consumer recognizes current_tile_id equality too.
+
+    NOTE: a same current_tile_id signal alone is NOT co-presence, NOT
+    proximity, NOT same-time, NOT awareness, NOT interaction,
+    NOT meeting, NOT collision, NOT relationship.  These tests
+    enforce that boundary at all observable surfaces.
+    """
+
+    def test_happy_path_consume_10bj_same_current_tile_id(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_SHARED,
+            b_current=TILE_SHARED,
+        )
+        assert contract["same_current_tile_id"] is True
+        assert contract["shared_current_tile_id"] == TILE_SHARED
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert decision["ok"] is True
+        assert decision["decision_schema_version"] == "10BT.1"
+        assert (
+            decision["decision_type"]
+            == "shared_public_contract_consumer_decision"
+        )
+        assert decision["decision_id"].startswith("10BT-")
+        assert decision["source_contract_id"] == contract["contract_id"]
+        assert (
+            decision["source_contract_type"]
+            == "shared_public_current_tile_id_equality_contract"
+        )
+        assert (
+            decision["source_contract_schema_version"] == "10BJ.1"
+        )
+        assert decision["source_claim_scope"] == (
+            "shared_public_current_tile_id_equality_only"
+        )
+        assert (
+            decision["source_merge_hash"]
+            == contract["source_merge_hash"]
+        )
+        assert decision["consumer_scope"] == "record_public_equality_signal_only"
+        assert decision["contract_seen"] is True
+        assert decision["contract_ok"] is True
+        assert decision["equality_signal_present"] is True
+        assert decision["equality_signal_type"] == "current_tile_id_equality"
+        assert (
+            decision["equality_signal_value"] == TILE_SHARED
+        )
+        for flag in (
+            "runtime_allowed",
+            "daemon_allowed",
+            "scheduler_allowed",
+            "network_allowed",
+        ):
+            assert decision[flag] is False, flag + " must be False"
+        assert decision["errors"] == []
+
+    def test_different_current_tile_ids_produces_no_signal(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_A,
+            b_current=TILE_B,
+        )
+        assert contract["same_current_tile_id"] is False
+        assert contract["shared_current_tile_id"] is None
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert decision["ok"] is True
+        assert decision["contract_seen"] is True
+        assert decision["contract_ok"] is True
+        assert decision["equality_signal_present"] is False
+        assert decision["equality_signal_type"] == "current_tile_id_equality"
+        assert decision["equality_signal_value"] is None
+        for flag in (
+            "runtime_allowed",
+            "daemon_allowed",
+            "scheduler_allowed",
+            "network_allowed",
+        ):
+            assert decision[flag] is False
+
+    def test_10bx_signal_does_not_change_21_field_envelope(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_SHARED, b_current=TILE_SHARED
+        )
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert set(decision.keys()) == _EXPECTED_DECISION_FIELDS
+        assert len(_EXPECTED_DECISION_FIELDS) == 21
+        assert set(decision.keys()) == {
+            "ok",
+            "decision_schema_version",
+            "decision_type",
+            "decision_id",
+            "source_contract_id",
+            "source_contract_type",
+            "source_contract_schema_version",
+            "source_claim_scope",
+            "source_merge_hash",
+            "consumer_scope",
+            "contract_seen",
+            "contract_ok",
+            "equality_signal_present",
+            "equality_signal_type",
+            "equality_signal_value",
+            "runtime_allowed",
+            "daemon_allowed",
+            "scheduler_allowed",
+            "network_allowed",
+            "claim_boundary",
+            "errors",
+        }
+
+    def test_10bx_signal_does_not_change_runtime_flag_block(self):
+        happy = create_shared_public_contract_consumer_decision(
+            _build_10bj_contract(a_current=TILE_SHARED, b_current=TILE_SHARED)
+        )
+        different = create_shared_public_contract_consumer_decision(
+            _build_10bj_contract(a_current=TILE_A, b_current=TILE_B)
+        )
+        for label, decision in (("happy", happy), ("different", different)):
+            assert decision["runtime_allowed"] is False, label
+            assert decision["daemon_allowed"] is False, label
+            assert decision["scheduler_allowed"] is False, label
+            assert decision["network_allowed"] is False, label
+
+    def test_10bx_signal_does_not_introduce_co_presence_or_proximity_keys(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_SHARED, b_current=TILE_SHARED
+        )
+        decision = create_shared_public_contract_consumer_decision(contract)
+        exported = export_shared_public_contract_consumer_decision(decision)
+        forbidden_keys = [
+            "co_presence",
+            "proximate",
+            "proximity",
+            "met",
+            "meeting",
+            "collision",
+            "interaction",
+            "active_at_same_time",
+            "temporal_overlap",
+            "same_event",
+            "same_time",
+            "same_sequence",
+            "same_observation",
+            "same_place_at_same_time",
+            "same_trip",
+            "together",
+            "shared_visit",
+            "shared_journey",
+            "navigated_to_each_other",
+            "aware",
+            "awareness",
+            "relationship",
+            "trust",
+        ]
+        for key in forbidden_keys:
+            assert key not in decision, (
+                "10BX must not introduce co-presence / proximity key: "
+                + key
+            )
+        lowered = exported.lower()
+        for token in (
+            "co_presence",
+            "proximity",
+            "met",
+            "meeting",
+            "collision",
+            "interaction",
+            "temporal_overlap",
+            "active_at_same_time",
+            "same_event",
+            "same_time",
+            "same_sequence",
+            "navigated_to_each_other",
+            "shared_visit",
+            "shared_journey",
+            "together",
+        ):
+            assert token not in lowered, (
+                "forbidden co-presence token in exported 10BX decision: "
+                + token
+            )
+        forbidden_phrases = [
+            "are co-present",
+            "are aware",
+            "have met",
+            "interacted",
+            "are proximate",
+            "same time",
+            "share an event",
+            "navigated to each other",
+            "share a journey",
+        ]
+        for phrase in forbidden_phrases:
+            assert phrase not in lowered, (
+                "forbidden co-presence phrase in exported 10BX decision: "
+                + phrase
+            )
+
+    def test_10bx_claim_boundary_names_co_presence_as_forbidden_concept(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_SHARED, b_current=TILE_SHARED
+        )
+        decision = create_shared_public_contract_consumer_decision(contract)
+        boundary = decision["claim_boundary"]
+        must_be_named_as_forbidden = [
+            "co-presence",
+            "awareness",
+            "relationship",
+            "timing",
+        ]
+        lowered = boundary.lower()
+        for word in must_be_named_as_forbidden:
+            assert word in lowered, (
+                "10BX claim_boundary must name co-presence/awareness/"
+                "relationship/timing as forbidden concepts; missing: "
+                + word
+            )
+
+    def test_10bx_decision_id_changes_with_contract_id(self):
+        c_shared = _build_10bj_contract(
+            a_current=TILE_SHARED, b_current=TILE_SHARED
+        )
+        c_diff = _build_10bj_contract(
+            a_current=TILE_A, b_current=TILE_B
+        )
+        d_shared = create_shared_public_contract_consumer_decision(c_shared)
+        d_diff = create_shared_public_contract_consumer_decision(c_diff)
+        assert d_shared["decision_id"] != d_diff["decision_id"]
+        assert (
+            d_shared["source_contract_id"] != d_diff["source_contract_id"]
+        )
+        assert (
+            d_shared["equality_signal_present"]
+            != d_diff["equality_signal_present"]
+        )
+
+    def test_10bx_private_strings_do_not_leak(self):
+        contract = _build_10bj_contract(
+            a_current=TILE_SHARED, b_current=TILE_SHARED
+        )
+        contract["source_merge_hash"] = "/home/user/secret"
+        decision = create_shared_public_contract_consumer_decision(contract)
+        exported = export_shared_public_contract_consumer_decision(decision)
+        assert "/home/user/secret" not in exported
+
+
 class TestPublicFunctionCoverage:
     """Test 16: all public functions exercised."""
 
@@ -787,6 +1064,10 @@ class TestPublicFunctionCoverage:
         ay_contract = _build_10ay_contract(
             a_snapshot_hash=SNAP_HASH_SHARED,
             b_snapshot_hash=SNAP_HASH_SHARED,
+        )
+        bj_contract = _build_10bj_contract(
+            a_current=TILE_SHARED,
+            b_current=TILE_SHARED,
         )
 
         d_bp = create_shared_public_contract_consumer_decision(bp_contract)
@@ -798,6 +1079,11 @@ class TestPublicFunctionCoverage:
         assert d_ay["ok"] is True
         assert d_ay["contract_seen"] is True
         assert d_ay["equality_signal_type"] == "snapshot_hash_equality"
+
+        d_bj = create_shared_public_contract_consumer_decision(bj_contract)
+        assert d_bj["ok"] is True
+        assert d_bj["contract_seen"] is True
+        assert d_bj["equality_signal_type"] == "current_tile_id_equality"
 
         exported = export_shared_public_contract_consumer_decision(d_bp)
         assert isinstance(exported, str)

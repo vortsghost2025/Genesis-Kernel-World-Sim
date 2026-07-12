@@ -77,6 +77,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10BR - Post-10BP Public Surface Coverage Audit   (current)
 10BT - First Shared Public Contract Consumer Harness   (current)
 10BV - Add Snapshot Hash Signal Extraction to Contract Consumer Harness   (current)
+10BX - Add Current Tile Signal Extraction to Contract Consumer Harness   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
