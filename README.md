@@ -82,6 +82,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10CB - Add Known Tile IDs Set Signal Extraction to Contract Consumer Harness   (current)
 10CD - Add Route Destination Tile Signal Extraction to Contract Consumer Harness   (current)
 10CF - Post-Consumer Vocabulary Coverage Audit   (current)
+10CH - Runtime Readiness Boundary Audit   (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
