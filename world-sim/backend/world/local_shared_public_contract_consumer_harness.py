@@ -292,6 +292,27 @@ def _extract_equality_signal(contract_type: str, contract: dict) -> dict[str, An
             "equality_signal_value": value,
         }
 
+    if contract_type == "shared_public_route_destination_contract":
+        # 10AW does not expose a dedicated ``same_`` boolean; the
+        # equality indicator is ``shared_route_destination_tile_id``,
+        # which is set only when both agents declare the same known
+        # destination tile.  Treat presence of a non-empty sanitized
+        # destination as the equality signal.
+        shared_dest = contract.get("shared_route_destination_tile_id")
+        same_dest = bool(isinstance(shared_dest, str) and shared_dest)
+        if same_dest:
+            value: Any = sanitize_public_mapping(shared_dest)
+            if not isinstance(value, str) or not value:
+                value = None
+            same_dest = bool(value)
+        else:
+            value = None
+        return {
+            "equality_signal_present": same_dest,
+            "equality_signal_type": "route_destination_tile_id_equality",
+            "equality_signal_value": value,
+        }
+
     return {
         "equality_signal_present": False,
         "equality_signal_type": _UNKNOWN_CONTRACT_SIGNAL,

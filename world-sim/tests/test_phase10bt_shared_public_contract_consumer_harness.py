@@ -50,6 +50,9 @@ from backend.world.local_shared_public_current_tile_id_equality_contract import 
 from backend.world.local_shared_public_known_tile_ids_set_equality_contract import (
     create_shared_known_tile_ids_set_equality_contract,
 )
+from backend.world.local_shared_public_route_destination_contract import (
+    create_shared_public_route_destination_contract,
+)
 from backend.world.local_shared_public_route_intent_id_equality_contract import (
     create_shared_route_intent_id_equality_contract,
 )
@@ -401,6 +404,42 @@ def _build_10bl_contract(
     contract = create_shared_known_tile_ids_set_equality_contract(merge)
     assert contract["ok"] is True, (
         "fixture 10BL contract must be ok=True; got: "
+        + repr(contract.get("errors"))
+    )
+    return contract
+
+
+def _build_merge_for_10aw(
+    *,
+    a_dest: str = "tile_central",
+    b_dest: str = "tile_central",
+    a_known: bool = True,
+    b_known: bool = True,
+) -> dict:
+    merge = _build_merge()
+    merge["agent_a"]["route_destination_tile_id"] = a_dest
+    merge["agent_a"]["route_destination_known"] = a_known
+    merge["agent_b"]["route_destination_tile_id"] = b_dest
+    merge["agent_b"]["route_destination_known"] = b_known
+    return merge
+
+
+def _build_10aw_contract(
+    *,
+    a_dest: str = "tile_central",
+    b_dest: str = "tile_central",
+    a_known: bool = True,
+    b_known: bool = True,
+) -> dict:
+    merge = _build_merge_for_10aw(
+        a_dest=a_dest,
+        b_dest=b_dest,
+        a_known=a_known,
+        b_known=b_known,
+    )
+    contract = create_shared_public_route_destination_contract(merge)
+    assert contract["ok"] is True, (
+        "fixture 10AW contract must be ok=True; got: "
         + repr(contract.get("errors"))
     )
     return contract
@@ -1427,6 +1466,140 @@ class Test10CBExpansion:
         assert results[3]["equality_signal_type"] == "route_intent_id_equality"
 
 
+class Test10CDExpansion:
+    # 10CD: consumer recognizes 10AW
+    # (shared_public_route_destination_contract) and exports
+    # route_destination_tile_id_equality WITHOUT inferring same route
+    # path, movement, arrival, timing, plan, coordination,
+    # cooperation, awareness, trip, proximity, co-presence, or
+    # relationship.
+
+    def test_happy_path_shared_destination_exports_equality(self) -> None:
+        contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_central",
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["contract_seen"] is True
+        assert result["equality_signal_type"] == (
+            "route_destination_tile_id_equality"
+        )
+        assert result["equality_signal_present"] is True
+        assert result["equality_signal_value"] == "tile_central"
+        assert result["source_contract_type"] == (
+            "shared_public_route_destination_contract"
+        )
+
+    def test_different_destination_exports_false(self) -> None:
+        contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_far",
+        )
+        assert contract["ok"] is True
+        assert contract.get("shared_route_destination_tile_id") is None
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["equality_signal_type"] == (
+            "route_destination_tile_id_equality"
+        )
+        assert result["equality_signal_present"] is False
+        assert result["equality_signal_value"] is None
+
+    def test_unknown_destination_exports_false(self) -> None:
+        contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_central",
+            b_known=False,
+        )
+        assert contract["ok"] is True
+        assert contract.get("shared_route_destination_tile_id") is None
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["equality_signal_present"] is False
+        assert result["equality_signal_value"] is None
+
+    def test_envelope_fields_are_unchanged(self) -> None:
+        contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_central",
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["decision_schema_version"] == "10BT.1"
+        assert result["runtime_allowed"] is False
+        assert result["daemon_allowed"] is False
+        assert result["scheduler_allowed"] is False
+        assert result["network_allowed"] is False
+        assert result["source_contract_type"] == (
+            "shared_public_route_destination_contract"
+        )
+        assert result["claim_boundary"]
+
+    def test_no_inference_keys_present(self) -> None:
+        contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_far",
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        forbidden_keys = [
+            "route_path",
+            "movement",
+            "arrival",
+            "arrived",
+            "destination_reached",
+            "same_time",
+            "timing",
+            "plan",
+            "planning",
+            "coordination",
+            "cooperation",
+            "co_presence",
+            "proximity",
+            "awareness",
+            "interaction",
+            "relationship",
+            "trip",
+            "shared_journey",
+            "co_journey",
+            "shared_visit",
+        ]
+        for key in forbidden_keys:
+            assert key not in result, (
+                "forbidden key in 10CD decision: " + key
+            )
+
+    def test_module_discipline_no_contract_creator_import(self) -> None:
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "backend"
+            / "world"
+            / "local_shared_public_contract_consumer_harness.py"
+        )
+        text = path.read_text(encoding="utf-8")
+        assert "create_shared_public_route_destination_contract" not in text
+
+    def test_existing_10bp_10ay_10bj_10bk_10bl_contracts_still_pass(
+        self,
+    ) -> None:
+        contracts = [
+            _build_10bp_contract(),
+            _build_10ay_contract(),
+            _build_10bj_contract(),
+            _build_10bk_contract(),
+            _build_10bl_contract(),
+        ]
+        results = [
+            create_shared_public_contract_consumer_decision(c)
+            for c in contracts
+        ]
+        assert all(r["ok"] is True for r in results)
+        assert results[0]["equality_signal_type"] == "snapshot_id_equality"
+        assert results[1]["equality_signal_type"] == "snapshot_hash_equality"
+        assert results[2]["equality_signal_type"] == "current_tile_id_equality"
+        assert results[3]["equality_signal_type"] == "route_intent_id_equality"
+        assert results[4]["equality_signal_type"] == "known_tile_ids_set_equality"
+
+
 class TestPublicFunctionCoverage:
     """Test 16: all public functions exercised."""
 
@@ -1472,6 +1645,17 @@ class TestPublicFunctionCoverage:
         assert d_bl["ok"] is True
         assert d_bl["contract_seen"] is True
         assert d_bl["equality_signal_type"] == "known_tile_ids_set_equality"
+
+        aw_contract = _build_10aw_contract(
+            a_dest="tile_central",
+            b_dest="tile_central",
+        )
+        d_aw = create_shared_public_contract_consumer_decision(aw_contract)
+        assert d_aw["ok"] is True
+        assert d_aw["contract_seen"] is True
+        assert d_aw["equality_signal_type"] == (
+            "route_destination_tile_id_equality"
+        )
 
         exported = export_shared_public_contract_consumer_decision(d_bp)
         assert isinstance(exported, str)
