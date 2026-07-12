@@ -95,6 +95,7 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 10DB - Apply Pytest Working-Directory Convention Fix (current)
 10DD - Line-Ending Hygiene Spec (.gitattributes) (current)
 10DF - Apply Line-Ending Hygiene (.gitattributes) (current)
+10DH - Post-Tooling Readiness Boundary Audit (current)
 ```
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
@@ -165,6 +166,7 @@ Completed locally (mixed pure modules and harness proof):
 - 10DB: Apply Pytest Working-Directory Convention Fix - applies the 10CZ convention by adding world-sim/pytest.ini ([pytest] pythonpath = .) so backend resolves from repo root or world-sim; verified 29/29 pass both from repo root (python -m pytest world-sim/tests/...) and from world-sim (python -m pytest tests/...), where the root-path run previously raised ModuleNotFoundError: backend; no test/backend rewrites, no runtime/daemon/scheduler/network, gate-7 stays closed
 - 10DD: Line-Ending Hygiene Spec (.gitattributes) - docs/spec-only map of the line-ending hygiene for Genesis; defines the exact `.gitattributes` content (`* text=auto eol=lf`) and scope; applying the file is a later gated step (10DE); verified 0 tracked files currently contain CRLF (rule is preventive, not corrective) and the one-time trailing-whitespace strip is deferred (would touch many older files); no mass rewrites, tests/backend, runtime/daemon/scheduler/network, or world-sim/data writes; gate-7 stays closed
 - 10DF: Apply Line-Ending Hygiene (.gitattributes) - applies the 10DD convention by adding repo-root `.gitattributes` with `* text=auto eol=lf` only; no whitespace strip, no mass renormalize, no backend/tests/runtime/data changes; verified `git status` shows only `.gitattributes` untracked with 0 renormalize churn (0 files had CRLF); gate-7 stays closed
+- 10DH: Post-Tooling Readiness Boundary Audit - docs-only audit confirming the repo is ready for the next serious implementation phase; verifies 10CX compact/restore boundary locked (2ef6d7e), 10CZ/10DB pytest cwd convention locked (eedb32c, world-sim/pytest.ini), 10DD/10DF line-ending hygiene locked (c40336a, .gitattributes), pytest 29/29 from both repo root and world-sim, .gitattributes contains only `* text=auto eol=lf`, no whitespace strip performed, gate-7 closed, runtime/daemon/scheduler/network still unauthorized; any future runtime/write/daemon/scheduler/network phase needs separate authorization plus the GPT-5.6 Sol/Luna model switch; no implementation, tests, backend/runtime/world-sim/data changes, daemon/scheduler/network, or PatchRaccoon/agent-config edits
 
 Documentation/spec phases:
 - 10M: public README and phase index
