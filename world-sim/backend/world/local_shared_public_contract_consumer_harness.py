@@ -225,6 +225,21 @@ def _extract_equality_signal(contract_type: str, contract: dict) -> dict[str, An
             "equality_signal_value": value,
         }
 
+    if contract_type == "shared_snapshot_hash_equality_contract":
+        same_snapshot_hash = bool(contract.get("same_snapshot_hash"))
+        shared_snapshot_hash = contract.get("shared_snapshot_hash")
+        if same_snapshot_hash and isinstance(shared_snapshot_hash, str):
+            value: Any = sanitize_public_mapping(shared_snapshot_hash)
+            if not isinstance(value, str) or not value:
+                value = None
+        else:
+            value = None
+        return {
+            "equality_signal_present": same_snapshot_hash,
+            "equality_signal_type": "snapshot_hash_equality",
+            "equality_signal_value": value,
+        }
+
     return {
         "equality_signal_present": False,
         "equality_signal_type": _UNKNOWN_CONTRACT_SIGNAL,

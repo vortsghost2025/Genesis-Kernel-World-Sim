@@ -130,7 +130,18 @@ When `contract_type` is a non-empty string but not yet wired up:
 - `consumer_scope` remains `"record_public_equality_signal_only"`
 - All four runtime flags remain **False**
 
-The harness remains open to future contracts (10AY, 10BJ, and others) without modification; the consumer simply records the contract type "unknown" until an explicit future rung teaches the consumer how to extract a signal from it.
+The harness remains open to future contracts (10BJ, 10BK, 10BL, and others) without modification; the consumer simply records the contract type "unknown" until an explicit future rung teaches the consumer how to extract a signal from it.
+
+### Currently Recognised Contract Vocabulary
+
+The consumer harness has explicit signal-extraction branches for:
+
+| Contract type string | Signal type | Source field | Signal value source |
+|---|---|---|---|
+| `shared_public_snapshot_id_equality_contract` (10BP) | `"snapshot_id_equality"` | `contract["same_snapshot_id"]` | `contract["shared_snapshot_id"]` (sanitized) when present-true, else `None` |
+| `shared_snapshot_hash_equality_contract` (10AY) | `"snapshot_hash_equality"` | `contract["same_snapshot_hash"]` | `contract["shared_snapshot_hash"]` (sanitized) when present-true, else `None` |
+
+Adding a new recognised contract is a small extension to `_extract_equality_signal` in the 10BT module only; the public-facing decision envelope (21 fields), `consumer_scope`, `claim_boundary`, `decision_schema_version`, and the hard-coded runtime/daemon/scheduler/network block do **not** change between recognitions.
 
 ---
 

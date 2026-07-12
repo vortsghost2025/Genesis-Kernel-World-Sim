@@ -44,6 +44,9 @@ from backend.world.local_shared_public_contract_consumer_harness import (
     create_shared_public_contract_consumer_decision,
     export_shared_public_contract_consumer_decision,
 )
+from backend.world.local_shared_public_snapshot_hash_equality_contract import (
+    create_shared_snapshot_hash_equality_contract,
+)
 from backend.world.local_shared_public_snapshot_id_equality_contract import (
     create_shared_snapshot_id_equality_contract,
 )
@@ -60,6 +63,12 @@ TILE_B = "tile_east"
 TILE_C = "tile_north"
 TILE_SHARED = "tile_central"
 TILE_OTHER = "tile_far"
+SNAP_HASH_A = "a" * 64
+SNAP_HASH_B = "b" * 64
+SNAP_HASH_SHARED = "s" * 64
+SNAP_ID_A = "10AQ-" + "a" * 32
+SNAP_ID_B = "10AQ-" + "b" * 32
+SNAP_ID_SHARED = "10AQ-" + "s" * 32
 
 
 def _strip_python_prose(text: str) -> str:
@@ -219,6 +228,38 @@ def _build_10bp_contract(
     contract = create_shared_snapshot_id_equality_contract(merge)
     assert contract["ok"] is True, (
         "fixture 10BP contract must be ok=True; got: "
+        + repr(contract.get("errors"))
+    )
+    return contract
+
+
+def _build_merge_for_10ay(
+    *,
+    a_snapshot_hash: str = SNAP_HASH_A,
+    b_snapshot_hash: str = SNAP_HASH_B,
+    a_snapshot_id: str = SNAP_ID_A,
+    b_snapshot_id: str = SNAP_ID_B,
+) -> dict:
+    merge = _build_merge()
+    merge["agent_a"]["snapshot_hash"] = a_snapshot_hash
+    merge["agent_a"]["snapshot_id"] = a_snapshot_id
+    merge["agent_b"]["snapshot_hash"] = b_snapshot_hash
+    merge["agent_b"]["snapshot_id"] = b_snapshot_id
+    return merge
+
+
+def _build_10ay_contract(
+    *,
+    a_snapshot_hash: str = SNAP_HASH_A,
+    b_snapshot_hash: str = SNAP_HASH_B,
+) -> dict:
+    merge = _build_merge_for_10ay(
+        a_snapshot_hash=a_snapshot_hash,
+        b_snapshot_hash=b_snapshot_hash,
+    )
+    contract = create_shared_snapshot_hash_equality_contract(merge)
+    assert contract["ok"] is True, (
+        "fixture 10AY contract must be ok=True; got: "
         + repr(contract.get("errors"))
     )
     return contract
@@ -615,6 +656,7 @@ class TestModuleDiscipline:
             "project_public_state(",
             "create_route_intent_contract(",
             "create_shared_snapshot_id_equality_contract(",
+            "create_shared_snapshot_hash_equality_contract(",
             "create_shared_current_tile_id_equality_contract(",
             "create_shared_route_intent_id_equality_contract(",
             "create_shared_known_tile_ids_set_equality_contract(",
@@ -629,29 +671,149 @@ class TestModuleDiscipline:
             )
 
 
+class Test10AYExpansion:
+    """10BV expansion: consumer recognizes snapshot_hash equality too."""
+
+    def test_happy_path_consume_10ay_same_snapshot_hash(self):
+        contract = _build_10ay_contract(
+            a_snapshot_hash=SNAP_HASH_SHARED,
+            b_snapshot_hash=SNAP_HASH_SHARED,
+        )
+        assert contract["same_snapshot_hash"] is True
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert decision["ok"] is True
+        assert decision["decision_schema_version"] == "10BT.1"
+        assert (
+            decision["decision_type"]
+            == "shared_public_contract_consumer_decision"
+        )
+        assert decision["decision_id"].startswith("10BT-")
+        assert decision["source_contract_id"] == contract["contract_id"]
+        assert (
+            decision["source_contract_type"]
+            == "shared_snapshot_hash_equality_contract"
+        )
+        assert (
+            decision["source_contract_schema_version"]
+            == contract["contract_schema_version"]
+        )
+        assert (
+            decision["source_claim_scope"]
+            == "shared_snapshot_hash_equality_only"
+        )
+        assert (
+            decision["source_merge_hash"]
+            == contract["source_merge_hash"]
+        )
+        assert decision["consumer_scope"] == "record_public_equality_signal_only"
+        assert decision["contract_seen"] is True
+        assert decision["contract_ok"] is True
+        assert decision["equality_signal_present"] is True
+        assert decision["equality_signal_type"] == "snapshot_hash_equality"
+        assert (
+            decision["equality_signal_value"]
+            == contract["shared_snapshot_hash"]
+        )
+        for flag in (
+            "runtime_allowed",
+            "daemon_allowed",
+            "scheduler_allowed",
+            "network_allowed",
+        ):
+            assert decision[flag] is False, flag + " must be False"
+        assert decision["errors"] == []
+
+    def test_different_snapshot_hashes_produces_no_signal(self):
+        contract = _build_10ay_contract(
+            a_snapshot_hash=SNAP_HASH_A,
+            b_snapshot_hash=SNAP_HASH_B,
+        )
+        assert contract["same_snapshot_hash"] is False
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert decision["ok"] is True
+        assert decision["contract_seen"] is True
+        assert decision["contract_ok"] is True
+        assert decision["equality_signal_present"] is False
+        assert decision["equality_signal_type"] == "snapshot_hash_equality"
+        assert decision["equality_signal_value"] is None
+        for flag in (
+            "runtime_allowed",
+            "daemon_allowed",
+            "scheduler_allowed",
+            "network_allowed",
+        ):
+            assert decision[flag] is False
+
+    def test_10ay_missing_snapshot_hash_produces_no_signal(self):
+        contract = _build_10ay_contract(
+            a_snapshot_hash="",
+            b_snapshot_hash="",
+        )
+        assert contract["same_snapshot_hash"] is False
+        decision = create_shared_public_contract_consumer_decision(contract)
+        assert decision["ok"] is True
+        assert decision["equality_signal_present"] is False
+        assert decision["equality_signal_type"] == "snapshot_hash_equality"
+        assert decision["equality_signal_value"] is None
+
+    def test_decision_id_changes_with_10ay_contract_id(self):
+        c_shared = _build_10ay_contract(
+            a_snapshot_hash=SNAP_HASH_SHARED,
+            b_snapshot_hash=SNAP_HASH_SHARED,
+        )
+        c_diff = _build_10ay_contract(
+            a_snapshot_hash=SNAP_HASH_A,
+            b_snapshot_hash=SNAP_HASH_B,
+        )
+        d_shared = create_shared_public_contract_consumer_decision(c_shared)
+        d_diff = create_shared_public_contract_consumer_decision(c_diff)
+        assert d_shared["ok"] is True
+        assert d_diff["ok"] is True
+        assert (
+            d_shared["equality_signal_present"]
+            != d_diff["equality_signal_present"]
+        )
+        assert d_shared["decision_id"] != d_diff["decision_id"]
+        assert (
+            d_shared["source_contract_id"] != d_diff["source_contract_id"]
+        )
+
+
 class TestPublicFunctionCoverage:
     """Test 16: all public functions exercised."""
 
     def test_all_public_functions_exercised(self):
-        contract = _build_10bp_contract()
+        bp_contract = _build_10bp_contract()
+        ay_contract = _build_10ay_contract(
+            a_snapshot_hash=SNAP_HASH_SHARED,
+            b_snapshot_hash=SNAP_HASH_SHARED,
+        )
 
-        d1 = create_shared_public_contract_consumer_decision(contract)
-        assert d1["ok"] is True
-        assert d1["contract_seen"] is True
+        d_bp = create_shared_public_contract_consumer_decision(bp_contract)
+        assert d_bp["ok"] is True
+        assert d_bp["contract_seen"] is True
+        assert d_bp["equality_signal_type"] == "snapshot_id_equality"
 
-        exported = export_shared_public_contract_consumer_decision(d1)
+        d_ay = create_shared_public_contract_consumer_decision(ay_contract)
+        assert d_ay["ok"] is True
+        assert d_ay["contract_seen"] is True
+        assert d_ay["equality_signal_type"] == "snapshot_hash_equality"
+
+        exported = export_shared_public_contract_consumer_decision(d_bp)
         assert isinstance(exported, str)
         parsed = json.loads(exported)
-        assert parsed["decision_id"] == d1["decision_id"]
+        assert parsed["decision_id"] == d_bp["decision_id"]
         re = export_shared_public_contract_consumer_decision(parsed)
         assert re == exported
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "contract.json"
-            path.write_text(json.dumps(contract), encoding="utf-8")
+            path.write_text(
+                json.dumps(bp_contract), encoding="utf-8"
+            )
             d2 = consume_shared_public_contract_file(path)
         assert d2["ok"] is True
-        assert d2["decision_id"] == d1["decision_id"]
+        assert d2["decision_id"] == d_bp["decision_id"]
 
-        sanitizer_check = sanitize_public_mapping(d1)
+        sanitizer_check = sanitize_public_mapping(d_bp)
         assert isinstance(sanitizer_check, dict)
