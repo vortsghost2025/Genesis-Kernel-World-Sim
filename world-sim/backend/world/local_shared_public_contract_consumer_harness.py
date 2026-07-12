@@ -270,6 +270,28 @@ def _extract_equality_signal(contract_type: str, contract: dict) -> dict[str, An
             "equality_signal_value": value,
         }
 
+    if contract_type == "shared_public_known_tile_ids_set_equality_contract":
+        same_known_tile_ids = bool(contract.get("same_known_tile_ids"))
+        shared_known_tile_ids = contract.get("shared_known_tile_ids")
+        if (
+            same_known_tile_ids
+            and isinstance(shared_known_tile_ids, list)
+            and shared_known_tile_ids
+            and all(
+                isinstance(x, str) for x in shared_known_tile_ids
+            )
+        ):
+            value: Any = sanitize_public_mapping(shared_known_tile_ids)
+            if not (isinstance(value, list) and value):
+                value = None
+        else:
+            value = None
+        return {
+            "equality_signal_present": same_known_tile_ids,
+            "equality_signal_type": "known_tile_ids_set_equality",
+            "equality_signal_value": value,
+        }
+
     return {
         "equality_signal_present": False,
         "equality_signal_type": _UNKNOWN_CONTRACT_SIGNAL,

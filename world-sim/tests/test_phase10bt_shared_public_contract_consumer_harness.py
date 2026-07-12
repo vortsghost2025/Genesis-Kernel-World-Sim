@@ -47,6 +47,9 @@ from backend.world.local_shared_public_contract_consumer_harness import (
 from backend.world.local_shared_public_current_tile_id_equality_contract import (
     create_shared_current_tile_id_equality_contract,
 )
+from backend.world.local_shared_public_known_tile_ids_set_equality_contract import (
+    create_shared_known_tile_ids_set_equality_contract,
+)
 from backend.world.local_shared_public_route_intent_id_equality_contract import (
     create_shared_route_intent_id_equality_contract,
 )
@@ -368,6 +371,36 @@ def _build_10bk_contract(
     contract = create_shared_route_intent_id_equality_contract(merge)
     assert contract["ok"] is True, (
         "fixture 10BK contract must be ok=True; got: "
+        + repr(contract.get("errors"))
+    )
+    return contract
+
+
+def _build_merge_for_10bl(
+    *,
+    a_known: list[str] | None = None,
+    b_known: list[str] | None = None,
+) -> dict:
+    merge = _build_merge()
+    if a_known is not None:
+        merge["agent_a"]["known_tile_ids"] = list(a_known)
+    if b_known is not None:
+        merge["agent_b"]["known_tile_ids"] = list(b_known)
+    return merge
+
+
+def _build_10bl_contract(
+    *,
+    a_known: list[str] | None = None,
+    b_known: list[str] | None = None,
+) -> dict:
+    merge = _build_merge_for_10bl(
+        a_known=a_known,
+        b_known=b_known,
+    )
+    contract = create_shared_known_tile_ids_set_equality_contract(merge)
+    assert contract["ok"] is True, (
+        "fixture 10BL contract must be ok=True; got: "
         + repr(contract.get("errors"))
     )
     return contract
@@ -1254,6 +1287,146 @@ class Test10BZExpansion:
         assert results[2]["equality_signal_type"] == "current_tile_id_equality"
 
 
+class Test10CBExpansion:
+    # 10CB: consumer recognizes 10BL
+    # (shared_public_known_tile_ids_set_equality_contract) and exports
+    # known_tile_ids_set_equality WITHOUT inferring same observation
+    # depth, same route path, same travel history, same memory, same
+    # map, same experience, same time, co-presence, awareness,
+    # interaction, relationship, or coordination.
+
+    KNOWN_SHARED = ["tile_a", "tile_b", "tile_central", "tile_north"]
+    KNOWN_A_ONLY = ["tile_a", "tile_b", "tile_central"]
+    KNOWN_B_ONLY = ["tile_b", "tile_central", "tile_south"]
+
+    def test_happy_path_shared_set_exports_equality(self) -> None:
+        contract = _build_10bl_contract(
+            a_known=list(self.KNOWN_SHARED),
+            b_known=list(self.KNOWN_SHARED),
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["contract_seen"] is True
+        assert result["equality_signal_type"] == (
+            "known_tile_ids_set_equality"
+        )
+        assert result["equality_signal_present"] is True
+        assert result["equality_signal_value"] == sorted(self.KNOWN_SHARED)
+        assert result["source_contract_type"] == (
+            "shared_public_known_tile_ids_set_equality_contract"
+        )
+
+    def test_different_sets_export_false(self) -> None:
+        contract = _build_10bl_contract(
+            a_known=list(self.KNOWN_A_ONLY),
+            b_known=list(self.KNOWN_B_ONLY),
+        )
+        assert contract["ok"] is True
+        assert contract.get("same_known_tile_ids") is False
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["equality_signal_type"] == (
+            "known_tile_ids_set_equality"
+        )
+        assert result["equality_signal_present"] is False
+        assert result["equality_signal_value"] is None
+
+    def test_set_value_is_deterministic_and_sanitized(self) -> None:
+        contract = _build_10bl_contract(
+            a_known=["tile_a", "tile_b", "tile_central"],
+            b_known=["tile_central", "tile_b", "tile_a"],
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["equality_signal_present"] is True
+        assert result["equality_signal_value"] == [
+            "tile_a",
+            "tile_b",
+            "tile_central",
+        ]
+        assert result["equality_signal_value"] == sorted(
+            result["equality_signal_value"]
+        )
+
+    def test_envelope_fields_are_unchanged(self) -> None:
+        contract = _build_10bl_contract(
+            a_known=list(self.KNOWN_SHARED),
+            b_known=list(self.KNOWN_SHARED),
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["decision_schema_version"] == "10BT.1"
+        assert result["runtime_allowed"] is False
+        assert result["daemon_allowed"] is False
+        assert result["scheduler_allowed"] is False
+        assert result["network_allowed"] is False
+        assert result["source_contract_type"] == (
+            "shared_public_known_tile_ids_set_equality_contract"
+        )
+        assert result["claim_boundary"]
+
+    def test_no_inference_keys_present(self) -> None:
+        contract = _build_10bl_contract(
+            a_known=list(self.KNOWN_A_ONLY),
+            b_known=list(self.KNOWN_B_ONLY),
+        )
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        forbidden_keys = [
+            "same_observation_depth",
+            "same_knowledge_depth",
+            "same_path",
+            "same_route",
+            "same_travel",
+            "same_travel_history",
+            "same_memory",
+            "same_map",
+            "same_experience",
+            "same_time",
+            "co_presence",
+            "awareness",
+            "interaction",
+            "relationship",
+            "coordination",
+            "cooperation",
+            "shared_visit",
+            "shared_journey",
+            "proximity",
+            "route_path",
+            "travel_timing",
+            "eta",
+        ]
+        for key in forbidden_keys:
+            assert key not in result, (
+                "forbidden key in 10CB decision: " + key
+            )
+
+    def test_module_discipline_no_contract_creator_import(self) -> None:
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "backend"
+            / "world"
+            / "local_shared_public_contract_consumer_harness.py"
+        )
+        text = path.read_text(encoding="utf-8")
+        assert "create_shared_known_tile_ids_set_equality_contract" not in text
+
+    def test_existing_10bp_10ay_10bj_10bk_contracts_still_pass(self) -> None:
+        contracts = [
+            _build_10bp_contract(),
+            _build_10ay_contract(),
+            _build_10bj_contract(),
+            _build_10bk_contract(),
+        ]
+        results = [
+            create_shared_public_contract_consumer_decision(c)
+            for c in contracts
+        ]
+        assert all(r["ok"] is True for r in results)
+        assert results[0]["equality_signal_type"] == "snapshot_id_equality"
+        assert results[1]["equality_signal_type"] == "snapshot_hash_equality"
+        assert results[2]["equality_signal_type"] == "current_tile_id_equality"
+        assert results[3]["equality_signal_type"] == "route_intent_id_equality"
+
+
 class TestPublicFunctionCoverage:
     """Test 16: all public functions exercised."""
 
@@ -1270,6 +1443,10 @@ class TestPublicFunctionCoverage:
         bk_contract = _build_10bk_contract(
             a_intent_id=INTENT_SHARED,
             b_intent_id=INTENT_SHARED,
+        )
+        bl_contract = _build_10bl_contract(
+            a_known=["tile_a", "tile_b", "tile_central"],
+            b_known=["tile_central", "tile_b", "tile_a"],
         )
 
         d_bp = create_shared_public_contract_consumer_decision(bp_contract)
@@ -1291,6 +1468,10 @@ class TestPublicFunctionCoverage:
         assert d_bk["ok"] is True
         assert d_bk["contract_seen"] is True
         assert d_bk["equality_signal_type"] == "route_intent_id_equality"
+        d_bl = create_shared_public_contract_consumer_decision(bl_contract)
+        assert d_bl["ok"] is True
+        assert d_bl["contract_seen"] is True
+        assert d_bl["equality_signal_type"] == "known_tile_ids_set_equality"
 
         exported = export_shared_public_contract_consumer_decision(d_bp)
         assert isinstance(exported, str)
