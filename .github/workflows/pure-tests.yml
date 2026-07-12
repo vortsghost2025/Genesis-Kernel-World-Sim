@@ -73,6 +73,7 @@ jobs:
             tests/test_phase10bl_shared_public_known_tile_ids_set_equality_contract.py \
             tests/test_phase10bp_shared_public_snapshot_id_equality_contract.py \
             tests/test_phase10bt_shared_public_contract_consumer_harness.py \
+            tests/test_phase10cj_runtime_adapter_dry_run_harness.py \
             tests/test_phase10ai_local_movement_contract.py \
             tests/test_phase10aj_known_map_accumulation.py \
             tests/test_phase10ak_multi_tick_exploration_loop.py \
