@@ -78,6 +78,7 @@ jobs:
             tests/test_phase10cv_gate7_free_dry_run_adapter.py \
             tests/test_phase10dl_minimal_runtime_adapter_integration_harness.py \
             tests/test_phase10dr_minimal_inert_ledger_write_orchestrator.py \
+            tests/test_phase10dx_minimal_inert_ledger_readback_verifier.py \
             tests/test_phase10ai_local_movement_contract.py \
             tests/test_phase10aj_known_map_accumulation.py \
             tests/test_phase10ak_multi_tick_exploration_loop.py \
