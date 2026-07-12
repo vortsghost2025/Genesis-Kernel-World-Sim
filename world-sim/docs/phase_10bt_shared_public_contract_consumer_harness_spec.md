@@ -141,6 +141,7 @@ The consumer harness has explicit signal-extraction branches for:
 | `shared_public_snapshot_id_equality_contract` (10BP) | `"snapshot_id_equality"` | `contract["same_snapshot_id"]` | `contract["shared_snapshot_id"]` (sanitized) when present-true, else `None` |
 | `shared_snapshot_hash_equality_contract` (10AY) | `"snapshot_hash_equality"` | `contract["same_snapshot_hash"]` | `contract["shared_snapshot_hash"]` (sanitized) when present-true, else `None` |
 | `shared_public_current_tile_id_equality_contract` (10BJ) | `"current_tile_id_equality"` | `contract["same_current_tile_id"]` | `contract["shared_current_tile_id"]` (sanitized) when present-true, else `None` |
+| `shared_public_route_intent_id_equality_contract` (10BK) | `"route_intent_id_equality"` | `contract["same_route_intent_id"]` | `contract["shared_route_intent_id"]` (sanitized) when present-true, else `None` |
 
 Adding a new recognised contract is a small extension to `_extract_equality_signal` in the 10BT module only; the public-facing decision envelope (21 fields), `consumer_scope`, `claim_boundary`, `decision_schema_version`, and the hard-coded runtime/daemon/scheduler/network block do **not** change between recognitions.
 
@@ -163,6 +164,29 @@ A same current_tile_id equality signal is a **public equality signal only**. It 
 - being "together"
 
 The 10BT envelope must never expose any of those keys, tokens, or phrases at the public surface. The `claim_boundary` field names a configurable fixed list of these forbidden concepts (co-presence, awareness, relationship, timing) so that a downstream consumer reading the export may verify the boundary is intact. The 10BX test suite explicitly scans the exported decision JSON for the forbidden keys, tokens, and phrases; any future regression that re-introduces them will fail the test.
+
+### 10BK-Specific Boundary (Hard)
+
+A same route_intent_id equality signal is a **public equality signal only**. It records that two agents' public route-intent contracts self-reported the same `intent_id`. It MUST NOT, and DOES NOT, imply:
+
+- co-presence
+- co-journey / shared journey
+- same time
+- same observation
+- proximity
+- awareness
+- interaction
+- relationship
+- meeting
+- collision
+- coordination
+- cooperation
+- shared visit
+- having navigated to each other
+- being "together"
+- any route path, travel timing, or ETA inference
+
+The 10BT envelope must never expose any of those keys, tokens, or phrases at the public surface. The 10BZ test suite explicitly scans the exported decision JSON for the forbidden keys (including `co_journey`, `coordination`, `shared_visit`, `shared_journey`, `proximity`, `route_path`, `travel_timing`, `eta`); any future regression that re-introduces them will fail the test.
 
 ---
 
@@ -248,7 +272,7 @@ Tests verify these via Python `ast` parsing of the module source — comments an
 
 ## Relation to 10BP, 10BN, 10BO, 10BR
 
-- **10BP (shared_public_snapshot_id_equality_contract)** is the first equality contract 10BT can consume. 10BT is contract-agnostic in shape (any structurally-valid contract passes the 5-field check) but 10BT only knows how to extract a signal from 10BP today; other contracts get `unknown_contract_type`.
+- **10BP (shared_public_snapshot_id_equality_contract)** is the first equality contract 10BT can consume. 10BT is contract-agnostic in shape (any structurally-valid contract passes the 5-field check) and has explicit signal-extraction branches for 10BP (`snapshot_id_equality`), 10AY (`snapshot_hash_equality`), 10BJ (`current_tile_id_equality`), and 10BK (`route_intent_id_equality`). Other contract types get `unknown_contract_type`.
 - **10BN / 10BO** closed the depth surface (no depth equality, rank, order, calendar, shared-depth reconstruction, or enum expansion). 10BT does not reopen any depth surface and does not extract a "depth equality signal."
 - **10BR** documented that the public-surface ladder is closed at 10BP and recommended no standalone next-rung candidate except possibly a post-ladder runtime-wiring readiness phase. 10BT is precisely that next step: it does not add new equality rungs and does not wire to live runtime; it prepares the consumer side. 10BT does **not** name or commit to 10BS or any later rung; it only points at the operator decision.
 

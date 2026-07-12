@@ -255,6 +255,21 @@ def _extract_equality_signal(contract_type: str, contract: dict) -> dict[str, An
             "equality_signal_value": value,
         }
 
+    if contract_type == "shared_public_route_intent_id_equality_contract":
+        same_route_intent_id = bool(contract.get("same_route_intent_id"))
+        shared_route_intent_id = contract.get("shared_route_intent_id")
+        if same_route_intent_id and isinstance(shared_route_intent_id, str):
+            value: Any = sanitize_public_mapping(shared_route_intent_id)
+            if not isinstance(value, str) or not value:
+                value = None
+        else:
+            value = None
+        return {
+            "equality_signal_present": same_route_intent_id,
+            "equality_signal_type": "route_intent_id_equality",
+            "equality_signal_value": value,
+        }
+
     return {
         "equality_signal_present": False,
         "equality_signal_type": _UNKNOWN_CONTRACT_SIGNAL,

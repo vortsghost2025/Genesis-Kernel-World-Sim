@@ -47,6 +47,9 @@ from backend.world.local_shared_public_contract_consumer_harness import (
 from backend.world.local_shared_public_current_tile_id_equality_contract import (
     create_shared_current_tile_id_equality_contract,
 )
+from backend.world.local_shared_public_route_intent_id_equality_contract import (
+    create_shared_route_intent_id_equality_contract,
+)
 from backend.world.local_shared_public_snapshot_hash_equality_contract import (
     create_shared_snapshot_hash_equality_contract,
 )
@@ -72,6 +75,9 @@ SNAP_HASH_SHARED = "s" * 64
 SNAP_ID_A = "10AQ-" + "a" * 32
 SNAP_ID_B = "10AQ-" + "b" * 32
 SNAP_ID_SHARED = "10AQ-" + "s" * 32
+INTENT_A = "10AR-" + "a" * 32
+INTENT_B = "10AR-" + "b" * 32
+INTENT_SHARED = "10AR-" + "c" * 32
 
 
 def _strip_python_prose(text: str) -> str:
@@ -170,6 +176,8 @@ def _build_merge(
     b_visited: list[str] | None = None,
     a_snapshot_id: str | None = None,
     b_snapshot_id: str | None = None,
+    a_intent_id: str | None = None,
+    b_intent_id: str | None = None,
 ) -> dict:
     """Build a real 10AS merge via the 10AS creator."""
 
@@ -210,8 +218,27 @@ def _build_merge(
     else:
         snap_b["snapshot_id"] = snap_a["snapshot_id"]
 
+    route_intent_a = None
+    route_intent_b = None
+    if a_intent_id is not None:
+        route_intent_a = _route_intent_dict(
+            agent_id=AGENT_A_ID,
+            source_snapshot_id=snap_a["snapshot_id"],
+            intent_id=a_intent_id,
+            destination_tile_id=TILE_SHARED,
+        )
+    if b_intent_id is not None:
+        route_intent_b = _route_intent_dict(
+            agent_id=AGENT_B_ID,
+            source_snapshot_id=snap_b["snapshot_id"],
+            intent_id=b_intent_id,
+            destination_tile_id=TILE_SHARED,
+        )
+
     merge = create_two_agent_public_merge(
-        public_a, snap_a, public_b, snap_b
+        public_a, snap_a, public_b, snap_b,
+        route_intent_a=route_intent_a,
+        route_intent_b=route_intent_b,
     )
     assert merge["ok"] is True, "fixture merge must be ok=True; got: " + repr(
         merge.get("errors")
@@ -292,6 +319,55 @@ def _build_10bj_contract(
     contract = create_shared_current_tile_id_equality_contract(merge)
     assert contract["ok"] is True, (
         "fixture 10BJ contract must be ok=True; got: "
+        + repr(contract.get("errors"))
+    )
+    return contract
+
+
+def _route_intent_dict(
+    *,
+    agent_id: str,
+    source_snapshot_id: str,
+    intent_id: str,
+    destination_tile_id: str,
+) -> dict:
+    return {
+        "ok": True,
+        "intent_type": "route_intent_contract",
+        "intent_id": intent_id,
+        "source_phase": "10AQ",
+        "source_snapshot_id": source_snapshot_id,
+        "agent_id": agent_id,
+        "destination_tile_id": destination_tile_id,
+        "destination_known": True,
+        "claim_scope": "intent_only",
+        "errors": [],
+    }
+
+
+def _build_merge_for_10bk(
+    *,
+    a_intent_id: str = INTENT_A,
+    b_intent_id: str = INTENT_B,
+) -> dict:
+    return _build_merge(
+        a_intent_id=a_intent_id,
+        b_intent_id=b_intent_id,
+    )
+
+
+def _build_10bk_contract(
+    *,
+    a_intent_id: str = INTENT_A,
+    b_intent_id: str = INTENT_B,
+) -> dict:
+    merge = _build_merge_for_10bk(
+        a_intent_id=a_intent_id,
+        b_intent_id=b_intent_id,
+    )
+    contract = create_shared_route_intent_id_equality_contract(merge)
+    assert contract["ok"] is True, (
+        "fixture 10BK contract must be ok=True; got: "
         + repr(contract.get("errors"))
     )
     return contract
@@ -1056,6 +1132,128 @@ class Test10BXExpansion:
         assert "/home/user/secret" not in exported
 
 
+class Test10BZExpansion:
+    # 10BZ: consumer recognizes 10BK
+    # (shared_public_route_intent_id_equality_contract) and exports
+    # route_intent_id_equality without inferring co-presence / co-journey /
+    # coordination.
+
+    def test_happy_path_shared_intent_exports_equality(self) -> None:
+        merge = _build_merge_for_10bk(
+            a_intent_id=INTENT_SHARED,
+            b_intent_id=INTENT_SHARED,
+        )
+        contract = create_shared_route_intent_id_equality_contract(merge)
+        assert contract["ok"] is True
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["contract_seen"] is True
+        assert result["equality_signal_type"] == "route_intent_id_equality"
+        assert result["equality_signal_present"] is True
+        assert result["equality_signal_value"] == INTENT_SHARED
+        assert result["source_contract_type"] == (
+            "shared_public_route_intent_id_equality_contract"
+        )
+
+    def test_different_intent_id_exports_false(self) -> None:
+        merge = _build_merge_for_10bk(
+            a_intent_id=INTENT_A,
+            b_intent_id=INTENT_B,
+        )
+        contract = create_shared_route_intent_id_equality_contract(merge)
+        assert contract["ok"] is True
+        assert contract.get("same_route_intent_id") is False
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        assert result["contract_seen"] is True
+        assert result["equality_signal_type"] == "route_intent_id_equality"
+        assert result["equality_signal_present"] is False
+        assert result["equality_signal_value"] is None
+
+    def test_envelope_fields_are_unchanged(self) -> None:
+        merge = _build_merge_for_10bk(
+            a_intent_id=INTENT_SHARED,
+            b_intent_id=INTENT_SHARED,
+        )
+        contract = create_shared_route_intent_id_equality_contract(merge)
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["decision_schema_version"] == "10BT.1"
+        assert result["runtime_allowed"] is False
+        assert result["daemon_allowed"] is False
+        assert result["scheduler_allowed"] is False
+        assert result["network_allowed"] is False
+        assert result["source_contract_type"] == (
+            "shared_public_route_intent_id_equality_contract"
+        )
+        assert result["claim_boundary"]
+
+    def test_no_forbidden_keys_present(self) -> None:
+        merge = _build_merge_for_10bk(
+            a_intent_id=INTENT_A,
+            b_intent_id=INTENT_B,
+        )
+        contract = create_shared_route_intent_id_equality_contract(merge)
+        result = create_shared_public_contract_consumer_decision(contract)
+        assert result["ok"] is True
+        forbidden_keys = [
+            "co_presence",
+            "met",
+            "trust",
+            "cooperation",
+            "conflict",
+            "awareness",
+            "communication",
+            "relationship",
+            "same_event",
+            "same_time",
+            "same_sequence",
+            "same_map",
+            "same_knowledge",
+            "same_observation",
+            "temporal_overlap",
+            "active_at_same_time",
+            "tick_window",
+            "route_path",
+            "travel_timing",
+            "eta",
+            "same_state",
+            "co_journey",
+            "coordination",
+            "shared_visit",
+            "shared_journey",
+            "proximity",
+        ]
+        for key in forbidden_keys:
+            assert key not in result, (
+                "forbidden key in 10BZ decision: " + key
+            )
+
+    def test_module_discipline_no_contract_creator_import(self) -> None:
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "backend"
+            / "world"
+            / "local_shared_public_contract_consumer_harness.py"
+        )
+        text = path.read_text(encoding="utf-8")
+        assert "create_shared_route_intent_id_equality_contract" not in text
+
+    def test_existing_10bp_10ay_10bj_contracts_still_pass(self) -> None:
+        contracts = [
+            _build_10bp_contract(),
+            _build_10ay_contract(),
+            _build_10bj_contract(),
+        ]
+        results = [
+            create_shared_public_contract_consumer_decision(c)
+            for c in contracts
+        ]
+        assert all(r["ok"] is True for r in results)
+        assert results[0]["equality_signal_type"] == "snapshot_id_equality"
+        assert results[1]["equality_signal_type"] == "snapshot_hash_equality"
+        assert results[2]["equality_signal_type"] == "current_tile_id_equality"
+
+
 class TestPublicFunctionCoverage:
     """Test 16: all public functions exercised."""
 
@@ -1068,6 +1266,10 @@ class TestPublicFunctionCoverage:
         bj_contract = _build_10bj_contract(
             a_current=TILE_SHARED,
             b_current=TILE_SHARED,
+        )
+        bk_contract = _build_10bk_contract(
+            a_intent_id=INTENT_SHARED,
+            b_intent_id=INTENT_SHARED,
         )
 
         d_bp = create_shared_public_contract_consumer_decision(bp_contract)
@@ -1084,6 +1286,11 @@ class TestPublicFunctionCoverage:
         assert d_bj["ok"] is True
         assert d_bj["contract_seen"] is True
         assert d_bj["equality_signal_type"] == "current_tile_id_equality"
+
+        d_bk = create_shared_public_contract_consumer_decision(bk_contract)
+        assert d_bk["ok"] is True
+        assert d_bk["contract_seen"] is True
+        assert d_bk["equality_signal_type"] == "route_intent_id_equality"
 
         exported = export_shared_public_contract_consumer_decision(d_bp)
         assert isinstance(exported, str)
