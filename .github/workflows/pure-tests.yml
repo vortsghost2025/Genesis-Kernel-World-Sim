@@ -85,6 +85,7 @@ jobs:
             tests/test_phase10ev_minimal_inert_ledger_status_digest_verifier.py \
             tests/test_phase10fb_minimal_inert_ledger_status_digest_verification_reporter.py \
             tests/test_phase10fh_minimal_inert_ledger_status_digest_verification_verifier.py \
+            tests/test_phase10fn_minimal_inert_ledger_status_digest_verification_verifier_status_reporter.py \
             tests/test_phase10ai_local_movement_contract.py \
             tests/test_phase10aj_known_map_accumulation.py \
             tests/test_phase10ak_multi_tick_exploration_loop.py \
