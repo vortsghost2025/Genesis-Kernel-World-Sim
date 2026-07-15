@@ -91,6 +91,7 @@ jobs:
             tests/test_phase10gf_minimal_inert_model_routing_authorization_report_status_reporter.py \
             tests/test_phase10gl_minimal_inert_model_routing_authorization_report_status_verification_verifier_status_reporter.py \
             tests/test_phase10gr_minimal_inert_model_routing_authorization_report_status_verification_verifier_status_verification_verifier_status_reporter.py \
+            tests/test_phase10gx_minimal_inert_model_routing_authorization_report_status_verification_verifier_status_verification_verifier_status_verification_verifier_status_reporter.py \
             tests/test_phase10ai_local_movement_contract.py \
             tests/test_phase10aj_known_map_accumulation.py \
             tests/test_phase10ak_multi_tick_exploration_loop.py \
