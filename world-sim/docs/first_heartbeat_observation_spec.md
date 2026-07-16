@@ -112,7 +112,7 @@ affected lane returns to the last known good:
 - Missing rollback anchor — no known-good state to revert to.
 - Missing observation boundary — no defined observation slice.
 - Hidden true_map leakage — hidden substrate appears in any output.
-- Attempted write — any write to a forbidden surface (Section 5, Section 10).
+- Attempted write — any write to a forbidden surface (Section 10).
 - Attempted model / provider call — any autonomous model or provider
   invocation (Section 7).
 

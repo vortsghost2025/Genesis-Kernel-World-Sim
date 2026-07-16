@@ -37,7 +37,7 @@ Each identity gets a canonical `agent_id`.
   identity material only, with no clock, no entropy, no environment input,
   and no model output.
 - The canonical derivation inputs are: `identity_schema_version`,
-  `id_derivation_version`, the canonical identity fields (§3) in a
+  `id_derivation_version`, the canonical identity fields (Section 3) in a
   **canonical field ordering**, a **canonical UTF-8 serialization** of
   those fields, and a **Genesis First Pair domain separator** that
   namespaces this derivation from any other identity scheme in the project.
@@ -97,15 +97,15 @@ influence `agent_id`.
   particular public-phase module).
 - Mutable fields live under a separate namespace (e.g. `self_state.*`) and
   are never mixed into canonical identity material.
-- Re-deriving identity uses **only** §3 fields. Adding, removing, or
-  mutating §4 fields must not change `agent_id`.
+- Re-deriving identity uses **only** Section 3 fields. Adding, removing, or
+  mutating Section 4 fields must not change `agent_id`.
 - This separation is what makes restart safe: live state can be reset to a
   known-good snapshot without invalidating identity.
 
 ## 5. Continuity Across Heartbeats and Restarts
 
 - `agent_id` is stable across heartbeat ticks and across full restarts
-  because it is a pure function of immutable material (§3).
+  because it is a pure function of immutable material (Section 3).
 - After any restart, identity is recovered by **re-derivation**, not by
   recalling a stored id. Re-derivation either matches the canonical
   `agent_id` exactly or the recovery fails closed.
@@ -122,16 +122,16 @@ re-derive to its canonical `agent_id` from its declared immutable material.
 
 Drift cases that must be rejected fail-closed:
 
-- Immutable field mismatch — any §3 field on a presented identity differs
+- Immutable field mismatch — any Section 3 field on a presented identity differs
   from its canonical value at definition.
 - `agent_id` mismatch — a presented `agent_id` does not equal the
-  re-derivation from its declared §3 material.
+  re-derivation from its declared Section 3 material.
 - Pair mismatch — a presented identity carries a `pair_id` that differs
   from the canonical pair id, or Adam and Eve fields are cross-swapped.
 - Extra identity material — a presented identity carries fields beyond the
-  canonical §3 set and the loader refuses to derive from an extended
+  canonical Section 3 set and the loader refuses to derive from an extended
   material set.
-- Missing material — any §3 field absent at load time; no defaulting, no
+- Missing material — any Section 3 field absent at load time; no defaulting, no
   inference.
 
 Rejection is **immediate and absolute**: no partial identity is accepted,
@@ -144,12 +144,12 @@ drifted identity.
 Identity is not asserted; it is provenanced.
 
 - Every claim "this is Adam" or "this is Eve" must carry provenance back to
-  the operator-approved `provenance_commitment` (§3). Verification uses the
+  the operator-approved `provenance_commitment` (Section 3). Verification uses the
   commitment, not any raw secret material.
 - The provenance chain is recorded with `claim_scope = identity` and may
   not be relabeled as `observed`, `world_event`, `agent_speech`, or
   `hypothesis`.
-- An identity claim without provenance is rejected as drift (§6).
+- An identity claim without provenance is rejected as drift (Section 6).
 - Cross-agent identity claims (Adam claiming something about Eve's
   identity, or vice versa) are treated as **speech**, not as identity
   authority. Identity is established by canonical material plus operator
@@ -161,8 +161,8 @@ Adam and Eve are distinct; the pair is not a merged identity and not a
 shared mind.
 
 - Adam and Eve have **separate `agent_id`s**, separate mutable self-state
-  (§4), and separate provenance.
-- The pair relationship is carried in the shared `pair_id` (§3) and in
+  (Section 4), and separate provenance.
+- The pair relationship is carried in the shared `pair_id` (Section 3) and in
   existing verified public-state merge contracts (referenced here only as
   examples), not in any shared mutable state. The identity spec itself
   does **not** depend on any particular merge / equality module; those are
