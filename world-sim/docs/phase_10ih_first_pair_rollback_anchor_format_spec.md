@@ -40,9 +40,7 @@ by re-reading the module source; this spec does not modify them.
 - Authorization-vs-execution separation: shape validation is not rollback
   authorization; rollback authorization is not rollback execution; anchor
   acceptance performs no rollback; 10IH names no executor.
-- Operator-approval boundary: the anchor is operator-supplied (caller
-  supply asserted), not model-chosen; operator approval is not
-  independently verified by 10IC.
+- Operator-approval boundary: the anchor is caller-supplied, not model-chosen; `claim_scope = "operator_proof"` is a claim classification, not proof of operator approval.
 - Existing fail-closed error vocabulary (`invalid_rollback_anchor`,
   `missing_rollback_anchor`, enclosing candidate/boundary drift errors).
 - Replay/uniqueness/expiry/tamper status: honestly documented as absent
@@ -104,7 +102,7 @@ The caller-supplied `rollback_anchor` input is a Python `dict` containing
 | Key | Type | Constraint | Implementation Reference |
 |---|---|---|---|
 | `rollback_anchor_schema_version` | exact `str` | Must equal literal `"first_rollback_anchor.1"` | L30, L399-400 |
-| `rollback_anchor_id` | exact `str` | Caller/operator supplied; must satisfy `_is_safe_identifier` (see §4) | L403 |
+| `rollback_anchor_id` | exact `str` | Caller-supplied; must satisfy `_is_safe_identifier` (see §4) | L403 |
 | `habitat_id` | exact `str` | Must satisfy `_is_safe_identifier`; must equal the already-validated habitat's `habitat_id` | L405-407 |
 | `claim_scope` | exact `str` | Must equal literal `"operator_proof"` | L409 |
 | `state_commitment` | exact `str` | Must satisfy `_is_hex64`: exactly 64 lowercase hex characters | L211-214, L411 |
@@ -129,7 +127,7 @@ It validates that a value is:
 - Does not contain `..`.
 - Lowercased form does not contain any forbidden marker from the module's
   `_FORBIDDEN_IDENTIFIER_MARKERS` list.
-- Collapsed alphanumeric form (lowerc (lowercased, non-alphanumeric removed) does not contain
+- Collapsed alphanumeric form (lowercased with non-alphanumeric characters removed) does not contain
   `truemap`, `knownmap`, or `hiddensubstrate`.
 - Survives `sanitize_public_text(value) == value` (idempotent
   sanitization).
@@ -160,9 +158,15 @@ is exact `bool` `False`. The module uses `is True` / `is False` checks
 
 The returned dictionary is a **detached reconstructed dictionary of scalar
 values** — not a reference to the input, not technically immutable, and
-not a frozen object. Downstream modules (10ID, 10IE, heartbeat verifier)
-re-validate by equality of the normalized fields. Mutation or drift of the
-envelope between stages is detected and collapses to `invalid_rollback_anchor`.
+not a frozen object. Downstream propagation carries the envelope through
+each boundary without re-validation: 10ID carries the anchor from the birth
+candidate; 10IE carries the anchor from the verified 10ID habitat boundary;
+the heartbeat verifier checks only `rollback_anchor_id` equality. No
+downstream module calls `_validate_rollback_anchor`. Drift or tampering of
+the envelope between stages is detected by the enclosing boundary's
+integrity checks and surfaces through existing layer-specific errors
+(`invalid_birth_candidate`, `invalid_habitat_boundary`,
+`candidate_declaration_drift`, `missing_rollback_anchor`).
 
 ---
 
@@ -216,8 +220,8 @@ is a **claim classification** used by the provenance taxonomy (see
 `first_memory_boundary_spec.md` §6 for the public taxonomy:
 `observed`, `speech`, `hypothesis`, `identity`, `proof`). Its presence in
 a validated anchor does **not** prove that operator approval occurred.
-Operator approval is asserted by caller supply; 10IC does not verify an
-approval signature, authorization artifact, or registry.
+The anchor is caller-supplied; 10IC does not verify an approval
+signature, authorization artifact, or registry.
 
 ### Last-Known-Good State
 
@@ -295,13 +299,14 @@ error strings:
 
 | Error String | Origin | Condition |
 |---|---|---|
-| `invalid_rollback_anchor` | 10IC `_validate_rollback_anchor` returns `False`; propagated by 10IC L474-475 and 10ID equality check | Any input envelope failing the five-field rules (missing key, extra key, wrong type, wrong literal, unsafe identifier, hex64 violation, habitat_id mismatch, claim_scope mismatch) |
+| `invalid_rollback_anchor` | 10IC `_validate_rollback_anchor` returns a six-field invalid dict with `rollback_anchor_valid=False`; `create_first_pair_birth_candidate` adds `invalid_rollback_anchor` when `rollback_anchor_valid` is `False` (L474-475) | Any input envelope failing the five-field rules (missing key, extra key, wrong type, wrong literal, unsafe identifier, hex64 violation, habitat_id mismatch, claim_scope mismatch) |
 | `missing_rollback_anchor` | Heartbeat verifier L766, L799, L805-806 | Observation's `rollback_anchor_id` absent or mismatched against the birth candidate's anchor id |
 | `candidate_declaration_drift` | 10ID / 10IE / 10IC cross-boundary drift detection | Enclosing candidate/habitat/memory boundary fields mutated between stages |
 
 `rollback_anchor_drift` is **not** a separate error string in the current
-implementation; drift in the anchor envelope between stages is caught by
-10ID's equality revalidation and collapses to `invalid_rollback_anchor`.
+implementation; drift surfaces through existing layer-specific errors
+(`invalid_birth_candidate`, `invalid_habitat_boundary`,
+`candidate_declaration_drift`, `missing_rollback_anchor`).
 10IH does not add a new string without operator decision.
 
 ---
