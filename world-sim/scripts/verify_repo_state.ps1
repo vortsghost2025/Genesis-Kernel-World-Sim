@@ -202,9 +202,9 @@ function Get-CredentialShapedPatterns {
     $skPrefix = 'sk' + '-'
     $skLive = 'sk' + '_live_'
     $skTest = 'sk' + '_test_'
-    $akiaPrefix = 'AKIA' + '0'
-    $iaKey = 'ASIA' + '0'
-    $aiKey = 'AIza' + '0'
+    $akiaPrefix = 'AKIA'
+    $iaKey = 'ASIA'
+    $aiKey = 'AIza'
     $patterns += [PSCustomObject]@{
         Label = 'provider-token-prefix'
         Regex = [regex]::New('(' + [regex]::Escape($ghpPrefix) + '|' + [regex]::Escape($ghoPrefix) + '|' + [regex]::Escape($ghuPrefix) + '|' + [regex]::Escape($ghsPrefix) + '|' + [regex]::Escape($ghrPrefix) + '|' + [regex]::Escape($glptPrefix) + '|' + [regex]::Escape($xoxbPrefix) + '|' + [regex]::Escape($xoxpPrefix) + '|' + [regex]::Escape($skPrefix) + '|' + [regex]::Escape($skLive) + '|' + [regex]::Escape($skTest) + '|' + [regex]::Escape($akiaPrefix) + '|' + [regex]::Escape($iaKey) + '|' + [regex]::Escape($aiKey) + ')[A-Za-z0-9_' + [regex]::Escape('-') + ']{8,}')
@@ -224,6 +224,7 @@ function Get-CredentialShapedPatterns {
 }
 
 # Obvious placeholders that should never be treated as real credentials.
+# Kept for reference; matching is handled by explicit exact-equality rules in Test-IsPlaceholder.
 $script:PlaceholderTokens = @(
     '[REDACTED]',
     '<placeholder>',
@@ -233,29 +234,50 @@ $script:PlaceholderTokens = @(
     'example',
     'example-only',
     'test-only',
-    'test',
     'fake',
     'mock',
     'dummy',
     'sample',
     'placeholder',
+    'redacted',
     'your-secret-here',
     'your-token-here',
     'your-key-here',
-    'your-password-here',
-    '00000000',
-    'aaaaaaaa',
-    'xxxxxxxx',
-    'redacted'
+    'your-password-here'
 )
 
 function Test-IsPlaceholder {
     param([string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { return $false }
+
     $lower = $Value.ToLowerInvariant()
-    foreach ($ph in $script:PlaceholderTokens) {
-        if ($lower.Contains($ph.ToLowerInvariant())) { return $true }
+
+    # Exact-match placeholders (case-insensitive)
+    $exactPlaceholders = @(
+        '[REDACTED]',
+        '<placeholder>',
+        '<redacted>',
+        'changeme',
+        'change-me',
+        'example',
+        'example-only',
+        'test-only',
+        'fake',
+        'mock',
+        'dummy',
+        'sample',
+        'placeholder',
+        'redacted',
+        'your-secret-here',
+        'your-token-here',
+        'your-key-here',
+        'your-password-here'
+    )
+    foreach ($ph in $exactPlaceholders) {
+        if ($lower -eq $ph.ToLowerInvariant()) { return $true }
     }
-    # Repeated single character (e.g. "aaaaaaa", "1111111")
+
+    # Repeated single character sentinel values
     if ($Value.Length -ge 4) {
         $first = $Value[0]
         $allSame = $true
@@ -264,10 +286,12 @@ function Test-IsPlaceholder {
         }
         if ($allSame) { return $true }
     }
+
     # Regex source definitions (common in the verifier itself)
     if ($lower.StartsWith('regex') -or $lower.StartsWith('[regex') -or $lower.Contains('::escape(') -or $lower.Contains('::new(')) {
         return $true
     }
+
     return $false
 }
 
@@ -323,13 +347,20 @@ function Invoke-CredentialScan {
                 foreach ($pat in $patterns) {
                     $matches = $pat.Regex.Matches($line)
                     foreach ($m in $matches) {
-                        $captured = $null
-                        if ($m.Groups.Count -ge 2) {
-                            $captured = $m.Groups[1].Value
+                        $candidate = $null
+                        switch ($pat.Label) {
+                            'credential-assignment' {
+                                if ($m.Groups.Count -ge 2) { $candidate = $m.Groups[1].Value }
+                            }
+                            'provider-token-prefix' {
+                                $candidate = $m.Value
+                            }
+                            'private-key-header' {
+                                $candidate = $m.Value
+                            }
                         }
-                        if ($captured -and (Test-IsPlaceholder -Value $captured)) { continue }
-                        # Also skip if the matched group is empty / pattern is a name-only regex
-                        if (-not $captured) { continue }
+                        if ($candidate -and (Test-IsPlaceholder -Value $candidate)) { continue }
+                        if (-not $candidate) { continue }
                         $credentialMatches += [PSCustomObject]@{
                             Path    = $file
                             LineNum = $i + 1
@@ -933,6 +964,64 @@ function Invoke-SelfTest {
         $noPathExit = $LASTEXITCODE
         $noPathText = $noPathResult -join "`n"
         Assert-Condition -Name 'T10-no-path-notice' -Test { $noPathText.Contains('no files selected') } -Description "output contains explicit 'no files selected' notice"
+
+        # Test 11: Genuine credential containing 'test' substring => RED (exact-equality placeholder rule)
+        Write-Host "`n[Test 11] Genuine credential with 'test' substring expects RED"
+        $test11File = Join-Path $repoDir 'config11.md'
+        $test11Cred = 'contest' + 'Credential' + '123456'
+        $test11Text = "# Config`napi_key = `"$test11Cred`"`n"
+        [System.IO.File]::WriteAllText($test11File, $test11Text, [System.Text.UTF8Encoding]::new($false))
+        $test11Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'config11.md' 2>&1)
+        $test11Exit = $LASTEXITCODE
+        Assert-Condition -Name 'T11-test-substring-not-placeholder' -Test { $test11Exit -eq 2 } -Description "exit=$test11Exit (expected 2=RED, 'test' substring must not exempt)"
+        Remove-Item -LiteralPath $test11File -Force
+
+        # Test 12: Exact placeholder 'test-only' => non-RED (exact-equality placeholder rule)
+        Write-Host "`n[Test 12] Exact placeholder 'test-only' expects non-RED"
+        $test12File = Join-Path $repoDir 'config12.md'
+        $test12Text = "# Config`napi_key = `"test-only`"`n"
+        [System.IO.File]::WriteAllText($test12File, $test12Text, [System.Text.UTF8Encoding]::new($false))
+        $test12Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'config12.md' 2>&1)
+        $test12Exit = $LASTEXITCODE
+        Assert-Condition -Name 'T12-exact-placeholder-nonblocking' -Test { $test12Exit -ne 2 } -Description "exit=$test12Exit (expected non-RED, exact placeholder 'test-only')"
+        Remove-Item -LiteralPath $test12File -Force
+
+        # Test 13: Dynamic provider-token value => RED, [REDACTED] present, raw absent
+        Write-Host "`n[Test 13] Provider-token value expects RED"
+        $test13File = Join-Path $repoDir 'token13.md'
+        $test13Token = 'ghp' + '_' + '1234567890' + 'abcdefghijklmnop'
+        $test13Text = $test13Token + "`n"
+        [System.IO.File]::WriteAllText($test13File, $test13Text, [System.Text.UTF8Encoding]::new($false))
+        $test13Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'token13.md' 2>&1)
+        $test13Exit = $LASTEXITCODE
+        Assert-Condition -Name 'T13-provider-token-red' -Test { $test13Exit -eq 2 } -Description "exit=$test13Exit (expected 2=RED)"
+        $test13Output = $test13Result -join "`n"
+        Assert-Condition -Name 'T13-provider-token-redacted' -Test { $test13Output.Contains('[REDACTED]') -and -not $test13Output.Contains($test13Token) } -Description "output contains [REDACTED] and not raw token"
+        Remove-Item -LiteralPath $test13File -Force
+
+        # Test 14: Dynamic private-key header => RED and redacted reporting
+        Write-Host "`n[Test 14] Private-key header expects RED"
+        $test14File = Join-Path $repoDir 'key14.txt'
+        $test14Header = '-----BEGIN ' + 'RSA' + ' PRIVATE KEY-----'
+        $test14Text = $test14Header + "`n"
+        [System.IO.File]::WriteAllText($test14File, $test14Text, [System.Text.UTF8Encoding]::new($false))
+        $test14Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'key14.txt' 2>&1)
+        $test14Exit = $LASTEXITCODE
+        Assert-Condition -Name 'T14-private-key-red' -Test { $test14Exit -eq 2 } -Description "exit=$test14Exit (expected 2=RED)"
+        $test14Output = $test14Result -join "`n"
+        Assert-Condition -Name 'T14-private-key-redacted' -Test { $test14Output.Contains('[REDACTED]') } -Description "output contains [REDACTED] for private-key header"
+        Remove-Item -LiteralPath $test14File -Force
+
+        # Test 15: Dynamic AKIA-form access-key identifier => RED
+        Write-Host "`n[Test 15] AKIA-form access-key expects RED"
+        $test15File = Join-Path $repoDir 'ak15.txt'
+        $test15Key = 'AKIA' + '1234567890abcdef'
+        $test15Text = $test15Key + "`n"
+        [System.IO.File]::WriteAllText($test15File, $test15Text, [System.Text.UTF8Encoding]::new($false))
+        $test15Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'ak15.txt' 2>&1)
+        $test15Exit = $LASTEXITCODE
+        Assert-Condition -Name 'T15-akia-form-red' -Test { $test15Exit -eq 2 } -Description "exit=$test15Exit (expected 2=RED for AKIA-form key)"
+        Remove-Item -LiteralPath $test15File -Force
 
         # Cleanup: remove any leftovers from tests
         Get-ChildItem -LiteralPath $repoDir -File | Where-Object { $_.Name -ne 'README.md' -and $_.Name -ne 'verify_repo_state.ps1' } | Remove-Item -Force -ErrorAction SilentlyContinue
