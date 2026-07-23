@@ -264,8 +264,6 @@ function Test-IsPlaceholder {
         }
         if ($allSame) { return $true }
     }
-    # Self-test credentials embedded in this script for T09 — known test-only values
-    if ($lower.Contains('1234567890abcdef') -or $lower.Contains('1234567890abcdefghij')) { return $true }
     # Regex source definitions (common in the verifier itself)
     if ($lower.StartsWith('regex') -or $lower.StartsWith('[regex') -or $lower.Contains('::escape(') -or $lower.Contains('::new(')) {
         return $true
@@ -332,6 +330,11 @@ function Invoke-CredentialScan {
                         if ($captured -and (Test-IsPlaceholder -Value $captured)) { continue }
                         # Also skip if the matched group is empty / pattern is a name-only regex
                         if (-not $captured) { continue }
+                        $credentialMatches += [PSCustomObject]@{
+                            Path    = $file
+                            LineNum = $i + 1
+                            Label   = $pat.Label
+                        }
                     }
                 }
             }
@@ -911,14 +914,17 @@ function Invoke-SelfTest {
         # Test 9: Credential-shaped assignment => RED
         Write-Host "`n[Test 9] Credential-shaped assignment expects RED"
         $credFile = Join-Path $repoDir 'config.md'
-        $credText = "# Config`napi_key = `"ghp_1234567890abcdefghijklmnop`"`n"
+        $testPrefix = 'ghp' + '_'
+        $testBody = '1234567890' + 'abcdefghijklmnop'
+        $testCredential = $testPrefix + $testBody
+        $credText = "# Config`napi_key = `"$testCredential`"`n"
         [System.IO.File]::WriteAllText($credFile, $credText, [System.Text.UTF8Encoding]::new($false))
         $credResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -Path 'config.md' 2>&1)
         $credExit = $LASTEXITCODE
         Assert-Condition -Name 'T09-credential-red' -Test { $credExit -eq 2 } -Description "exit=$credExit (expected 2=RED)"
         # Verify [REDACTED] in output, no raw credential
         $credOutputText = $credResult -join "`n"
-        Assert-Condition -Name 'T09-redacted-no-raw' -Test { $credOutputText.Contains('[REDACTED]') -and -not $credOutputText.Contains('ghp_1234567890abcdefghijklmnop') } -Description "output contains [REDACTED] and not the raw test credential"
+        Assert-Condition -Name 'T09-redacted-no-raw' -Test { $credOutputText.Contains('[REDACTED]') -and -not $credOutputText.Contains($testCredential) } -Description "output contains [REDACTED] and not the raw test credential"
         Remove-Item -LiteralPath $credFile -Force
 
         # Test 10: No selected paths => explicit notice, no all-repo scan
