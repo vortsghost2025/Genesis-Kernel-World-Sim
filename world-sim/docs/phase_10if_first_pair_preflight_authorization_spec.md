@@ -1,6 +1,6 @@
 # Phase 10IF — First Pair Preflight Authorization Spec
 
-Unnumbered docs-only spec. This file consolidates the exact authorization gate
+Numbered docs-only authorization spec. This file consolidates the exact authorization gate
 for any future First Pair creation phase. It identifies and cross-references
 all six First Pair preflight specs, distinguishes existing implemented
 boundaries (10IC, 10ID, 10IE) from unimplemented write-authority, rollback,
@@ -69,14 +69,14 @@ Before any First Pair creation phase may start, **all** of the following must be
 3. **Valid observation boundary** — observation-only heartbeat contract verified, no hidden true_map, no private paths, no secrets (10IC heartbeat verifier implemented; standalone boundary module not implemented).
 4. **Valid memory boundary** — agent-scoped memory refs, cross-identity public-only, no leakage, fail-closed (10IE implemented).
 5. **Concrete rollback anchor** — explicit, enumerated, caller-supplied, provenanced, sanitized; format specified in a spec, not only in implementation (not resolved).
-5. **Explicit per-call write allow-list** — enumerated writable surfaces, not blanket; provenanced; 10CP remains sole writer; Adam/Eve are not writers (not resolved; no write-authority module).
-6. **Provenance commitment construction** — hash algorithm, input material, encoding, verification path documented and reviewed (not resolved).
-7. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
-8. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
-9. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
-10. **Explicit Sean approval for the specific creation phase** — not granted.
+6. **Explicit per-call write allow-list** — enumerated writable surfaces, not blanket; provenanced; 10CP remains sole writer; Adam/Eve are not writers (not resolved; no write-authority module).
+7. **Provenance commitment construction** — hash algorithm, input material, encoding, verification path documented and reviewed (not resolved).
+8. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
+9. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
+10. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
+11. **Explicit Sean approval for the specific creation phase** — not granted.
 
-**None of the above preconditions are met by this document.** All remain open and require separate explicit authorization.
+This document grants no new authority. The implemented 10IC, 10ID, and 10IE boundaries remain verified, while the unresolved creation prerequisites identified above remain open and require separate review and explicit authorization.
 
 ---
 
