@@ -158,12 +158,34 @@ is exact `bool` `False`. The module uses `is True` / `is False` checks
 
 The returned dictionary is a **detached reconstructed dictionary of scalar
 values** — not a reference to the input, not technically immutable, and
-not a frozen object. Downstream propagation carries the envelope through
-each boundary without re-validation: 10ID carries the anchor from the birth
-candidate; 10IE carries the anchor from the verified 10ID habitat boundary;
-the heartbeat verifier checks only `rollback_anchor_id` equality. No
-downstream module calls `_validate_rollback_anchor`. Drift or tampering of
-the envelope between stages is detected by the enclosing boundary's
+not a frozen object.
+
+The normalized rollback-anchor dictionary is carried inside the enclosing
+First Pair artifacts. 10ID and 10IE do not directly call the private
+`_validate_rollback_anchor` helper. However, both indirectly revalidate the
+complete rollback-anchor envelope when they reconstruct the authorized 10IC
+birth candidate by calling `create_first_pair_birth_candidate`.
+
+10ID:
+- validates the supplied birth-candidate deterministic integrity;
+- calls `create_first_pair_birth_candidate(authorized_declaration)`;
+- compares the reconstructed authorized candidate with the supplied candidate;
+- therefore indirectly revalidates the complete rollback anchor through 10IC.
+
+10IE:
+- validates the supplied 10ID habitat-boundary integrity;
+- calls `create_first_pair_birth_candidate(authorized_declaration)`;
+- reconstructs the 10ID habitat boundary;
+- therefore indirectly revalidates the complete rollback anchor through the
+  recreated 10IC and 10ID chain.
+
+Heartbeat verification:
+- does not reconstruct or revalidate the complete rollback-anchor envelope;
+- validates observation.rollback_anchor_id as a safe identifier;
+- compares it with the candidate rollback_anchor_id;
+- mismatch emits `missing_rollback_anchor`.
+
+Drift or tampering of the envelope between stages is detected by the enclosing boundary's
 integrity checks and surfaces through existing layer-specific errors
 (`invalid_birth_candidate`, `invalid_habitat_boundary`,
 `candidate_declaration_drift`, `missing_rollback_anchor`).
@@ -183,7 +205,8 @@ integrity checks and surfaces through existing layer-specific errors
   pre-materialization duplicates.
 - **No Python immutability guarantee:** The normalized output is a plain
   `dict`. Immutability is an operational expectation (downstream
-  revalidation detects drift), not a language-level guarantee.
+  reconstruction and enclosing deterministic-integrity checks detect drift),
+  not a language-level guarantee.
 
 ---
 
