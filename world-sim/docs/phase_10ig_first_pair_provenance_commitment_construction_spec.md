@@ -1,111 +1,138 @@
-# Phase 10IG — First Pair Provenance Commitment Construction Spec
+# Phase 10IG — First Pair Provenance Commitment Validation and Agent-ID Binding Spec
 
-Numbered docs-only authorization spec. This file closes the first unresolved
-preflight gap identified by the 10IF audit: the `provenance_commitment`
-construction (hash algorithm, input material, encoding, verification path)
-that the Identity spec §3 explicitly deferred to "an implementation spec
-with explicit review."
+Numbered docs-only spec. This file corrects the earlier 10IG document,
+which conflated two distinct constructions and overclaimed closure of the
+Identity spec §3 deferred gap. The earlier 10IG has been rewritten in
+place under this same phase number; no new phase number is created.
 
-This spec documents the construction **already in use** by the implemented
-10IC birth-candidate module. It does not invent a new algorithm, does not
-modify 10IC, does not authorize creation, and does not open Gate-7.
+The Identity spec §3 explicitly defers "the exact commitment construction
+(hash algorithm, input material, encoding, verification path) remains
+deferred to an implementation spec with explicit review." That full gap
+is **not** closed by this document. What this document closes is the
+narrower, evidence-grounded question of how the already-implemented 10IC
+module validates a caller-supplied `provenance_commitment` and binds it
+into the canonical `agent_id` derivation material.
+
+This spec is grounded in the actual behavior of the pushed 10IC module
+`backend/world/local_first_pair_birth_candidate.py` (commit `2e1d189`) and
+its test suite `tests/test_phase10ic_first_pair_birth_candidate.py`. It
+does not invent new fields, does not modify 10IC, does not authorize
+creation, and does not open Gate-7.
 
 **FIRST_PAIR_CREATION_AUTHORIZED = False** (unchanged by this document).
-
-This document records provenance commitment construction only. It does not
-authorize Adam/Eve creation, implementation of new boundary modules,
-runtime activation, or world-state writes. Gate-7 remains closed. 10HD
-remains named-only and untouched. 10CP remains the sole writer.
 
 ---
 
 ## 1. Scope and Out-of-Scope
 
-### In scope
+### In scope (what this spec closes)
 
-- The exact construction of the immutable `provenance_commitment` field
-  carried by every First Pair identity.
-- The exact derivation algorithm for `agent_id` from canonical identity
-  material, including the role of `provenance_commitment` in that
-  derivation.
-- The verification path: how a presented `provenance_commitment` and
-  presented `agent_id` are checked against canonical material.
+- The exact **accepted shape** of the `provenance_commitment` field as
+  validated by 10IC.
+- The exact **type and lowercase-hex validation** 10IC applies to a
+  caller-supplied commitment value.
+- The **inclusion** of `provenance_commitment` in the canonical identity
+  material used to derive `agent_id`.
+- The **canonical `agent_id` derivation** algorithm that consumes the
+  validated commitment.
+- The **exact-equality and fail-closed identity-drift verification**
+  procedure that re-derives `agent_id` from the canonical material.
 
-### Out of scope (separate Lane A specs)
+### Out of scope (what this spec does NOT close)
 
-- **Truncation and collision budget for `agent_id`** — deferred to 10IK.
-  This spec documents the **full-hash** `agent_id` form already produced by
-  10IC (no truncation). Any truncation review is a separate explicit spec.
-- **Rollback anchor format** — deferred to 10IH. The
-  `rollback_anchor.state_commitment` field reuses the hex64 shape defined
-  here, but the anchor envelope is a separate spec.
-- **Per-call write allow-list** — deferred to 10II.
-- **Starting habitat tiles declaration** — deferred to 10IJ.
+- **The source material from which the operator constructs the
+  `provenance_commitment` value.** The Identity spec §3 defers "the exact
+  commitment construction (hash algorithm, input material, encoding,
+  verification path)" to an implementation spec with explicit review.
+  No such source-envelope spec exists in the repository as of this phase.
+  This document does not invent one.
+- **Truncation and collision budget for `agent_id`** — deferred to a
+  future 10IK review.
+- **Rollback anchor format** — deferred to a future 10IH spec.
+- **Per-call write allow-list** — deferred to a future 10II spec.
+- **Starting habitat tiles declaration** — deferred to a future 10IJ spec.
+
+The `provenance_commitment`'s own source material and construction remain
+**unresolved**. This document explicitly does not close the Identity-spec
+§3 construction gap.
 
 ---
 
 ## 2. Grounding: 10IC Implementation Behavior
 
 This spec is grounded in the actual behavior of the pushed 10IC module
-`backend/world/local_first_pair_birth_candidate.py` (commit `2e1d189`).
-The construction below is a **normative description of what 10IC already
-does**, not a new algorithm. Discrepancies between this spec and 10IC are
-resolved by re-reading the 10IC source; this spec does not modify 10IC.
+(commit `2e1d189`). The behavior below is a normative description of what
+10IC already does; discrepancies between this spec and 10IC are resolved
+by re-reading the 10IC source. This spec does not modify 10IC.
 
-10IC constants used by the construction:
+10IC constants relevant to validation and binding:
 
 - `_IDENTITY_SCHEMA_VERSION = "first_pair_identity.1"`
 - `_ID_DERIVATION_VERSION = "sha256-full-v1"`
 - `_IDENTITY_DOMAIN_SEPARATOR = "GENESIS_FIRST_PAIR_IDENTITY_V1"`
 - `_PAIR_ID = "genesis-first-pair"`
 
+10IC validation of `provenance_commitment` (see `_is_hex64` and
+`_derive_identity` in `local_first_pair_birth_candidate.py`):
+
+- Type check: `type(value["provenance_commitment"]) is not str` — rejects
+  non-`str` types and string subclasses (exact-type identity).
+- Length check: `len(value) != 64` — rejects anything other than exactly
+  64 characters.
+- Alphabet check: every character must be in `"0123456789abcdef"` —
+  lowercase hex only; uppercase hex characters are rejected.
+- 10IC does **not** recompute the commitment from any source envelope. It
+  accepts the caller-supplied value as-is once it passes the hex64 shape
+  check, then includes it in the `agent_id` derivation material.
+
+10IC test fixtures (see `tests/test_phase10ic_first_pair_birth_candidate.py`)
+use the literal values `"a" * 64` and `"b" * 64` as Adam's and Eve's
+`provenance_commitment` respectively. This is direct evidence that 10IC
+treats the commitment as a caller-supplied value, not as a value it
+constructs from provenance material.
+
 ---
 
-## 3. Provenance Commitment Construction
+## 3. Provenance Commitment Accepted Shape
 
 ### 3.1 Shape
 
-The `provenance_commitment` is a **64-character lowercase hexadecimal
-string** — the sha256 hexdigest of operator-approved creation provenance
-material.
+The `provenance_commitment` accepted by 10IC is a **64-character
+lowercase hexadecimal string**.
 
-- Type: `str` (exact; subclasses rejected by 10IC's `type(value) is not str`
-  guards).
+- Type: exactly `str` (subclasses rejected by 10IC's
+  `type(value) is not str` guards).
 - Length: exactly 64 characters.
-- Alphabet: `0123456789abcdef` (lowercase only; uppercase hex is rejected).
-- Role: an immutable, operator-approved commitment to creation provenance.
-  This is **not** a raw secret seed; nothing in this spec or in 10IC
-  requires raw secret material to be held at runtime.
+- Alphabet: `0123456789abcdef` (lowercase only; uppercase hex is
+  rejected).
+- Role per Identity spec §3: an operator-approved immutable commitment to
+  creation provenance. This is **not** a raw secret seed; nothing in this
+  spec or in 10IC requires raw secret material to be held at runtime.
 
-### 3.2 Operator Approval of the Commitment Value
+### 3.2 Operator Approval of the Supplied Value
 
-The `provenance_commitment` value itself is **operator-approved** before
-pair definition. The operator selects the commitment value (a 64-char
-lowercase hex string) and supplies it as part of the canonical identity
-material at pair definition time.
-
-This spec does **not** define how the operator chooses or stores the
-commitment value — only that it must be a 64-char lowercase hex string
-when presented at runtime. Selection and secure storage of the commitment
-value outside the runtime lane is an operator responsibility, not a
-Genesis module responsibility.
+The `provenance_commitment` value is **operator-approved** before pair
+definition and supplied to 10IC by the caller. 10IC validates the shape
+only; it does not verify operator approval, does not consult any external
+registry of approved commitments, and does not store the value beyond
+including it in the in-memory identity dict.
 
 ### 3.3 Immutability After Definition
 
 Per Identity spec §3, `provenance_commitment` is immutable across cycles
-and restarts. Any proposed mutation is rejected fail-closed by 10IC, and
-identity is re-derived from the unchanged canonical material on every
-restart. There is no field-rename, no commitment rotation, and no
-re-derivation under a different commitment value.
+and restarts. 10IC's drift checks (Section 5 of this spec) reject any
+proposed mutation. There is no field-rename, no commitment rotation, and
+no re-derivation under a different commitment value.
 
 ---
 
-## 4. agent_id Derivation Algorithm
+## 4. agent_id Derivation That Consumes the Validated Commitment
 
 ### 4.1 Canonical Material
 
-The `agent_id` is derived from an **exact, ordered** canonical material
-dict containing these eight fields and no others:
+After `provenance_commitment` passes the §3 shape check, 10IC builds an
+**exact, ordered** canonical material dict containing these eight fields
+and no others:
 
 | Field | Source | Value |
 |---|---|---|
@@ -116,7 +143,7 @@ dict containing these eight fields and no others:
 | `canonical_agent_ref` | identity input | `"east_adam"` or `"east_eve"` |
 | `pair_id` | 10IC constant | `"genesis-first-pair"` |
 | `founding_role` | 10IC constant | `"founding_agent"` (unified; see §7) |
-| `provenance_commitment` | identity input | 64-char lowercase hex per §3 |
+| `provenance_commitment` | identity input | validated 64-char lowercase hex per §3 |
 
 ### 4.2 Canonical Serialization
 
@@ -154,13 +181,12 @@ The `agent_id` is the string:
 ```
 
 - **No truncation.** The full 64-character sha256 hexdigest is used. 10IC
-  line 314: `"genesis-agent-" + _hash_canonical(material)` — no `[:32]`
-  slice.
-- The full-hash form is the canonical form for this spec. Any truncation
-  review (32-char or otherwise) is deferred to 10IK and is not authorized
-  by this document.
-- Prefix `"genesis-agent-"` is fixed; it namespaces First Pair agents from
-  any other identity scheme in the project.
+  uses `"genesis-agent-" + _hash_canonical(material)` — no `[:32]` slice
+  on the `agent_id` form.
+- Truncation review (32-char or otherwise) is deferred to a future 10IK
+  spec and is not authorized by this document.
+- Prefix `"genesis-agent-"` is fixed; it namespaces First Pair agents
+  from any other identity scheme in the project.
 
 ### 4.5 Determinism and Pair Symmetry
 
@@ -171,12 +197,12 @@ The `agent_id` is the string:
 - Adam and Eve are not granted different identity tiers; they differ only
   in identity material.
 - Re-derivation from the same canonical material always produces the same
-  `agent_id`. There is no per-tick variation, no per-restart variation, no
-  per-process variation.
+  `agent_id`. There is no per-tick variation, no per-restart variation,
+  no per-process variation.
 
 ---
 
-## 5. Verification Path
+## 5. Verification Path (Validated by 10IC Drift Checks)
 
 ### 5.1 Re-Derivation, Not Recall
 
@@ -184,12 +210,13 @@ After any restart, identity is verified by **re-derivation**, not by
 recalling a stored `agent_id`. Re-derivation either matches the canonical
 `agent_id` exactly or the recovery fails closed.
 
-### 5.2 Verification Procedure
+### 5.2 Verification Procedure Used by 10IC
 
 To verify a presented First Pair identity:
 
-1. Confirm the presented `provenance_commitment` is a 64-char lowercase
-   hex string (§3.1). Reject fail-closed if not.
+1. Confirm the presented `provenance_commitment` passes the §3 shape
+   check (exact-`str` type, length 64, lowercase hex only). Reject
+   fail-closed if not.
 2. Confirm the presented `canonical_name`, `canonical_agent_ref`, `pair_id`,
    and `founding_role` match their canonical values (§4.1). Reject
    fail-closed on any mismatch.
@@ -204,8 +231,10 @@ To verify a presented First Pair identity:
 Per Identity spec §6, these drift cases are rejected immediately and
 absolutely:
 
-- Immutable field mismatch — any §4.1 field on a presented identity differs
-  from its canonical value.
+- `provenance_commitment` shape mismatch — not exact-`str`, not 64 chars,
+  or not lowercase hex.
+- Immutable field mismatch — any §4.1 field on a presented identity
+  differs from its canonical value.
 - `agent_id` mismatch — the presented `agent_id` does not equal the
   re-derivation from the declared canonical material.
 - Pair mismatch — a presented identity carries a `pair_id` that differs
@@ -237,6 +266,10 @@ carry provenance back to the operator-approved `provenance_commitment`.
   authority. Identity is established by canonical material plus operator
   provenance, never by another agent's assertion.
 
+The binding to `claim_scope = "identity"` is meaningful only when the
+commitment value itself carries operator approval — which 10IC does not
+verify and this spec does not specify (see §1, out of scope).
+
 ---
 
 ## 7. Founding Role Unification (Documented Deviation)
@@ -256,47 +289,101 @@ existing 10IC/10ID/10IE test fixtures.
 
 ---
 
-## 8. Non-Authority Statements
+## 8. Status of the Identity-spec §3 Construction Gap
 
-- This spec authorizes **nothing beyond documenting the provenance
-  commitment construction**.
+The Identity spec §3 says:
+
+> The exact commitment construction (hash algorithm, input material,
+> encoding, verification path) remains deferred to an implementation spec
+> with explicit review.
+
+The earlier 10IG document (pushed as `70ec3ca`) overclaimed closure of
+this gap by asserting that the commitment "is the sha256 hexdigest of
+operator-approved creation provenance material." That assertion was
+unsupported: no spec in the repository defines the operator-approved
+creation provenance material, no implementation in the repository
+computes the commitment from such material, and the 10IC tests supply
+placeholder values (`"a" * 64`, `"b" * 64`) directly.
+
+This corrected 10IG document does **not** close the Identity-spec §3
+construction gap. It closes only:
+
+- the accepted shape of a caller-supplied `provenance_commitment` (§3);
+- the exact type and lowercase-hex validation 10IC applies (§3);
+- the inclusion of `provenance_commitment` in the canonical `agent_id`
+  material (§4.1);
+- the canonical `agent_id` derivation algorithm (§4);
+- the exact-equality and fail-closed identity-drift verification
+  procedure 10IC implements (§5).
+
+The construction of `provenance_commitment` itself — the source-envelope
+fields, the source-envelope hash algorithm, the source-envelope canonical
+ordering and JSON settings, the source-envelope UTF-8 encoding, the
+source-envelope output encoding, the source-envelope verification
+procedure, the unknown/missing-field handling for the source envelope,
+the list ordering and duplicate handling for source-envelope fields, the
+source-envelope input immutability, and the operator-approval binding to
+a specific source-envelope artifact — **remains unresolved**.
+
+A future phase (numbered, not this one) must specify the
+`provenance_commitment` source envelope exactly before the Identity-spec
+§3 gap can be closed. That future phase requires an already-approved
+exact source envelope to exist; if none exists, it must design one with
+explicit operator review. This document does neither.
+
+---
+
+## 9. Non-Authority Statements
+
+- This spec authorizes **nothing beyond documenting the validation and
+  agent-id binding behavior already implemented by 10IC**.
 - It does **not** authorize creating Adam or Eve.
 - It does **not** modify 10IC, 10ID, 10IE, or any prior phase.
 - It does **not** implement a new boundary module.
 - It does **not** open Gate-7, start a daemon, add a scheduler, open a
   network connection, call a provider, or touch `world-sim/data`.
-- It does **not** review truncation/collision budget (deferred to 10IK).
-- It does **not** specify the rollback anchor envelope (deferred to 10IH).
-- It does **not** enumerate the per-call write allow-list (deferred to 10II).
-- It does **not** declare starting habitat tiles (deferred to 10IJ).
+- It does **not** specify the `provenance_commitment` source envelope.
+- It does **not** review truncation/collision budget (deferred to a
+  future 10IK).
+- It does **not** specify the rollback anchor envelope (deferred to a
+  future 10IH).
+- It does **not** enumerate the per-call write allow-list (deferred to a
+  future 10II).
+- It does **not** declare starting habitat tiles (deferred to a future
+  10IJ).
 
 ---
 
-## 9. Authorization Gate Conclusion
+## 10. Authorization Gate Conclusion
 
 | Condition | Status |
 |---|---|
-| `provenance_commitment` shape documented (64-char lowercase hex) | ✅ Yes — by this spec |
-| `agent_id` derivation algorithm documented (sha256, canonical JSON, domain separator, full hash) | ✅ Yes — by this spec |
-| Verification path documented (re-derive, exact-equality, fail-closed drift) | ✅ Yes — by this spec |
-| Truncation/collision budget reviewed | ❌ No — deferred to 10IK |
-| Rollback anchor format specified | ❌ No — deferred to 10IH |
-| Write allow-list enumerated | ❌ No — deferred to 10II |
-| Starting habitat tiles declared | ❌ No — deferred to 10IJ |
+| `provenance_commitment` accepted shape documented (64-char lowercase hex) | ✅ Yes — by this spec |
+| Exact type and lowercase-hex validation documented | ✅ Yes — by this spec |
+| Inclusion of `provenance_commitment` in `agent_id` material documented | ✅ Yes — by this spec |
+| Canonical `agent_id` derivation documented (sha256, canonical JSON, domain separator, full hash) | ✅ Yes — by this spec |
+| Exact-equality fail-closed identity-drift verification documented | ✅ Yes — by this spec |
+| `provenance_commitment` source-envelope construction specified | ❌ No — unresolved (see §8) |
+| Operator-approval binding to a specific source-envelope artifact specified | ❌ No — unresolved (see §8) |
+| Truncation/collision budget reviewed | ❌ No — deferred to a future 10IK |
+| Rollback anchor format specified | ❌ No — deferred to a future 10IH |
+| Write allow-list enumerated | ❌ No — deferred to a future 10II |
+| Starting habitat tiles declared | ❌ No — deferred to a future 10IJ |
 | `world-sim/data` write authorized | ❌ No — not granted |
 | GPT-5.6 Sol/Luna invoked for creation implementation | ❌ No — creation unauthorized |
 | Explicit Sean approval for creation phase | ❌ No — not granted |
 
 **FIRST_PAIR_CREATION_AUTHORIZED = False**
 
-This document closes the "Provenance commitment construction deferred"
-audit finding from 10IF Section 3. It does not close any other audit
-finding. The remaining unresolved creation prerequisites identified by
-10IF remain open and require separate review and explicit authorization.
+This document does not close the 10IF audit finding "Provenance commitment
+construction deferred." That finding remains open. This document closes
+only the narrower question of how 10IC validates and binds a
+caller-supplied commitment value, which is a prerequisite for, but not a
+substitute for, the future construction spec.
 
 ---
 
-## 10. Forbidden Actions (Repeated for Emphasis)
+## 11. Forbidden Actions (Repeated for Emphasis)
 
 Under this spec and all six preflight specs, the following are forbidden
 and must fail closed:
@@ -312,12 +399,13 @@ and must fail closed:
 - Model/provider autonomy (no model may choose actions, writes, or ticks)
 - Runtime self-scheduling (no self-initiated ticks)
 - Any write without an explicit per-call allow-list and provenance chain
-- Modifying the 10IC implementation to add truncation without an explicit
-  10IK review
+- Modifying the 10IC implementation, 10ID, or 10IE
+- Inventing a `provenance_commitment` source envelope without an
+  explicit, reviewed, operator-approved design
 
 ---
 
-## 11. Phase Index
+## 12. Phase Index
 
 This phase receives a single `phase_index.md` row marked **Done**,
 commit-only, hash recorded after push. No tests, no backend/runtime
