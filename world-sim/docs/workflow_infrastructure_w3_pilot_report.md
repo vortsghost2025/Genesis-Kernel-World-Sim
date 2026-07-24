@@ -206,7 +206,7 @@ GREEN
 | Wrong OldShortSha | `sync_phase_index_sha.ps1 -OldShortSha aaaaaaa` | **RED** — Commit cell mismatch |
 | Zero phase matches | `sync_phase_index_sha.ps1 -PhaseId NONE` | **RED** — no matching phase row |
 | Duplicate W3P row | Copy W3P row to disposable `phase_index_dup.md` | **RED** — multiple matching phase rows |
-| Credential-shaped fixture | Add `cred_test.md` with `api_key = "test-only"` | **RED** — `[FAIL] credential-shaped match`, `[REDACTED]` output |
+| Credential-shaped fixture | `cred_test.md` containing a live provider token (e.g., GitHub PAT) → produces **RED**, `[FAIL] credential-shaped match`, `[REDACTED]` output |
 | Keyword-only prose | Fixture contains "password" in documentation context | **GREEN** — `keyword-notice` only, nonblocking |
 
 All failure cases produced RED without modifying live Genesis repo.
@@ -217,12 +217,35 @@ All failure cases produced RED without modifying live Genesis repo.
 
 | Input | Verifier Output | Level | Blocking |
 |-------|-----------------|-------|----------|
-| `password = "test-only"` (assignment) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
+| `api_key = "test-only"` (assignment) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `The password field is required` (doc prose) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `api_key = "test-only"` (exact placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
-| `TEST-PLACEHOLDER` (AWS key pattern) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
+| `TEST-PLACEHOLDER` (generic placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 
 Raw credential values **never printed** — always `[REDACTED]`.
+
+---
+
+## Multi-Path PowerShell Finding
+
+During live validation of the credential scan with two explicit paths, the verifier's `-Path` parameter **only accepted both paths when passed as a single PowerShell array variable** (`$paths = @("path1", "path2"); script.ps1 -Path $paths`). Passing the paths as separate positional arguments (`script.ps1 -Path "path1", "path2"` or `script.ps1 -Path "path1" "path2"`) caused the authorization check to fail for the second path.
+
+**Correct pattern:**
+```powershell
+$paths = @("world-sim/docs/docs_correction_runbook.md", "world-sim/docs/workflow_infrastructure_w3_pilot_report.md")
+pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -ExpectedSha $headSha -AllowDirty -Path $paths
+```
+
+**Incorrect patterns that failed authorization:**
+```powershell
+# Fails: second path treated as next positional parameter
+pwsh -NoProfile -File script.ps1 -Path "path1" "path2"
+
+# Fails: array literal without variable assignment
+pwsh -NoProfile -File script.ps1 -Path "path1", "path2"
+```
+
+This is a PowerShell parameter binding behavior: when multiple values are passed to a `[string[]]` parameter without an explicit variable, they are bound as separate positional arguments rather than a single array. The verifier's authorization check iterates over the `$Path` array, so only the first element was recognized as authorized.
 
 ---
 
