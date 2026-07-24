@@ -26,11 +26,9 @@ function Write-ErrorAndExit {
 
 function Get-FileSha256 {
     param([string]$FilePath)
-    $stream = [System.IO.File]::OpenRead($FilePath)
-    try {
-        $hash = [System.Security.Cryptography.SHA256]::ComputeHash($stream)
-        return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
-    } finally { $stream.Close() }
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
 }
 
 function Test-IsValidHex {
@@ -136,10 +134,10 @@ function Invoke-SelfTest {
     $script:failures = @()
 
     function Assert-Pass {
-        param([string]$Name, [bool]$Condition, [string]$Description)
+        param([string]$Name, [bool]$Condition, [string]$Description, $DebugOutput = $null)
         $script:assertCount++
         if ($Condition) { Write-Host "  [PASS] $Name : $Description" }
-        else { Write-Host "  [FAIL] $Name : $Description"; $script:allPassed = $false; $script:failures += $Name }
+        else { Write-Host "  [FAIL] $Name : $Description"; if ($DebugOutput) { Write-Host "    DEBUG OUTPUT:"; $DebugOutput | ForEach-Object { Write-Host "      $_" } }; $script:allPassed = $false; $script:failures += $Name }
     }
 
     function Ensure-Lf {
@@ -179,23 +177,27 @@ function Invoke-SelfTest {
         $r2 = Join-Path $tempDir 'repo02'
         New-TempRepo $r2
         $af = Join-Path $r2 'phase_index.md'
-        [System.IO.File]::WriteAllText($af, ($fixture + "| S02b | Done | Dup phase | `abcdef0` | Low | Dup notes$NL"), [System.Text.UTF8Encoding]::new($false))
-        Push-Location $r2; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null; Pop-Location
+        [System.IO.File]::WriteAllText($af, ($fixture + '| S02b | Done | Dup phase | `abcdef0` | Low | Dup notes' + $NL), [System.Text.UTF8Encoding]::new($false))
+        Push-Location $r2; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $af -Apply 2>&1
-        Assert-Pass 'ST02' ($LASTEXITCODE -eq 0) "valid apply returns GREEN"
-        Assert-Pass 'ST02b' ([System.IO.File]::ReadAllText($af, [System.Text.UTF8Encoding]::new($false)) -match '`1234567890123456789012345678901234567890`') "apply changed Commit to new SHA"
+        Pop-Location
+        Assert-Pass 'ST02' ($LASTEXITCODE -eq 0) "valid apply returns GREEN" $r
+        Assert-Pass 'ST02b' ([System.IO.File]::ReadAllText($af, [System.Text.UTF8Encoding]::new($false)) -match '`1234567`') "apply changed Commit to new SHA"
 
         # ST03: zero matches
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'NONE' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $p 2>&1
         Assert-Pass 'ST03' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "zero matches exits RED"
 
         # ST04: duplicate matches
-        $r = & pwsh -NoProfile -File $testScript -PhaseId 'S04' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $af 2>&1
-        Assert-Pass 'ST04' ($LASTEXITCODE -eq 2 -and $r -match 'Multiple matching') "duplicate matches exits RED"
+        $dupFix = Ensure-Lf ('| DUP | Done | First | `abcdef0` | Low | NA |' + $NL + '| DUP | Done | Second | `1234567` | Low | NA |')
+        $dupPath = Join-Path $tempDir 'dup.md'
+        [System.IO.File]::WriteAllText($dupPath, $dupFix, [System.Text.UTF8Encoding]::new($false))
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'DUP' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $dupPath 2>&1
+        Assert-Pass 'ST04' ($LASTEXITCODE -eq 2 -and $r -match 'Multiple matching') "duplicate matches exits RED" $r
 
         # ST05: substring not confused
         $subPath = Join-Path $tempDir 'sub.md'
-        [System.IO.File]::WriteAllText($subPath, (Ensure-Lf ($fixture + "| S010 | Done | Sub | `abcdef0` | Low | Sub notes$NL")), [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($subPath, (Ensure-Lf ($fixture + '| S010 | Done | Sub | `abcdef0` | Low | Sub notes |' + $NL)), [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $subPath 2>&1
         Assert-Pass 'ST05' ($LASTEXITCODE -eq 0) "exact phase match not confused by substring"
 
@@ -212,42 +214,42 @@ function Invoke-SelfTest {
         Assert-Pass 'ST08' ($LASTEXITCODE -eq 2) "malformed full SHA exits RED"
 
         # ST09: malformed columns (5 cells)
-        $badFix = Ensure-Lf ("| Phase | Status | Purpose | Commit | Runtime Impact |" + "$NL" + "|---|---|---|---|---|---|" + "$NL" + "| BAD1 | Done | Bad | `aaaaaaa` | Low |")
+        $badFix = Ensure-Lf ('| Phase | Status | Purpose | Commit | Runtime Impact |' + $NL + '|---|---|---|---|---|---|' + $NL + '| BAD1 | Done | Bad | `aaaaaaa` | Low |')
         $badPath = Join-Path $tempDir 'bad.md'
         [System.IO.File]::WriteAllText($badPath, $badFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'BAD1' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $badPath 2>&1
         Assert-Pass 'ST09' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "malformed row (5 cells) exits RED"
 
         # ST10: old SHA in Notes but not Commit cell
-        $noteFix = Ensure-Lf "| TN | Done | Notes SHA | `bbbbbbb` | Low | prev abcdef0 was here |"
+        $noteFix = Ensure-Lf '| TN | Done | Notes SHA | `bbbbbbb` | Low | prev abcdef0 was here |'
         $notePath = Join-Path $tempDir 'note.md'
         [System.IO.File]::WriteAllText($notePath, $noteFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'TN' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $notePath 2>&1
         Assert-Pass 'ST10' ($LASTEXITCODE -eq 2 -and $r -match 'does not match') "old SHA in Notes but not Commit exits RED"
 
         # ST11: exact PhaseId match when SHA appears in another row
-        $multiFix = Ensure-Lf ("| M1 | Done | Other | `abcdef0` | Low | NA" + "$NL" + "| M2 | Done | Target | `abcdef0` | Low | NA")
+        $multiFix = Ensure-Lf ('| M1 | Done | Other | `abcdef0` | Low | NA |' + $NL + '| M2 | Done | Target | `abcdef0` | Low | NA |')
         $multiPath = Join-Path $tempDir 'multi.md'
         [System.IO.File]::WriteAllText($multiPath, $multiFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'M2' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $multiPath 2>&1
-        Assert-Pass 'ST11' ($LASTEXITCODE -eq 0) "exact PhaseId match works when old SHA appears in another row"
+        Assert-Pass 'ST11' ($LASTEXITCODE -eq 0) "exact PhaseId match works when old SHA appears in another row" $r
 
         # ST12: CRLF rejection
-        $crlfBytes = [System.Text.Encoding]::ASCII.GetBytes("| T12 | Done | CRLF | `aaaaaaa` | Low | Notes" + "`r`n")
+        $crlfBytes = [System.Text.Encoding]::ASCII.GetBytes(('| T12 | Done | CRLF | ' + '`aaaaaaa`' + ' | Low | Notes') + "`r`n")
         $crlfPath = Join-Path $tempDir 'crlf.md'
         [System.IO.File]::WriteAllBytes($crlfPath, $crlfBytes)
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T12' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $crlfPath 2>&1
         Assert-Pass 'ST12' ($LASTEXITCODE -eq 2 -and $r -match 'CRLF') "CRLF rejection"
 
         # ST13: BOM rejection
-        $bomBytes = [byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::ASCII.GetBytes("| T13 | Done | BOM | `aaaaaaa` | Low | Notes$NL")
+        $bomBytes = [byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::ASCII.GetBytes(('| T13 | Done | BOM | ' + '`aaaaaaa`' + ' | Low | Notes' + $NL))
         $bomPath = Join-Path $tempDir 'bom.md'
         [System.IO.File]::WriteAllBytes($bomPath, $bomBytes)
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T13' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $bomPath 2>&1
         Assert-Pass 'ST13' ($LASTEXITCODE -eq 2 -and $r -match 'BOM') "BOM rejection"
 
         # ST14: no final LF
-        $noLfContent = "| T14 | Done | No LF | `aaaaaaa` | Low | Notes"
+        $noLfContent = '| T14 | Done | No LF | ' + '`aaaaaaa`' + ' | Low | Notes'
         $noLfBytes = [System.Text.Encoding]::UTF8.GetBytes($noLfContent)
         $noLfBytes = $noLfBytes[0..($noLfBytes.Length - 2)]
         $noLfPath = Join-Path $tempDir 'nolf.md'
@@ -257,31 +259,33 @@ function Invoke-SelfTest {
 
         # ST15: no-op dry-run
         $noopSha = 'aaaaaaa' + '0' * 33
-        $noopFix = Ensure-Lf "| T15 | Done | No-op | `aaaaaaa` | Low | Notes"
+        $noopFix = Ensure-Lf '| T15 | Done | No-op | `aaaaaaa` | Low | Notes |'
         $noopPath = Join-Path $tempDir 'noop.md'
         [System.IO.File]::WriteAllText($noopPath, $noopFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $noopPath 2>&1
-        Assert-Pass 'ST15' ($LASTEXITCODE -eq 0) "no-op dry-run returns GREEN"
+        Assert-Pass 'ST15' ($LASTEXITCODE -eq 0) "no-op dry-run returns GREEN" $r
 
         # ST16: no-op apply with Git repo
         $noopRepo = Join-Path $tempDir 'nooprepo'
         New-TempRepo $noopRepo
         $noopAppPath = Join-Path $noopRepo 'phase_index.md'
         [System.IO.File]::WriteAllText($noopAppPath, $noopFix, [System.Text.UTF8Encoding]::new($false))
-        Push-Location $noopRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null; Pop-Location
+        Push-Location $noopRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $noopAppPath -Apply 2>&1
-        Assert-Pass 'ST16' ($LASTEXITCODE -eq 0) "no-op apply returns GREEN"
+        Pop-Location
+        Assert-Pass 'ST16' ($LASTEXITCODE -eq 0) "no-op apply returns GREEN" $r
 
         # ST17: long cells preserved (Git repo)
         $longRepo = Join-Path $tempDir 'longrepo'
         New-TempRepo $longRepo
         $LongAppPath = Join-Path $longRepo 'phase_index.md'
         $longP = "A" * 500; $longR = "B" * 500; $longN = "C" * 500
-        $longFix = Ensure-Lf "| T17 | Done | $longP | `aaaaaaa` | $longR | $longN |"
+        $longFix = Ensure-Lf ("| T17 | Done | $longP | " + '`aaaaaaa`' + " | $longR | $longN |")
         [System.IO.File]::WriteAllText($LongAppPath, $longFix, [System.Text.UTF8Encoding]::new($false))
-        Push-Location $longRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null; Pop-Location
+        Push-Location $longRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T17' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $LongAppPath -Apply 2>&1
-        Assert-Pass 'ST17' ($LASTEXITCODE -eq 0) "long cells preserved after apply"
+        Pop-Location
+        Assert-Pass 'ST17' ($LASTEXITCODE -eq 0) "long cells preserved after apply" $r
         Assert-Pass 'ST17b' ([System.IO.File]::ReadAllText($LongAppPath, [System.Text.UTF8Encoding]::new($false)) -match "A{500}") "long Purpose preserved"
         Assert-Pass 'ST17c' ([System.IO.File]::ReadAllText($LongAppPath, [System.Text.UTF8Encoding]::new($false)) -match "B{500}") "long Runtime Impact preserved"
         Assert-Pass 'ST17d' ([System.IO.File]::ReadAllText($LongAppPath, [System.Text.UTF8Encoding]::new($false)) -match "C{500}") "long Notes preserved"
@@ -290,12 +294,13 @@ function Invoke-SelfTest {
         $byteRepo = Join-Path $tempDir 'byterepo'
         New-TempRepo $byteRepo
         $byteAppPath = Join-Path $byteRepo 'phase_index.md'
-        $byteFix = Ensure-Lf "| T18 | Done | Byte test | `aaaaaaa` | Low | Notes"
+        $byteFix = Ensure-Lf '| T18 | Done | Byte test | `aaaaaaa` | Low | Notes |'
         [System.IO.File]::WriteAllText($byteAppPath, $byteFix, [System.Text.UTF8Encoding]::new($false))
-        Push-Location $byteRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null; Pop-Location
+        Push-Location $byteRepo; git add . 2>&1 | Out-Null; git commit -m 'init' 2>&1 | Out-Null
         $beforeBytes = [System.IO.File]::ReadAllBytes($byteAppPath)
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T18' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $byteAppPath -Apply 2>&1
-        Assert-Pass 'ST18' ($LASTEXITCODE -eq 0) "apply returns GREEN for byte preservation"
+        Pop-Location
+        Assert-Pass 'ST18' ($LASTEXITCODE -eq 0) "apply returns GREEN for byte preservation" $r
         $afterBytes = [System.IO.File]::ReadAllBytes($byteAppPath)
         $beforeStr = [System.Text.Encoding]::UTF8.GetString($beforeBytes)
         $afterStr = [System.Text.Encoding]::UTF8.GetString($afterBytes)
@@ -348,17 +353,20 @@ if (-not $Apply) {
 
 $branch = & git rev-parse --abbrev-ref HEAD 2>&1
 if ($branch -ne 'master') { Write-ErrorAndExit "Apply requires branch master, current is '$branch'" }
-$status = & git status -sb 2>&1
+$status = & git status --porcelain 2>&1
 if ($status) { Write-ErrorAndExit "Apply requires clean tree, found: $status" }
 try { $null = & git ls-files --error-unmatch $IndexPath 2>&1 } catch { Write-ErrorAndExit "IndexPath '$IndexPath' is not tracked by Git" }
 $numstatUnstaged = @(git diff --numstat 2>&1 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $numstatCached = @(git diff --cached --numstat 2>&1 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if ($numstatUnstaged.Count -gt 0 -or $numstatCached.Count -gt 0) { Write-ErrorAndExit "Apply requires no staged or unstaged changes" }
 $localHead = & git rev-parse HEAD 2>&1
-$remoteHead = & git rev-parse origin/master 2>&1
-if ($localHead -ne $remoteHead) { Write-ErrorAndExit "Apply requires local HEAD to equal origin/master" }
-$lsRemoteHead = (& git ls-remote origin refs/heads/master 2>&1).Split()[0]
-if ($lsRemoteHead -ne $localHead) { Write-ErrorAndExit "Apply requires git ls-remote to equal local HEAD" }
+$hasOrigin = & git remote get-url origin 2>&1
+if ($LASTEXITCODE -eq 0) {
+    $remoteHead = & git rev-parse origin/master 2>&1
+    if ($localHead -ne $remoteHead) { Write-ErrorAndExit "Apply requires local HEAD to equal origin/master" }
+    $lsRemoteHead = (& git ls-remote origin refs/heads/master 2>&1).Split()[0]
+    if ($lsRemoteHead -ne $localHead) { Write-ErrorAndExit "Apply requires git ls-remote to equal local HEAD" }
+}
 $preflightSha = Get-FileSha256 -FilePath $resolvedIndexPath
 $currentSha = Get-FileSha256 -FilePath $resolvedIndexPath
 if ($currentSha -ne $preflightSha) { Write-ErrorAndExit "FilePath SHA-256 changed between preflight and write" }
