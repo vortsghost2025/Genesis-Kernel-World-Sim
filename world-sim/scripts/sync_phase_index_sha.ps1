@@ -17,8 +17,7 @@ $script:ExitCodeGreen = 0
 $script:ExitCodeRed = 2
 
 # ---------------------------------------------------------------------------
-# Resolve repo root and validate IndexPath containment (Defect 4)
-# Note: repoRoot is resolved after IndexPath is resolved, from the IndexPath's directory
+# Resolve repo root and validate IndexPath containment
 # ---------------------------------------------------------------------------
 
 $script:repoRoot = $null
@@ -26,18 +25,11 @@ $script:repoRoot = $null
 function Write-ErrorAndExit {
     param([string]$Message)
     Write-Host "ERROR: $Message"
-    exit $script:ExitCodeRed
-}
-
-function Get-FileSha256 {
-    param([string]$FilePath)
-    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
-    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+    [System.Environment]::Exit($script:ExitCodeRed)
 }
 
 # ---------------------------------------------------------------------------
-# Input normalization (Defect 3)
+# Input normalization (Defect 4 — normalize BEFORE validation)
 # ---------------------------------------------------------------------------
 
 function Normalize-PhaseId {
@@ -56,14 +48,8 @@ function Normalize-FullSha {
 }
 
 # ---------------------------------------------------------------------------
-# Strict Commit-cell grammar (Defect 2)
+# Validation helpers
 # ---------------------------------------------------------------------------
-
-function Test-RawCommitCell {
-    param([string]$RawCell)
-    $pattern = '^\s*`[0-9a-f]{7}`\s*$'
-    return ($RawCell -cmatch $pattern)
-}
 
 function Test-IsValidHex {
     param(
@@ -76,8 +62,19 @@ function Test-IsValidHex {
     return ($Value -match $hexPattern)
 }
 
+function Test-IsValidHexLower {
+    param(
+        [string]$Value,
+        [int]$Length
+    )
+    if ([string]::IsNullOrEmpty($Value)) { return $false }
+    if ($Value.Length -ne $Length) { return $false }
+    $hexPattern = '^[0-9a-f]{' + $Length + '}$'
+    return ($Value -cmatch $hexPattern)
+}
+
 # ---------------------------------------------------------------------------
-# UTF-8 validation (Defect 7)
+# UTF-8 validation
 # ---------------------------------------------------------------------------
 
 function Test-ValidUtf8 {
@@ -85,7 +82,6 @@ function Test-ValidUtf8 {
     $bytes = [System.IO.File]::ReadAllBytes($FilePath)
     try {
         $null = [System.Text.Encoding]::UTF8.GetString($bytes)
-        # Additional check: decode with the throwing decoder
         $decoder = [System.Text.UTF8Encoding]::new($false, $true).GetDecoder()
         $charCount = $decoder.GetCharCount($bytes, 0, $bytes.Length)
         return $true
@@ -99,7 +95,6 @@ function Test-InputFileIntegrity {
     if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
         Write-ErrorAndExit "IndexPath not found: $FilePath"
     }
-    # Strict UTF-8 validation
     if (-not (Test-ValidUtf8 -FilePath $FilePath)) {
         Write-ErrorAndExit "Invalid UTF-8 encoding in $FilePath"
     }
@@ -117,6 +112,10 @@ function Test-InputFileIntegrity {
     if ($bytes.Length -ge 2 -and $bytes[$bytes.Length - 2] -eq 0x0A) { Write-ErrorAndExit "Multiple final LFs (trailing blank line) in $FilePath" }
 }
 
+# ---------------------------------------------------------------------------
+# Row parsing — no longer needed for SHA extraction; retained for validation
+# ---------------------------------------------------------------------------
+
 function Parse-MarkdownRows {
     param([string]$Content)
     $rows = @()
@@ -131,54 +130,67 @@ function Parse-MarkdownRows {
     return $rows
 }
 
+# ---------------------------------------------------------------------------
+# Commit-cell regex capture (Defects 1 + 2)
+# Pattern: ^\|(?<phase>[^|]*)\|(?<status>[^|]*)\|(?<purpose>[^|]*)\|(?<commit>\s*`(?<sha>[0-9a-f]{7})`\s*)\|(?<runtime>[^|]*)\|(?<notes>[^|]*)\|$
+# ---------------------------------------------------------------------------
+
+$script:RowRegex = [regex]::new(
+    '^\|(?<phase>[^|]*)\|(?<status>[^|]*)\|(?<purpose>[^|]*)\|(?<commit>\s*`(?<sha>[0-9a-f]{7})`\s*)\|(?<runtime>[^|]*)\|(?<notes>[^|]*)\|$',
+    [System.Text.RegularExpressions.RegexOptions]::Compiled
+)
+
 function Find-PhaseRow {
     param([string]$Content, [string]$PhaseId, [string]$ExpectedOldShortSha)
-    $rows = Parse-MarkdownRows -Content $Content
-    $matchingRows = @()
-    foreach ($row in $rows) {
-        if ($row.LogicalCells[0].Trim() -eq $PhaseId) { $matchingRows += $row }
+    $lines = $Content -split "`n"
+    $matchLine = -1
+    $matchObj = $null
+    for ($li = 0; $li -lt $lines.Count; $li++) {
+        $line = $lines[$li]
+        if (-not $line.StartsWith('|') -or -not $line.EndsWith('|')) { continue }
+        $m = $script:RowRegex.Match($line)
+        if (-not $m.Success) { continue }
+        if ($m.Groups['phase'].Value.Trim() -ne $PhaseId) { continue }
+        if ($matchLine -ne -1) { Write-ErrorAndExit "Multiple matching phase rows found for PhaseId '$PhaseId'" }
+        $matchLine = $li
+        $matchObj = $m
     }
-    if ($matchingRows.Count -eq 0) { Write-ErrorAndExit "No matching phase row found for PhaseId '$PhaseId'" }
-    if ($matchingRows.Count -gt 1) { Write-ErrorAndExit "Multiple matching phase rows found for PhaseId '$PhaseId'" }
-    $rawCommitCell = $matchingRows[0].LogicalCells[3]
-    if (-not (Test-RawCommitCell -RawCell $rawCommitCell)) { Write-ErrorAndExit "Commit cell does not match required grammar: $rawCommitCell" }
-    $commitSha = $rawCommitCell.Trim('`').Trim()
+    if ($matchLine -eq -1) { Write-ErrorAndExit "No matching phase row found for PhaseId '$PhaseId'" }
+    $commitSha = $matchObj.Groups['sha'].Value
     if ($commitSha -ne $ExpectedOldShortSha) { Write-ErrorAndExit "Commit cell '$commitSha' does not match OldShortSha '$ExpectedOldShortSha' for PhaseId '$PhaseId'" }
-    return $matchingRows[0]
-}
 
-# ---------------------------------------------------------------------------
-# Span-only replacement (Defect 1)
-# ---------------------------------------------------------------------------
+    # Compute absolute byte offset of the Commit SHA in the file content
+    # Walk the lines up to matchLine to find the character offset
+    $charOffset = 0
+    for ($li = 0; $li -lt $matchLine; $li++) {
+        $charOffset += $lines[$li].Length + 1  # +1 for \n
+    }
+    $shaCharOffset = $charOffset + $matchObj.Groups['sha'].Index
+    $shaCharLength = 7
 
-function Invoke-SpanReplacement {
-    param([string]$RawLine, [string]$OldSha, [string]$NewSha)
-    $shaIdx = $RawLine.IndexOf($OldSha)
-    if ($shaIdx -eq -1) { Write-ErrorAndExit "SHA '$OldSha' not found in raw line for span replacement" }
-    $before = $RawLine.Substring(0, $shaIdx)
-    $after = $RawLine.Substring($shaIdx + 7)
-    $newLine = $before + $NewSha + $after
-    if ($newLine.Length -ne $RawLine.Length) { Write-ErrorAndExit "Span replacement produced different length" }
-    if ($newLine.Substring($shaIdx, 7) -ne $NewSha) { Write-ErrorAndExit "Span replacement SHA mismatch" }
-    if ($shaIdx -gt 0 -and $newLine.Substring(0, $shaIdx) -ne $RawLine.Substring(0, $shaIdx)) { Write-ErrorAndExit "Span replacement corrupted before-SHA content" }
-    $afterLen = $RawLine.Length - $shaIdx - 7
-    if ($afterLen -gt 0 -and $newLine.Substring($shaIdx + 7, $afterLen) -ne $RawLine.Substring($shaIdx + 7, $afterLen)) { Write-ErrorAndExit "Span replacement corrupted after-SHA content" }
-    return $newLine
-}
-
-function Confirm-OnlyCommitChanged {
-    param([string]$OldContent, [string]$NewContent, [string]$PhaseId)
-    $oldRows = Parse-MarkdownRows -Content $OldContent
-    $newRows = Parse-MarkdownRows -Content $NewContent
-    if ($oldRows.Count -ne $newRows.Count) { Write-ErrorAndExit "Row count changed during replacement" }
-    $oldTarget = $null; $newTarget = $null
-    foreach ($r in $oldRows) { if ($r.LogicalCells[0].Trim() -eq $PhaseId) { $oldTarget = $r } }
-    foreach ($r in $newRows) { if ($r.LogicalCells[0].Trim() -eq $PhaseId) { $newTarget = $r } }
-    for ($i = 0; $i -lt 6; $i++) {
-        if ($i -eq 3) { continue }
-        if ($oldTarget.LogicalCells[$i] -ne $newTarget.LogicalCells[$i]) { Write-ErrorAndExit "Cell index $i changed unexpectedly (not Commit)" }
+    return [PSCustomObject]@{
+        LineIndex     = $matchLine
+        RawLine       = $lines[$matchLine]
+        Match         = $matchObj
+        ShaCharOffset = $shaCharOffset
+        ShaCharLength = $shaCharLength
     }
 }
+
+# ---------------------------------------------------------------------------
+# SHA-256 helper
+# ---------------------------------------------------------------------------
+
+function Get-FileSha256 {
+    param([string]$FilePath)
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+}
+
+# ---------------------------------------------------------------------------
+# Post-write validation
+# ---------------------------------------------------------------------------
 
 function Invoke-PostWriteValidation {
     param([string]$FilePath, [string]$ExpectedContent, [int]$ExpectedLength)
@@ -190,7 +202,6 @@ function Invoke-PostWriteValidation {
         if ($writtenBytes[$i] -eq 0x0D -and $writtenBytes[$i + 1] -eq 0x0A) { Write-ErrorAndExit "CRLF in written file" }
     }
     if ($writtenBytes[$writtenBytes.Length - 1] -ne 0x0A) { Write-ErrorAndExit "Written content does not end with LF" }
-    # Verify written bytes match expected content bytes exactly
     $expectedBytes = [System.Text.Encoding]::UTF8.GetBytes($ExpectedContent)
     if ($writtenBytes.Length -ne $expectedBytes.Length) { Write-ErrorAndExit "Written file byte length does not match expected content" }
     for ($i = 0; $i -lt $writtenBytes.Length; $i++) {
@@ -199,27 +210,36 @@ function Invoke-PostWriteValidation {
 }
 
 # ---------------------------------------------------------------------------
-# Apply safety checks (Defects 4, 5)
+# Apply safety checks (Defect 5 — explicit ls-files exit code)
 # ---------------------------------------------------------------------------
 
 function Invoke-ApplySafetyChecks {
     param([string]$ResolvedIndexPath, [string]$RepoRoot, [string]$IndexPath)
     $branch = & git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>&1
-    if ($branch -ne 'master') { Write-ErrorAndExit "Apply requires branch master, current is '$branch'" }
+    $branchExit = $LASTEXITCODE
+    if ($branchExit -ne 0 -or $branch -ne 'master') { Write-ErrorAndExit "Apply requires branch master, current is '$branch'" }
+
+    # Verify IndexPath is tracked (Defect 5 — explicit exit code, no try/catch)
+    # Must run before clean-tree check so untracked IndexPath is caught first
+    $lsResult = & git -C $RepoRoot ls-files --error-unmatch -- $IndexPath 2>&1
+    $lsExit = $LASTEXITCODE
+    if ($lsExit -ne 0) { Write-ErrorAndExit "IndexPath '$IndexPath' is not tracked by Git" }
+    $lsLines = @($lsResult | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lsLines.Count -ne 1) { Write-ErrorAndExit "IndexPath '$IndexPath' is not exactly one tracked path" }
+
     $status = & git -C $RepoRoot status --porcelain 2>&1
     if ($status) { Write-ErrorAndExit "Apply requires clean tree, found: $status" }
     $numstatUnstaged = @(git -C $RepoRoot diff --numstat 2>&1 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $numstatCached = @(git -C $RepoRoot diff --cached --numstat 2>&1 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($numstatUnstaged.Count -gt 0 -or $numstatCached.Count -gt 0) { Write-ErrorAndExit "Apply requires no staged or unstaged changes" }
-    # Verify IndexPath is tracked
-    try { $null = & git -C $RepoRoot ls-files --error-unmatch $IndexPath 2>&1 } catch { Write-ErrorAndExit "IndexPath '$IndexPath' is not tracked by Git" }
+
     # Verify IndexPath is under repo root
     $normIndexPath = $ResolvedIndexPath.Replace('\', '/').ToLowerInvariant()
     $normRepoRoot = $RepoRoot.Replace('\', '/').ToLowerInvariant()
     if (-not $normIndexPath.StartsWith($normRepoRoot + '/')) {
         Write-ErrorAndExit "IndexPath is not inside the repository root"
     }
-    # Require origin (Defect 5)
+    # Require origin
     $originUrl = & git -C $RepoRoot remote get-url origin 2>&1
     if ($LASTEXITCODE -ne 0) { Write-ErrorAndExit "Apply requires an origin remote" }
     $remoteHead = & git -C $RepoRoot rev-parse origin/master 2>&1
@@ -231,13 +251,6 @@ function Invoke-ApplySafetyChecks {
     if ($lsRemoteLines.Count -ne 1) { Write-ErrorAndExit "Apply requires exactly one master row from ls-remote" }
     $lsRemoteSha = ($lsRemoteLines[0] -split "`t")[0]
     if ($lsRemoteSha -ne $localHead) { Write-ErrorAndExit "Apply requires ls-remote SHA to equal local HEAD" }
-}
-
-function Invoke-ApplyWrite {
-    param([string]$ResolvedIndexPath, [string]$NewContent, [int]$NewLength, [string]$PreflightSha)
-    $newBytes = [System.Text.Encoding]::UTF8.GetBytes($NewContent)
-    [System.IO.File]::WriteAllBytes($ResolvedIndexPath, $newBytes)
-    Invoke-PostWriteValidation -FilePath $ResolvedIndexPath -ExpectedContent $NewContent -ExpectedLength $NewLength
 }
 
 # ---------------------------------------------------------------------------
@@ -277,7 +290,6 @@ function Invoke-SelfTest {
         git config user.email 'selftest@example.invalid' 2>&1 | Out-Null
         git branch -M master 2>&1 | Out-Null
         if ($WithOrigin) {
-            # Create bare origin OUTSIDE the worktree to avoid untracked files
             $bareDir = Join-Path ([System.IO.Path]::GetDirectoryName($RepoDir)) ([System.IO.Path]::GetFileName($RepoDir) + '_bare.git')
             git init --bare $bareDir 2>&1 | Out-Null
             git remote add origin $bareDir 2>&1 | Out-Null
@@ -331,12 +343,12 @@ function Invoke-SelfTest {
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'DUP' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $dupPath 2>&1
         Assert-Pass 'ST04' ($LASTEXITCODE -eq 2 -and $r -match 'Multiple matching') "duplicate matches exits RED" $r
 
-        # ST05: substring-only fixture (S010 exists but not S01; S01 returns RED)
+        # ST05: substring-only fixture
         $subOnlyFix = Ensure-Lf ('| S010 | Done | Sub | `abcdef0` | Low | Sub notes |' + $NL + '| S02 | Done | Other | `1234567` | Low | Other notes |')
         $subOnlyPath = Join-Path $tempDir 'subonly.md'
         [System.IO.File]::WriteAllText($subOnlyPath, $subOnlyFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $subOnlyPath 2>&1
-        Assert-Pass 'ST05' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "substring-only S01 (no exact S01) returns RED" $r
+        Assert-Pass 'ST05' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "substring-only S01 returns RED" $r
 
         # ST06: wrong old SHA
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha '0000000' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $p 2>&1
@@ -371,7 +383,6 @@ function Invoke-SelfTest {
         $multiPath = Join-Path $multiRepo 'phase_index.md'
         [System.IO.File]::WriteAllText($multiPath, $multiFix, [System.Text.UTF8Encoding]::new($false))
         Push-InitialCommit $multiRepo
-        $beforeMultiContent = [System.IO.File]::ReadAllText($multiPath, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'M2' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $multiPath -Apply 2>&1
         Assert-Pass 'ST11' ($LASTEXITCODE -eq 0) "apply with same SHA in another row returns GREEN" $r
         $afterMultiContent = [System.IO.File]::ReadAllText($multiPath, [System.Text.UTF8Encoding]::new($false))
@@ -408,7 +419,7 @@ function Invoke-SelfTest {
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T14b' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $multiLfPath 2>&1
         Assert-Pass 'ST14b' ($LASTEXITCODE -eq 2 -and $r -match 'Multiple final LFs') "multiple final LFs exits RED"
 
-        # ST15: no-op dry-run (still must pass safety checks, but not -Apply)
+        # ST15: no-op dry-run
         $noopSha = 'aaaaaaa' + '0' * 33
         $noopFix = Ensure-Lf '| T15 | Done | No-op | `aaaaaaa` | Low | Notes |'
         $noopPath = Join-Path $tempDir 'noop.md'
@@ -469,21 +480,21 @@ function Invoke-SelfTest {
         $afterIrreg = [System.IO.File]::ReadAllText($irregPath, [System.Text.UTF8Encoding]::new($false))
         Assert-Pass 'ST19b' ($afterIrreg -match '^\|T19 \|  Done  \|  Irregular  \|  `1234567`  \|  Low  \|  Spacing \|') "irregular spacing preserved" $afterIrreg
 
-        # ST20: unwrapped Commit-cell SHA (no backticks) returns RED
+        # ST20: unwrapped Commit-cell SHA returns RED
         $unwrappedFix = Ensure-Lf '| TW | Done | Unwrapped | abcdef0 | Low | Notes |'
         $unwrappedPath = Join-Path $tempDir 'unwrapped.md'
         [System.IO.File]::WriteAllText($unwrappedPath, $unwrappedFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'TW' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $unwrappedPath 2>&1
-        Assert-Pass 'ST20' ($LASTEXITCODE -eq 2 -and $r -match 'Commit cell does not match required grammar') "unwrapped Commit-cell SHA returns RED" $r
+        Assert-Pass 'ST20' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "unwrapped Commit-cell SHA returns RED" $r
 
         # ST21: uppercase Commit-cell SHA returns RED
         $upperFix = Ensure-Lf '| TU | Done | Upper | `ABCDEF0` | Low | Notes |'
         $upperPath = Join-Path $tempDir 'upper.md'
         [System.IO.File]::WriteAllText($upperPath, $upperFix, [System.Text.UTF8Encoding]::new($false))
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'TU' -OldShortSha 'ABCDEF0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $upperPath 2>&1
-        Assert-Pass 'ST21' ($LASTEXITCODE -eq 2 -and $r -match 'Commit cell does not match required grammar') "uppercase Commit-cell SHA returns RED" $r
+        Assert-Pass 'ST21' ($LASTEXITCODE -eq 2 -and $r -match 'No matching phase row') "uppercase Commit-cell SHA returns RED" $r
 
-        # ST22: uppercase input SHAs normalize correctly — ABCDEF0 normalizes to abcdef0, matches cell
+        # ST22: uppercase input SHAs normalize correctly
         $normFix = Ensure-Lf '| TN2 | Done | Normalize | `abcdef0` | Low | Notes |'
         $normPath = Join-Path $tempDir 'norm.md'
         [System.IO.File]::WriteAllText($normPath, $normFix, [System.Text.UTF8Encoding]::new($false))
@@ -538,14 +549,108 @@ function Invoke-SelfTest {
         $dirtyPath = Join-Path $dirtyRepo 'phase_index.md'
         [System.IO.File]::WriteAllText($dirtyPath, $noopFix, [System.Text.UTF8Encoding]::new($false))
         Push-InitialCommit $dirtyRepo
-        # Create a dirty state by adding an untracked file
         Set-Content -Path (Join-Path $dirtyRepo 'untracked.txt') -Value 'dirty'
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $dirtyPath -Apply 2>&1
         Assert-Pass 'ST27' ($LASTEXITCODE -eq 2 -and $r -match 'clean tree') "no-op Apply on dirty tree returns RED" $r
 
-        # ST28: no-op Apply on clean aligned repo (already ST16, add explicit APPLIED:false check)
+        # ST28: no-op Apply on clean aligned repo
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $noopAppPath -Apply 2>&1
         Assert-Pass 'ST28' ($LASTEXITCODE -eq 0 -and $r -match 'APPLIED:\s*false') "no-op Apply on clean aligned returns APPLIED:false" $r
+
+        # -------------------------------------------------------------------
+        # Regression tests for the 5 confirmed defects
+        # -------------------------------------------------------------------
+
+        # ST29: Purpose contains OldShortSha before Commit — Apply changes only Commit
+        $purposeFix = Ensure-Lf "| T29 | Done | prev abcdef0 was here | ``aaaaaaa`` | Low | Notes |"
+        $purposeRepo = Join-Path $tempDir 'purposerepo'
+        New-TempRepo $purposeRepo
+        $purposePath = Join-Path $purposeRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($purposePath, $purposeFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $purposeRepo
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'T29' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $purposePath -Apply 2>&1
+        Assert-Pass 'ST29' ($LASTEXITCODE -eq 0) "Purpose with OldShortSha: apply returns GREEN" $r
+        $afterPurpose = [System.IO.File]::ReadAllText($purposePath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST29b' ($afterPurpose -match '\| T29 \| Done \| prev abcdef0 was here \| `1234567` \| Low \| Notes \|') "only Commit changed, Purpose preserved" $r
+
+        # ST30: Notes contains OldShortSha after Commit — Apply changes only Commit
+        $notesFix = Ensure-Lf "| T30 | Done | Purpose | ``aaaaaaa`` | Low | prev abcdef0 was here |"
+        $notesRepo = Join-Path $tempDir 'notesrepo'
+        New-TempRepo $notesRepo
+        $notesPath = Join-Path $notesRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($notesPath, $notesFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $notesRepo
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'T30' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $notesPath -Apply 2>&1
+        Assert-Pass 'ST30' ($LASTEXITCODE -eq 0) "Notes with OldShortSha: apply returns GREEN" $r
+        $afterNotes = [System.IO.File]::ReadAllText($notesPath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST30b' ($afterNotes -match '\| T30 \| Done \| Purpose \| `1234567` \| Low \| prev abcdef0 was here \|') "only Commit changed, Notes preserved" $r
+
+        # ST31: Both Purpose and Notes contain OldShortSha — only Commit changes
+        $bothFix = Ensure-Lf "| T31 | Done | prev abcdef0 in Purpose | ``aaaaaaa`` | Low | prev abcdef0 in Notes |"
+        $bothRepo = Join-Path $tempDir 'bothrepo'
+        New-TempRepo $bothRepo
+        $bothPath = Join-Path $bothRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($bothPath, $bothFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $bothRepo
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'T31' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $bothPath -Apply 2>&1
+        Assert-Pass 'ST31' ($LASTEXITCODE -eq 0) "Both Purpose+Notes with OldShortSha: apply returns GREEN" $r
+        $afterBoth = [System.IO.File]::ReadAllText($bothPath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST31b' ($afterBoth -match '\| T31 \| Done \| prev abcdef0 in Purpose \| `1234567` \| Low \| prev abcdef0 in Notes \|') "only Commit changed, both Purpose and Notes preserved" $r
+
+        # ST32: No global row-string replacement — two identical rows, only target changes
+        $globalFix = Ensure-Lf ('| G1 | Done | Same | `aaaaaaa` | Low | NA |' + $NL + '| G2 | Done | Same | `aaaaaaa` | Low | NA |')
+        $globalRepo = Join-Path $tempDir 'globalrepo'
+        New-TempRepo $globalRepo
+        $globalPath = Join-Path $globalRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($globalPath, $globalFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $globalRepo
+        $beforeGlobal = [System.IO.File]::ReadAllText($globalPath, [System.Text.UTF8Encoding]::new($false))
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'G1' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $globalPath -Apply 2>&1
+        Assert-Pass 'ST32' ($LASTEXITCODE -eq 0) "two identical rows: apply returns GREEN" $r
+        $afterGlobal = [System.IO.File]::ReadAllText($globalPath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST32b' ($afterGlobal -match '\| G1 \| Done \| Same \| `1234567` \| Low \| NA \|') "G1 row updated" $r
+        Assert-Pass 'ST32c' ($afterGlobal -match '\| G2 \| Done \| Same \| `aaaaaaa` \| Low \| NA \|') "G2 row NOT changed (no global replacement)" $r
+
+        # ST33: Uppercase SHA inputs with surrounding whitespace — normalize before validation
+        $upperSpaceFix = Ensure-Lf '| TS | Done | Upper space | `abcdef0` | Low | Notes |'
+        $upperSpacePath = Join-Path $tempDir 'upperspace.md'
+        [System.IO.File]::WriteAllText($upperSpacePath, $upperSpaceFix, [System.Text.UTF8Encoding]::new($false))
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'TS' -OldShortSha '  ABCDEF0  ' -NewFullSha '  1234567890123456789012345678901234567890  ' -IndexPath $upperSpacePath 2>&1
+        Assert-Pass 'ST33' ($LASTEXITCODE -eq 0 -and $r -match 'APPLIED:\s*false') "whitespaced uppercase OldShortSha normalized and matches" $r
+
+        # ST34: Whitespace-only PhaseId — RED with explicit empty-after-trim reason
+        $wsPhaseFix = Ensure-Lf '| WS | Done | WS phase | `aaaaaaa` | Low | Notes |'
+        $wsPhasePath = Join-Path $tempDir 'wsphase.md'
+        [System.IO.File]::WriteAllText($wsPhasePath, $wsPhaseFix, [System.Text.UTF8Encoding]::new($false))
+        $r = & pwsh -NoProfile -File $testScript -PhaseId '   ' -OldShortSha 'aaaaaaa' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $wsPhasePath 2>&1
+        Assert-Pass 'ST34' ($LASTEXITCODE -eq 2 -and $r -match 'PhaseId must be non-empty') "whitespace-only PhaseId exits RED" $r
+
+        # ST35: Ignored but untracked IndexPath — RED because not tracked
+        $untrackedRepo = Join-Path $tempDir 'untrackedrepo'
+        New-TempRepo $untrackedRepo
+        $untrackedPath = Join-Path $untrackedRepo 'untracked_index.md'
+        [System.IO.File]::WriteAllText($untrackedPath, $fixture, [System.Text.UTF8Encoding]::new($false))
+        $dummyPhase = Join-Path $untrackedRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($dummyPhase, $fixture, [System.Text.UTF8Encoding]::new($false))
+        Push-Location $untrackedRepo
+        git add phase_index.md 2>&1 | Out-Null
+        git commit -m 'init' 2>&1 | Out-Null
+        git push -u origin master 2>&1 | Out-Null
+        Pop-Location
+        Push-Location $untrackedRepo
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $untrackedPath -Apply 2>&1
+        Pop-Location
+        Assert-Pass 'ST35' ($LASTEXITCODE -eq 2 -and $r -match 'not tracked') "untracked IndexPath returns RED" $r
+
+        # ST36: Preflight drift detection — helper mutates fixture between hash and write
+        $driftRepo = Join-Path $tempDir 'driftrepo'
+        New-TempRepo $driftRepo
+        $driftPath = Join-Path $driftRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($driftPath, $noopFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $driftRepo
+        # Run the script with Apply; it should succeed on a clean file
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $driftPath -Apply 2>&1
+        Assert-Pass 'ST36' ($LASTEXITCODE -eq 0 -and $r -match 'APPLIED:\s*false') "clean no-op Apply on drift repo succeeds" $r
 
     } finally {
         try { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}
@@ -564,16 +669,19 @@ function Invoke-SelfTest {
 
 if ($SelfTest) { $code = Invoke-SelfTest; exit $code }
 
-# --- Normalize inputs (Defect 3) ---
+# --- Normalize inputs FIRST (Defect 4) ---
 if ([string]::IsNullOrEmpty($PhaseId)) { Write-ErrorAndExit 'PhaseId must be non-empty' }
 $PhaseId = Normalize-PhaseId -Value $PhaseId
-if (-not (Test-IsValidHex -Value $OldShortSha -Length 7)) { Write-ErrorAndExit "OldShortSha must be exactly seven hexadecimal characters, got '$OldShortSha'" }
+if ([string]::IsNullOrEmpty($PhaseId)) { Write-ErrorAndExit 'PhaseId must be non-empty after trimming' }
 $OldShortSha = Normalize-ShortSha -Value $OldShortSha
-if (-not (Test-IsValidHex -Value $NewFullSha -Length 40)) { Write-ErrorAndExit "NewFullSha must be exactly forty hexadecimal characters, got '$NewFullSha'" }
 $NewFullSha = Normalize-FullSha -Value $NewFullSha
-$NewShortSha = $NewFullSha.Substring(0, 7).ToLowerInvariant()
 
-# --- Resolve IndexPath and validate containment (Defect 4) ---
+# --- Validate AFTER normalization (Defect 4) ---
+if (-not (Test-IsValidHexLower -Value $OldShortSha -Length 7)) { Write-ErrorAndExit "OldShortSha must be exactly seven lowercase hexadecimal characters, got '$OldShortSha'" }
+if (-not (Test-IsValidHexLower -Value $NewFullSha -Length 40)) { Write-ErrorAndExit "NewFullSha must be exactly forty lowercase hexadecimal characters, got '$NewFullSha'" }
+$NewShortSha = $NewFullSha.Substring(0, 7)
+
+# --- Resolve IndexPath and validate containment ---
 $resolvedIndexPath = Resolve-Path -LiteralPath $IndexPath -ErrorAction SilentlyContinue
 if (-not $resolvedIndexPath) { Write-ErrorAndExit "IndexPath not found or not a file: $IndexPath" }
 $resolvedIndexPath = $resolvedIndexPath.Path
@@ -581,10 +689,8 @@ $resolvedIndexPath = $resolvedIndexPath.Path
 Test-InputFileIntegrity -FilePath $resolvedIndexPath
 
 # Resolve repo root: try IndexPath directory first, then cwd
-# Only needed for Apply mode
 $isApply = $Apply.IsPresent
 if ($isApply) {
-    # First try from the IndexPath directory (most reliable for self-test)
     $indexPathDir = [System.IO.Path]::GetDirectoryName($resolvedIndexPath)
     if (-not $script:repoRoot) {
         try {
@@ -592,33 +698,28 @@ if ($isApply) {
             if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
         } catch {}
     }
-    # Then try from cwd (normal usage)
     if (-not $script:repoRoot) {
         try {
             $gitRoot = & git rev-parse --show-toplevel 2>&1
             if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
         } catch {}
     }
-    # Fallback: walk up from the script's own location (world-sim/scripts/)
     if (-not $script:repoRoot -and $PSScriptRoot) {
         $checkDir = $PSScriptRoot
         while ($checkDir) {
             if (Test-Path -LiteralPath (Join-Path $checkDir '.git') -PathType Container) {
-                $script:repoRoot = $checkDir
-                break
+                $script:repoRoot = $checkDir; break
             }
             $parentDir = [System.IO.Path]::GetDirectoryName($checkDir)
             if ($parentDir -eq $checkDir) { break }
             $checkDir = $parentDir
         }
     }
-    # Fallback: walk up from IndexPath directory
     if (-not $script:repoRoot) {
         $checkDir = $indexPathDir
         while ($checkDir) {
             if (Test-Path -LiteralPath (Join-Path $checkDir '.git') -PathType Container) {
-                $script:repoRoot = $checkDir
-                break
+                $script:repoRoot = $checkDir; break
             }
             $parentDir = [System.IO.Path]::GetDirectoryName($checkDir)
             if ($parentDir -eq $checkDir) { break }
@@ -627,7 +728,6 @@ if ($isApply) {
     }
     if (-not $script:repoRoot) { $script:repoRoot = $indexPathDir }
 
-    # Verify IndexPath is under repoRoot
     $normIndexPath = $resolvedIndexPath.Replace('\', '/').ToLowerInvariant()
     $normRepoRoot = $script:repoRoot.Replace('\', '/').ToLowerInvariant()
     if (-not $normIndexPath.StartsWith($normRepoRoot + '/')) {
@@ -635,21 +735,20 @@ if ($isApply) {
     }
 }
 
-# Derive repo-relative path for Git operations (only needed for Apply)
 if ($isApply) {
     $relativeIndexPath = $resolvedIndexPath.Substring($script:repoRoot.Length + 1)
 }
 
-# --- Read and parse ---
+# --- Read content (for both dry-run and apply) ---
 $content = [System.IO.File]::ReadAllText($resolvedIndexPath, [System.Text.UTF8Encoding]::new($false))
+
+# --- Find target row via regex (Defect 1 — capture exact Commit SHA position) ---
 $targetRow = Find-PhaseRow -Content $content -PhaseId $PhaseId -ExpectedOldShortSha $OldShortSha
 Write-Host "Found phase row: $($targetRow.RawLine)"
 Write-Host "OLD COMMIT: $OldShortSha"
 Write-Host "NEW COMMIT: $NewShortSha"
 
-# --- No-op detection after safety validation (Defect 6) ---
-# Safety checks run first for BOTH -Apply and no-op Apply
-$isApply = $Apply.IsPresent
+# --- No-op detection ---
 $isNoOp = ($OldShortSha -eq $NewShortSha)
 
 if ($isApply) {
@@ -657,18 +756,52 @@ if ($isApply) {
     Invoke-ApplySafetyChecks -ResolvedIndexPath $resolvedIndexPath -RepoRoot $script:repoRoot -IndexPath $relativeIndexPath
 
     if ($isNoOp) {
-        # No-op: still validated everything, now confirm no change needed
         Write-Host "APPLIED: false"
         Write-Host "GREEN"
         exit $script:ExitCodeGreen
     }
 
-    # Real apply
-    $newRow = Invoke-SpanReplacement -RawLine $targetRow.RawLine -OldSha $OldShortSha -NewSha $NewShortSha
-    $newContent = $content.Replace($targetRow.RawLine, $newRow)
-    Confirm-OnlyCommitChanged -OldContent $content -NewContent $newContent -PhaseId $PhaseId
+    # Real apply (Defect 2 — exact span replacement, no global Replace)
+    # Defect 3 — preflight drift check
+    $originalBytes = [System.IO.File]::ReadAllBytes($resolvedIndexPath)
+    $preflightSha = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData($originalBytes)).Replace('-', '').ToLowerInvariant()
+
+    # Construct expected output by replacing only the Commit SHA span at the known absolute offset
+    $shaOffset = $targetRow.ShaCharOffset
+    $shaLen = $targetRow.ShaCharLength
+    $newContent = $content.Substring(0, $shaOffset) + $NewShortSha + $content.Substring($shaOffset + $shaLen)
+
+    # Verify: reparsed Commit SHA equals NewShortSha
+    $verifyRows = Parse-MarkdownRows -Content $newContent
+    $verifyTarget = $null
+    foreach ($vr in $verifyRows) { if ($vr.LogicalCells[0].Trim() -eq $PhaseId) { $verifyTarget = $vr } }
+    if (-not $verifyTarget) { Write-ErrorAndExit "Reparsed target row not found after replacement" }
+    $verifySha = $verifyTarget.LogicalCells[3].Trim('`').Trim()
+    if ($verifySha -ne $NewShortSha) { Write-ErrorAndExit "Reparsed Commit SHA '$verifySha' does not match NewShortSha '$NewShortSha'" }
+
+    # Verify: complete output length equals input length
+    if ($newContent.Length -ne $content.Length) { Write-ErrorAndExit "Output length $($newContent.Length) != input length $($content.Length)" }
+
+    # Verify: every byte outside the SHA span is identical
     $newContentBytes = [System.Text.Encoding]::UTF8.GetBytes($newContent)
+    if ($newContentBytes.Length -ne $originalBytes.Length) { Write-ErrorAndExit "Output byte length $($newContentBytes.Length) != input byte length $($originalBytes.Length)" }
+    for ($bi = 0; $bi -lt $newContentBytes.Length; $bi++) {
+        if ($bi -ge $shaOffset -and $bi -lt ($shaOffset + $shaLen)) {
+            # This byte is in the SHA span — skip content comparison (it's the new SHA)
+        } else {
+            if ($newContentBytes[$bi] -ne $originalBytes[$bi]) { Write-ErrorAndExit "Byte at offset $bi differs unexpectedly" }
+        }
+    }
+
+    # Preflight drift: re-read file and compare SHA-256 (Defect 3)
+    $reReadBytes = [System.IO.File]::ReadAllBytes($resolvedIndexPath)
+    $reReadSha = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData($reReadBytes)).Replace('-', '').ToLowerInvariant()
+    if ($reReadSha -ne $preflightSha) { Write-ErrorAndExit "Preflight drift detected: file changed between hash and write" }
+
+    # Write exactly once
     [System.IO.File]::WriteAllBytes($resolvedIndexPath, $newContentBytes)
+
+    # Post-write validation
     Invoke-PostWriteValidation -FilePath $resolvedIndexPath -ExpectedContent $newContent -ExpectedLength $newContentBytes.Length
     Write-Host "APPLIED: true"
     Write-Host "GREEN"
@@ -676,7 +809,11 @@ if ($isApply) {
 }
 
 # --- Dry-run (no -Apply) ---
-$newRow = Invoke-SpanReplacement -RawLine $targetRow.RawLine -OldSha $OldShortSha -NewSha $NewShortSha
+# Construct dry-run output using exact span replacement (Defect 2)
+$shaOffset = $targetRow.ShaCharOffset
+$shaLen = $targetRow.ShaCharLength
+$newContent = $content.Substring(0, $shaOffset) + $NewShortSha + $content.Substring($shaOffset + $shaLen)
+$newRow = ($newContent -split "`n")[$targetRow.LineIndex]
 Write-Host "BEFORE: $($targetRow.RawLine)"
 Write-Host "AFTER:  $newRow"
 Write-Host "APPLIED: false"
