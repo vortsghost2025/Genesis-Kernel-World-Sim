@@ -220,7 +220,7 @@ All failure cases produced RED without modifying live Genesis repo.
 | `password = "test-only"` (assignment) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `api_key = "test-only"` (exact placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `TEST-PLACEHOLDER` (generic placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
-| Synthetic credential-shaped fixture; exact value omitted | `[FAIL]`, `[REDACTED]`, blocking RED | NOTICE + [REDACTED] | Yes (RED) |
+| Synthetic credential-shaped fixture; exact value omitted | `[FAIL]`, `[REDACTED]`, blocking RED | FAIL | Yes (RED) |
 
 The same input never appears in both the GREEN and RED categories. `test-only` and `TEST-PLACEHOLDER` are recognized placeholders (nonblocking, GREEN). A synthetic credential-shaped fixture that is not a recognized placeholder produces blocking RED.
 
