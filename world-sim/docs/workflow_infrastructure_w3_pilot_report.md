@@ -206,7 +206,7 @@ GREEN
 | Wrong OldShortSha | `sync_phase_index_sha.ps1 -OldShortSha aaaaaaa` | **RED** — Commit cell mismatch |
 | Zero phase matches | `sync_phase_index_sha.ps1 -PhaseId NONE` | **RED** — no matching phase row |
 | Duplicate W3P row | Copy W3P row to disposable `phase_index_dup.md` | **RED** — multiple matching phase rows |
-| Credential-shaped fixture | `cred_test.md` containing a live provider token (e.g., GitHub PAT) → produces **RED**, `[FAIL] credential-shaped match`, `[REDACTED]` output |
+| Credential-shaped fixture | Synthetic credential-shaped fixture; exact value omitted from report. Verifier returned `[FAIL]`, printed only `[REDACTED]`, and ended in FINAL STATE: RED |
 | Keyword-only prose | Fixture contains "password" in documentation context | **GREEN** — `keyword-notice` only, nonblocking |
 
 All failure cases produced RED without modifying live Genesis repo.
@@ -217,10 +217,12 @@ All failure cases produced RED without modifying live Genesis repo.
 
 | Input | Verifier Output | Level | Blocking |
 |-------|-----------------|-------|----------|
-| `api_key = "test-only"` (assignment) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
-| `The password field is required` (doc prose) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
+| `password = "test-only"` (assignment) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `api_key = "test-only"` (exact placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
 | `TEST-PLACEHOLDER` (generic placeholder) | `keyword-notice: 1 occurrence(s)` | NOTICE | No (GREEN) |
+| Synthetic credential-shaped fixture; exact value omitted | `[FAIL]`, `[REDACTED]`, blocking RED | NOTICE + [REDACTED] | Yes (RED) |
+
+The same input never appears in both the GREEN and RED categories. `test-only` and `TEST-PLACEHOLDER` are recognized placeholders (nonblocking, GREEN). A synthetic credential-shaped fixture that is not a recognized placeholder produces blocking RED.
 
 Raw credential values **never printed** — always `[REDACTED]`.
 
@@ -228,24 +230,25 @@ Raw credential values **never printed** — always `[REDACTED]`.
 
 ## Multi-Path PowerShell Finding
 
-During live validation of the credential scan with two explicit paths, the verifier's `-Path` parameter **only accepted both paths when passed as a single PowerShell array variable** (`$paths = @("path1", "path2"); script.ps1 -Path $paths`). Passing the paths as separate positional arguments (`script.ps1 -Path "path1", "path2"` or `script.ps1 -Path "path1" "path2"`) caused the authorization check to fail for the second path.
+During live validation of the credential scan with two explicit paths, an explicit PowerShell array variable passed through the call operator worked correctly. Passing the paths as separate positional arguments caused the authorization check to fail for the second path. This was an observed command-line invocation/argument-marshalling pitfall in the tested workflow. The verifier helper itself was not defective; the pilot did not establish a universal rule for every PowerShell `[string[]]` parameter. Operators should use the proven explicit-array pattern.
 
-**Correct pattern:**
+**Proven working pattern:**
 ```powershell
-$paths = @("world-sim/docs/docs_correction_runbook.md", "world-sim/docs/workflow_infrastructure_w3_pilot_report.md")
-pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -ExpectedSha $headSha -AllowDirty -Path $paths
+$paths = @(
+  'world-sim/docs/docs_correction_runbook.md',
+  'world-sim/docs/workflow_infrastructure_w3_pilot_report.md'
+)
+
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
+
+& '.\world-sim\scripts\verify_repo_state.ps1' `
+  -ExpectedSha $headSha `
+  -AllowDirty `
+  -Path $paths
 ```
-
-**Incorrect patterns that failed authorization:**
-```powershell
-# Fails: second path treated as next positional parameter
-pwsh -NoProfile -File script.ps1 -Path "path1" "path2"
-
-# Fails: array literal without variable assignment
-pwsh -NoProfile -File script.ps1 -Path "path1", "path2"
-```
-
-This is a PowerShell parameter binding behavior: when multiple values are passed to a `[string[]]` parameter without an explicit variable, they are bound as separate positional arguments rather than a single array. The verifier's authorization check iterates over the `$Path` array, so only the first element was recognized as authorized.
 
 ---
 
@@ -304,6 +307,19 @@ pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -ExpectedSha $head
 - Temporary directory `C:\Windows\Temp\w3_pilot` — best-effort removal attempted; Windows file locks may leave residual temp files (no live repo impact)
 - No live phase row created
 - No live Genesis files modified except the two authorized paths
+
+---
+
+## Historical Command Note
+
+Historical pilot command excerpts (Commit A workflow, Commit B workflow, No-Op Evidence) are evidence of the temporary pilot only. Current operators must follow the corrected live runbook using the proven explicit-array pattern:
+
+```powershell
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
+```
 
 ---
 
