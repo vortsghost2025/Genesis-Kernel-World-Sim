@@ -78,9 +78,11 @@ git rev-parse HEAD
 git rev-parse origin/master
 git ls-remote origin refs/heads/master
 
+# Resolve current HEAD dynamically; do NOT hard-code a SHA
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha c5b6f366fbfab02a1574f9e5affb73d63bcecba5
+  -ExpectedSha $headSha
 
 pwsh -NoProfile -File `
   world-sim/scripts/sync_phase_index_sha.ps1 `
@@ -121,9 +123,10 @@ Run the checks from Section 5 (Before Touching a File). All must pass.
 ### Step 3: Run Starting Verifier
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD>
+  -ExpectedSha $headSha
 ```
 
 Must be GREEN.
@@ -164,9 +167,10 @@ git diff --check
 ### Step 7: Run Dirty-State Verifier with Explicit Path
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -ExpectedSha $headSha `
   -AllowDirty `
   -Path world-sim/docs/<file>
 ```
@@ -181,17 +185,20 @@ Confirm every changed line is intentional.
 ### Step 9: Redacted Credential-Shaped Scan
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -ExpectedSha $headSha `
   -AllowDirty `
   -Path world-sim/docs/<file> `
   -SkipCrlfCheck `
   -SkipDiffCheck
 ```
 
-Review the output. Never print raw credential values. The scan keyword-matches
-credential-shaped patterns and surfaces NOTICE-level lines.
+Review the output. Never print raw credential values. The scan distinguishes:
+
+- **keyword-notice**: informational keyword occurrence (NOTICE level, nonblocking)
+- **credential-shaped match**: actual secret pattern detected ([FAIL], final RED, stop)
 
 ### Step 10: Stage Exactly the Authorized File
 
@@ -387,9 +394,10 @@ Verify:
 Run dirty-state verifier:
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -ExpectedSha $headSha `
   -AllowDirty `
   -Path world-sim/docs/phase_index.md
 ```
@@ -520,7 +528,7 @@ For every case below:
 | Apply RED | Apply exits non-zero or shows RED |
 | Unexpected extra diff | More rows changed than expected |
 | Rejected push (remote advanced) | `git push` fails with non-fast-forward |
-| Credential-shaped material | Verifier NOTICE with actual credential pattern |
+| **Actual credential-shaped match** | **Verifier [FAIL] — credential pattern detected** |
 
 ---
 
@@ -539,7 +547,7 @@ After every complete run:
 - Changed file list and numstat
 - Proof exactly one final LF
 - Byte-integrity results (UTF-8 no BOM, LF-only, no NUL)
-- Credential-shaped scan result
+- **Credential-shaped scan result** — keyword-notice lines vs [FAIL] lines
 - Policy corrections made (if runbook was the target)
 - Confirmation `phase_index.md` unchanged (unless Commit B was created)
 - Confirmation helpers, AGENTS.md, README.md unchanged
@@ -576,14 +584,14 @@ pwsh -NoProfile -File `
   -NewFullSha 'f3317e106a8c59d39498a1e4cd708e134ff1f389'
 ```
 
-### Expected Output
+### Expected Output (matches actual helper output)
 
 ```
-Found phase row: | 10IH | Sub/Active | (long purpose) | `f3317e1` | Low | (notes) |
+Found phase row: | 10IH | Done | First pair rollback anchor envelope format and validation spec | `f3317e1` | world-sim/docs/phase_10ih_first_pair_rollback_anchor_format_spec.md | Docs-only documentation of the exact rollback_anchor envelope format and validation rules already enforced by the pushed 10IC module. Closes only: (1) the exact five-field input envelope (rollback_anchor_schema_version, rollback_anchor_id, habitat_id, claim_scope, state_commitment); (2) exact field rules - schema version literal "first_rollback_anchor.1", safe-identifier validation on rollback_anchor_id and habitat_id via 10IC _is_safe_identifier (1-128 chars, alphabet a-zA-Z0-9_.:-, no .., forbidden-marker list, truemap/knownmap/hiddensubstrate collapse, sanitize_public_text idempotence), habitat_id strict equality with validated habitat stem, claim_scope literal "operator_proof" (clarified as claim classification, not proof of operator approval), state_commitment hex64 shape validation only; (3) exact six-field normalized output (rollback_anchor_valid exact bool + five normalized fields or None on invalid); (4) exact-key-set enforcement (no extra/missing keys); (5) contextual identity binding (anchor carries no pair_id, agent_id, provenance_commitment; identity association is transitive through the enclosing birth-candidate declaration, not derived from habitat_id); (6) state_commitment source-envelope construction explicitly UNRESOLVED - same gap as provenance_commitment; (7) authorization/execution separation (anchor acceptance = shape validation only; no rollback executed; no executor named); (8) scope-neutral anchor (no rollback_scope field; asymmetric rollback scope deferred to future authorization artifact); (9) replay/uniqueness/expiry/tamper status documented honestly (no mechanism introduced; no sequence/HMAC/signature/expiry/previous_anchor_id/fingerprint); (10) existing fail-closed vocabulary (invalid_rollback_anchor, missing_rollback_anchor, candidate_declaration_drift; no new strings added). The historical planning mention of 10IH in the 10FX naming paragraph was a soft notation reference for a model-routing candidate later implemented as 10FZ; no phase-row collision exists. FIRST_PAIR_CREATION_AUTHORIZED = False. No implementation, tests, backend/runtime changes, ledger access, daemon/scheduler/network, or world-sim/data writes. Gate-7 closed. 10CP sole writer. 10HD named-only. Pushed to origin/master. |
 OLD COMMIT: f3317e1
 NEW COMMIT: f3317e1
-BEFORE: | 10IH | Sub/Active | (purpose) | `f3317e1` | Low | (notes) |
-AFTER:  | 10IH | Sub/Active | (purpose) | `f3317e1` | Low | (notes) |
+BEFORE: | 10IH | Done | First pair rollback anchor envelope format and validation spec | `f3317e1` | world-sim/docs/phase_10ih_first_pair_rollback_anchor_format_spec.md | Docs-only documentation of the exact rollback_anchor envelope format and validation rules already enforced by the pushed 10IC module. Closes only: (1) the exact five-field input envelope (rollback_anchor_schema_version, rollback_anchor_id, habitat_id, claim_scope, state_commitment); (2) exact field rules - schema version literal "first_rollback_anchor.1", safe-identifier validation on rollback_anchor_id and habitat_id via 10IC _is_safe_identifier (1-128 chars, alphabet a-zA-Z0-9_.:-, no .., forbidden-marker list, truemap/knownmap/hiddensubstrate collapse, sanitize_public_text idempotence), habitat_id strict equality with validated habitat stem, claim_scope literal "operator_proof" (clarified as claim classification, not proof of operator approval), state_commitment hex64 shape validation only; (3) exact six-field normalized output (rollback_anchor_valid exact bool + five normalized fields or None on invalid); (4) exact-key-set enforcement (no extra/missing keys); (5) contextual identity binding (anchor carries no pair_id, agent_id, provenance_commitment; identity association is transitive through the enclosing birth-candidate declaration, not derived from habitat_id); (6) state_commitment source-envelope construction explicitly UNRESOLVED - same gap as provenance_commitment; (7) authorization/execution separation (anchor acceptance = shape validation only; no rollback executed; no executor named); (8) scope-neutral anchor (no rollback_scope field; asymmetric rollback scope deferred to future authorization artifact); (9) replay/uniqueness/expiry/tamper status documented honestly (no mechanism introduced; no sequence/HMAC/signature/expiry/previous_anchor_id/fingerprint); (10) existing fail-closed vocabulary (invalid_rollback_anchor, missing_rollback_anchor, candidate_declaration_drift; no new strings added). The historical planning mention of 10IH in the 10FX naming paragraph was a soft notation reference for a model-routing candidate later implemented as 10FZ; no phase-row collision exists. FIRST_PAIR_CREATION_AUTHORIZED = False. No implementation, tests, backend/runtime changes, ledger access, daemon/scheduler/network, or world-sim/data writes. Gate-7 closed. 10CP sole writer. 10HD named-only. Pushed to origin/master. |
+AFTER:  | 10IH | Done | First pair rollback anchor envelope format and validation spec | `f3317e1` | world-sim/docs/phase_10ih_first_pair_rollback_anchor_format_spec.md | Docs-only documentation of the exact rollback_anchor envelope format and validation rules already enforced by the pushed 10IC module. Closes only: (1) the exact five-field input envelope (rollback_anchor_schema_version, rollback_anchor_id, habitat_id, claim_scope, state_commitment); (2) exact field rules - schema version literal "first_rollback_anchor.1", safe-identifier validation on rollback_anchor_id and habitat_id via 10IC _is_safe_identifier (1-128 chars, alphabet a-zA-Z0-9_.:-, no .., forbidden-marker list, truemap/knownmap/hiddensubstrate collapse, sanitize_public_text idempotence), habitat_id strict equality with validated habitat stem, claim_scope literal "operator_proof" (clarified as claim classification, not proof of operator approval), state_commitment hex64 shape validation only; (3) exact six-field normalized output (rollback_anchor_valid exact bool + five normalized fields or None on invalid); (4) exact-key-set enforcement (no extra/missing keys); (5) contextual identity binding (anchor carries no pair_id, agent_id, provenance_commitment; identity association is transitive through the enclosing birth-candidate declaration, not derived from habitat_id); (6) state_commitment source-envelope construction explicitly UNRESOLVED - same gap as provenance_commitment; (7) authorization/execution separation (anchor acceptance = shape validation only; no rollback executed; no executor named); (8) scope-neutral anchor (no rollback_scope field; asymmetric rollback scope deferred to future authorization artifact); (9) replay/uniqueness/expiry/tamper status documented honestly (no mechanism introduced; no sequence/HMAC/signature/expiry/previous_anchor_id/fingerprint); (10) existing fail-closed vocabulary (invalid_rollback_anchor, missing_rollback_anchor, candidate_declaration_drift; no new strings added). The historical planning mention of 10IH in the 10FX naming paragraph was a soft notation reference for a model-routing candidate later implemented as 10FZ; no phase-row collision exists. FIRST_PAIR_CREATION_AUTHORIZED = False. No implementation, tests, backend/runtime changes, ledger access, daemon/scheduler/network, or world-sim/data writes. Gate-7 closed. 10CP sole writer. 10HD named-only. Pushed to origin/master. |
 APPLIED: false
 GREEN
 ```
@@ -617,9 +625,11 @@ git rev-parse HEAD
 git rev-parse origin/master
 git ls-remote origin refs/heads/master
 
+# Resolve current HEAD dynamically
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha c5b6f366fbfab02a1574f9e5affb73d63bcecba5
+  -ExpectedSha $headSha
 
 pwsh -NoProfile -File `
   world-sim/scripts/sync_phase_index_sha.ps1 `
@@ -629,9 +639,10 @@ pwsh -NoProfile -File `
 ### Verify Dirty Work
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -ExpectedSha $headSha `
   -AllowDirty `
   -Path world-sim/docs/<file>
 ```
@@ -686,9 +697,10 @@ git ls-remote origin refs/heads/master
 ### Credential-Shaped Scan
 
 ```powershell
+$headSha = git rev-parse HEAD
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -ExpectedSha $headSha `
   -AllowDirty `
   -Path world-sim/docs/<file> `
   -SkipCrlfCheck `
@@ -729,6 +741,8 @@ if ($bytes.Length -gt 1 -and $bytes[-2] -eq 0x0A) { throw 'More than one final L
 Runbook created: 2026-07-24
 Correction commit: corrects the initial W2B runbook (base commit
 `c5b6f366fbfab02a1574f9e5affb73d63bcecba5`)
+Second correction commit: fixes stale SHA, inaccurate 10IH output, and
+credential-scan level distinction
 
-This runbook is Commit A of the correction. No pointer synchronization is
-needed for W2B (workflow infrastructure — see Section 7).
+This runbook is Commit A of the second correction. No pointer synchronization
+is needed for W2B (workflow infrastructure — see Section 7).
