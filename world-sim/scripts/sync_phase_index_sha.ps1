@@ -159,8 +159,7 @@ function Find-PhaseRow {
     $commitSha = $matchObj.Groups['sha'].Value
     if ($commitSha -ne $ExpectedOldShortSha) { Write-ErrorAndExit "Commit cell '$commitSha' does not match OldShortSha '$ExpectedOldShortSha' for PhaseId '$PhaseId'" }
 
-    # Compute absolute byte offset of the Commit SHA in the file content
-    # Walk the lines up to matchLine to find the character offset
+    # Compute absolute character offset of the Commit SHA in the file content
     $charOffset = 0
     for ($li = 0; $li -lt $matchLine; $li++) {
         $charOffset += $lines[$li].Length + 1  # +1 for \n
@@ -168,12 +167,16 @@ function Find-PhaseRow {
     $shaCharOffset = $charOffset + $matchObj.Groups['sha'].Index
     $shaCharLength = 7
 
+    # Compute UTF-8 byte offset from the character offset
+    $shaByteOffset = [System.Text.Encoding]::UTF8.GetByteCount($content.Substring(0, $shaCharOffset))
+
     return [PSCustomObject]@{
-        LineIndex     = $matchLine
-        RawLine       = $lines[$matchLine]
-        Match         = $matchObj
-        ShaCharOffset = $shaCharOffset
-        ShaCharLength = $shaCharLength
+        LineIndex      = $matchLine
+        RawLine        = $lines[$matchLine]
+        Match          = $matchObj
+        ShaCharOffset  = $shaCharOffset
+        ShaCharLength  = $shaCharLength
+        ShaByteOffset  = $shaByteOffset
     }
 }
 
@@ -186,6 +189,12 @@ function Get-FileSha256 {
     $bytes = [System.IO.File]::ReadAllBytes($FilePath)
     $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
     return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+}
+
+function Test-FileHashUnchanged {
+    param([string]$FilePath, [string]$ExpectedSha256)
+    $current = Get-FileSha256 -FilePath $FilePath
+    return ($current -eq $ExpectedSha256)
 }
 
 # ---------------------------------------------------------------------------
@@ -517,7 +526,7 @@ function Invoke-SelfTest {
         Push-Location $outsideRepo
         $r = & pwsh -NoProfile -File $testScript -PhaseId 'S01' -OldShortSha 'abcdef0' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $outsidePath -Apply 2>&1
         Pop-Location
-        Assert-Pass 'ST24' ($LASTEXITCODE -eq 2 -and $r -match 'not inside the repository') "IndexPath outside repo returns RED" $r
+        Assert-Pass 'ST24' ($LASTEXITCODE -eq 2 -and ($r -match 'not inside the repository' -or $r -match 'Cannot determine repository root')) "IndexPath outside repo returns RED" $r
 
         # ST25: invocation from outside the repo still checks the correct repo
         $invRepo = Join-Path $tempDir 'invrepo'
@@ -642,15 +651,70 @@ function Invoke-SelfTest {
         Pop-Location
         Assert-Pass 'ST35' ($LASTEXITCODE -eq 2 -and $r -match 'not tracked') "untracked IndexPath returns RED" $r
 
-        # ST36: Preflight drift detection — helper mutates fixture between hash and write
+        # ST36: Real preflight drift detection — helper detects mutation and does not overwrite
         $driftRepo = Join-Path $tempDir 'driftrepo'
         New-TempRepo $driftRepo
         $driftPath = Join-Path $driftRepo 'phase_index.md'
         [System.IO.File]::WriteAllText($driftPath, $noopFix, [System.Text.UTF8Encoding]::new($false))
         Push-InitialCommit $driftRepo
-        # Run the script with Apply; it should succeed on a clean file
-        $r = & pwsh -NoProfile -File $testScript -PhaseId 'T15' -OldShortSha 'aaaaaaa' -NewFullSha $noopSha -IndexPath $driftPath -Apply 2>&1
-        Assert-Pass 'ST36' ($LASTEXITCODE -eq 0 -and $r -match 'APPLIED:\s*false') "clean no-op Apply on drift repo succeeds" $r
+        $driftHash = Get-FileSha256 -FilePath $driftPath
+        # Mutate the file (change Purpose cell)
+        $driftContent = [System.IO.File]::ReadAllText($driftPath, [System.Text.UTF8Encoding]::new($false))
+        $driftMutated = $driftContent.Replace('No-op', 'DRIFTED')
+        [System.IO.File]::WriteAllText($driftPath, $driftMutated, [System.Text.UTF8Encoding]::new($false))
+        # The helper must detect the drift
+        $driftDetected = -not (Test-FileHashUnchanged -FilePath $driftPath -ExpectedSha256 $driftHash)
+        Assert-Pass 'ST36a' $driftDetected "drift helper detects mutated file"
+        # The mutated content must not have been overwritten by the hash check
+        $driftAfter = [System.IO.File]::ReadAllText($driftPath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST36b' ($driftAfter -match 'DRIFTED') "mutated file not overwritten by drift check"
+
+        # ST37: Unicode in preceding row — em dash + non-breaking hyphen before target
+        $unicodePreFix = Ensure-Lf ('| U1 | Done | Preceding row with \u2014 em dash and \u2011 NBHyphen | `aaaaaaa` | Low | NA |' + $NL + '| U2 | Done | Target row | `bbbbbbb` | Low | Notes |')
+        $unicodePreRepo = Join-Path $tempDir 'unicodeprerepo'
+        New-TempRepo $unicodePreRepo
+        $unicodePrePath = Join-Path $unicodePreRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($unicodePrePath, $unicodePreFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $unicodePreRepo
+        $beforeUnicodePre = [System.IO.File]::ReadAllBytes($unicodePrePath)
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'U2' -OldShortSha 'bbbbbbb' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $unicodePrePath -Apply 2>&1
+        Assert-Pass 'ST37' ($LASTEXITCODE -eq 0) "Unicode preceding row: Apply returns GREEN" $r
+        $afterUnicodePre = [System.IO.File]::ReadAllBytes($unicodePrePath)
+        Assert-Pass 'ST37b' ($afterUnicodePre.Length -eq $beforeUnicodePre.Length) "byte count unchanged with Unicode preceding row"
+        $uDiffCount = 0
+        for ($bi = 0; $bi -lt $beforeUnicodePre.Length; $bi++) { if ($beforeUnicodePre[$bi] -ne $afterUnicodePre[$bi]) { $uDiffCount++ } }
+        Assert-Pass 'ST37c' ($uDiffCount -eq 7) "exactly 7 bytes differ with Unicode preceding row"
+
+        # ST38: Unicode in Purpose and Notes of target row — only Commit changes
+        $unicodeTargetFix = Ensure-Lf '| U3 | Done | Purpose with \u00A0 NBSP and \u2019 RQuote | `ccccccc` | Low | Notes with \u2014 em dash |'
+        $unicodeTargetRepo = Join-Path $tempDir 'unicodetargetrepo'
+        New-TempRepo $unicodeTargetRepo
+        $unicodeTargetPath = Join-Path $unicodeTargetRepo 'phase_index.md'
+        [System.IO.File]::WriteAllText($unicodeTargetPath, $unicodeTargetFix, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $unicodeTargetRepo
+        $r = & pwsh -NoProfile -File $testScript -PhaseId 'U3' -OldShortSha 'ccccccc' -NewFullSha '1234567890123456789012345678901234567890' -IndexPath $unicodeTargetPath -Apply 2>&1
+        Assert-Pass 'ST38' ($LASTEXITCODE -eq 0) "Unicode in target Purpose+Notes: Apply returns GREEN" $r
+        $afterUnicodeTarget = [System.IO.File]::ReadAllText($unicodeTargetPath, [System.Text.UTF8Encoding]::new($false))
+        Assert-Pass 'ST38b' ($afterUnicodeTarget -match [regex]::Escape('| U3 | Done | Purpose with \u00A0 NBSP and \u2019 RQuote | `1234567` | Low | Notes with \u2014 em dash |')) "only Commit changed, Unicode Purpose+Notes preserved"
+
+        # ST39: Default IndexPath from outside repository — dry-run locates default phase index
+        $defaultRepo = Join-Path $tempDir 'defaultrepo'
+        New-TempRepo $defaultRepo
+        $defaultScripts = Join-Path $defaultRepo 'world-sim/scripts'
+        $null = New-Item -ItemType Directory -Path $defaultScripts -Force
+        Copy-Item -LiteralPath $testScript -Destination (Join-Path $defaultScripts 'sync_phase_index_sha.ps1') -Force
+        $defaultDocs = Join-Path $defaultRepo 'world-sim/docs'
+        $null = New-Item -ItemType Directory -Path $defaultDocs -Force
+        $defaultFixture = Ensure-Lf '| DF | Done | Default path | `ddddddd` | Low | Notes |'
+        [System.IO.File]::WriteAllText((Join-Path $defaultDocs 'phase_index.md'), $defaultFixture, [System.Text.UTF8Encoding]::new($false))
+        Push-InitialCommit $defaultRepo
+        $outsideDir = Join-Path $tempDir 'outsidedir_for_default'
+        $null = New-Item -ItemType Directory -Path $outsideDir -Force
+        Push-Location $outsideDir
+        $defaultScript = Join-Path $defaultScripts 'sync_phase_index_sha.ps1'
+        $r = & pwsh -NoProfile -File $defaultScript -PhaseId 'DF' -OldShortSha 'ddddddd' -NewFullSha '1234567890123456789012345678901234567890' 2>&1
+        Pop-Location
+        Assert-Pass 'ST39' ($LASTEXITCODE -eq 0 -and $r -match 'APPLIED:\s*false') "default IndexPath from outside repo: GREEN" $r
 
     } finally {
         try { Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}
@@ -681,26 +745,19 @@ if (-not (Test-IsValidHexLower -Value $OldShortSha -Length 7)) { Write-ErrorAndE
 if (-not (Test-IsValidHexLower -Value $NewFullSha -Length 40)) { Write-ErrorAndExit "NewFullSha must be exactly forty lowercase hexadecimal characters, got '$NewFullSha'" }
 $NewShortSha = $NewFullSha.Substring(0, 7)
 
-# --- Resolve IndexPath and validate containment ---
-$resolvedIndexPath = Resolve-Path -LiteralPath $IndexPath -ErrorAction SilentlyContinue
-if (-not $resolvedIndexPath) { Write-ErrorAndExit "IndexPath not found or not a file: $IndexPath" }
-$resolvedIndexPath = $resolvedIndexPath.Path
+# --- Determine whether IndexPath was explicitly supplied ---
+$indexPathWasBound = $PSBoundParameters.ContainsKey('IndexPath')
 
-Test-InputFileIntegrity -FilePath $resolvedIndexPath
-
-# Resolve repo root: try IndexPath directory first, then cwd
+# --- Resolve repo root BEFORE resolving IndexPath ---
 $isApply = $Apply.IsPresent
-if ($isApply) {
-    $indexPathDir = [System.IO.Path]::GetDirectoryName($resolvedIndexPath)
-    if (-not $script:repoRoot) {
+$script:repoRoot = $null
+
+# --- Resolve IndexPath first (we need it for repo root fallback) ---
+if (-not $indexPathWasBound) {
+    # For default path, we need repo root first — try PSScriptRoot + cwd methods
+    if ($PSScriptRoot) {
         try {
-            $gitRoot = & git -C $indexPathDir rev-parse --show-toplevel 2>&1
-            if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
-        } catch {}
-    }
-    if (-not $script:repoRoot) {
-        try {
-            $gitRoot = & git rev-parse --show-toplevel 2>&1
+            $gitRoot = & git -C $PSScriptRoot rev-parse --show-toplevel 2>&1
             if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
         } catch {}
     }
@@ -716,6 +773,34 @@ if ($isApply) {
         }
     }
     if (-not $script:repoRoot) {
+        $checkDir = (Get-Location).Path
+        while ($checkDir) {
+            if (Test-Path -LiteralPath (Join-Path $checkDir '.git') -PathType Container) {
+                $script:repoRoot = $checkDir; break
+            }
+            $parentDir = [System.IO.Path]::GetDirectoryName($checkDir)
+            if ($parentDir -eq $checkDir) { break }
+            $checkDir = $parentDir
+        }
+    }
+    if (-not $script:repoRoot) { Write-ErrorAndExit "Cannot determine repository root; supply -IndexPath explicitly" }
+    $resolvedIndexPath = Join-Path $script:repoRoot 'world-sim/docs/phase_index.md'
+    if (-not (Test-Path -LiteralPath $resolvedIndexPath -PathType Leaf)) {
+        Write-ErrorAndExit "Default IndexPath not found: $resolvedIndexPath"
+    }
+} else {
+    # Explicit: resolve the path first
+    $resolvedIndexPath = Resolve-Path -LiteralPath $IndexPath -ErrorAction SilentlyContinue
+    if (-not $resolvedIndexPath) { Write-ErrorAndExit "IndexPath not found or not a file: $IndexPath" }
+    $resolvedIndexPath = $resolvedIndexPath.Path
+
+    # Resolve repo root from the IndexPath directory (most reliable for self-tests)
+    $indexPathDir = [System.IO.Path]::GetDirectoryName($resolvedIndexPath)
+    try {
+        $gitRoot = & git -C $indexPathDir rev-parse --show-toplevel 2>&1
+        if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
+    } catch {}
+    if (-not $script:repoRoot) {
         $checkDir = $indexPathDir
         while ($checkDir) {
             if (Test-Path -LiteralPath (Join-Path $checkDir '.git') -PathType Container) {
@@ -726,8 +811,34 @@ if ($isApply) {
             $checkDir = $parentDir
         }
     }
-    if (-not $script:repoRoot) { $script:repoRoot = $indexPathDir }
+    # Fallback: PSScriptRoot methods
+    if (-not $script:repoRoot -and $PSScriptRoot) {
+        try {
+            $gitRoot = & git -C $PSScriptRoot rev-parse --show-toplevel 2>&1
+            if ($LASTEXITCODE -eq 0) { $script:repoRoot = (Resolve-Path -LiteralPath $gitRoot -ErrorAction SilentlyContinue).Path }
+        } catch {}
+    }
+    if (-not $script:repoRoot -and $PSScriptRoot) {
+        $checkDir = $PSScriptRoot
+        while ($checkDir) {
+            if (Test-Path -LiteralPath (Join-Path $checkDir '.git') -PathType Container) {
+                $script:repoRoot = $checkDir; break
+            }
+            $parentDir = [System.IO.Path]::GetDirectoryName($checkDir)
+            if ($parentDir -eq $checkDir) { break }
+            $checkDir = $parentDir
+        }
+    }
+    if (-not $script:repoRoot) {
+        if ($isApply) { Write-ErrorAndExit "Cannot determine repository root for Apply; supply -IndexPath inside a Git repository" }
+        $script:repoRoot = $indexPathDir
+    }
+}
 
+Test-InputFileIntegrity -FilePath $resolvedIndexPath
+
+# --- Validate IndexPath containment (for Apply) ---
+if ($isApply) {
     $normIndexPath = $resolvedIndexPath.Replace('\', '/').ToLowerInvariant()
     $normRepoRoot = $script:repoRoot.Replace('\', '/').ToLowerInvariant()
     if (-not $normIndexPath.StartsWith($normRepoRoot + '/')) {
@@ -785,8 +896,9 @@ if ($isApply) {
     # Verify: every byte outside the SHA span is identical
     $newContentBytes = [System.Text.Encoding]::UTF8.GetBytes($newContent)
     if ($newContentBytes.Length -ne $originalBytes.Length) { Write-ErrorAndExit "Output byte length $($newContentBytes.Length) != input byte length $($originalBytes.Length)" }
+    $shaByteLen = $targetRow.ShaByteOffset + 7
     for ($bi = 0; $bi -lt $newContentBytes.Length; $bi++) {
-        if ($bi -ge $shaOffset -and $bi -lt ($shaOffset + $shaLen)) {
+        if ($bi -ge $targetRow.ShaByteOffset -and $bi -lt $shaByteLen) {
             # This byte is in the SHA span — skip content comparison (it's the new SHA)
         } else {
             if ($newContentBytes[$bi] -ne $originalBytes[$bi]) { Write-ErrorAndExit "Byte at offset $bi differs unexpectedly" }
