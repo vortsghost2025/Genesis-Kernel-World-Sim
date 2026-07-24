@@ -4,10 +4,15 @@
 
 This runbook defines the standard procedure for:
 
-1. **Documentation corrections** — fixing typos, clarifying prose, updating cross-references, or correcting metadata in `world-sim/docs/` markdown files (including `phase_index.md`).
-2. **Phase pointer synchronization** — advancing the "current phase" pointer in tooling and documentation after a phase is pushed to `origin/master`.
+1. **Documentation corrections** — fixing typos, clarifying prose, updating
+   cross-references, or correcting metadata in authorized
+   `world-sim/docs/` markdown files.
+2. **Phase-index Commit-cell pointer synchronization** — updating a phase
+   row's Commit cell to reference the Commit A correction commit that
+   belongs to that phase.
 
-The runbook is **read-only for tooling**; it does not grant authority to modify implementation code, tests, backend, frontend, runtime, or data.
+The runbook is **read-only for tooling**; it does not grant authority to
+modify implementation code, tests, backend, frontend, runtime, or data.
 
 ---
 
@@ -15,241 +20,715 @@ The runbook is **read-only for tooling**; it does not grant authority to modify 
 
 | Action | Allowed | Requires Explicit Authorization |
 |--------|---------|--------------------------------|
-| Edit `world-sim/docs/*.md` for typo/prose/format fixes | ✅ | — |
-| Update cross-references in `phase_index.md` | ✅ | — |
-| Edit `phase_index.md` Status/Purpose/Commit/Runtime/Notes cells | ❌ | Sean explicit approval |
-| Change `phase_index.md` Phase ordering or add rows | ❌ | Sean explicit approval |
-| Modify `verify_repo_state.ps1` | ❌ | Sean explicit approval |
-| Modify `sync_phase_index_sha.ps1` | ❌ | Sean explicit approval |
-| Modify AGENTS.md | ❌ | Sean explicit approval |
-| Modify README.md | ❌ | Sean explicit approval |
-| Create new markdown files in `world-sim/docs/` | ❌ | Sean explicit approval |
-| Run `-Apply` against live `phase_index.md` | ❌ | Sean explicit approval |
-| Start W3 or 10II | ❌ | Sean explicit approval |
-
-**Boundary reminder**: This runbook covers documentation-only corrections. Any change to the phase index's structural rows (Phase, Status, Commit SHA) is a *phase metadata* operation and follows the phase sync protocol (Section 5), not this runbook.
+| Edit an explicitly authorized `world-sim/docs/*.md` file | ✅ | Sean before edit begins |
+| Stage, commit, and push that correction | ✅ after passing all checks | — |
+| Synchronise the commit SHA in an existing phase row | ✅ after Commit A is pushed | Sean before dry-run |
+| Edit `verify_repo_state.ps1` | ❌ | Sean |
+| Edit `sync_phase_index_sha.ps1` | ❌ | Sean |
+| Edit `AGENTS.md` | ❌ | Sean |
+| Edit `README.md` | ❌ | Sean |
+| Start W3, 10II, or any implementation phase | ❌ | Sean |
+| Force-push, amend, rebase, reset, or rewrite public history | ❌ | Never |
+| Modify backend, runtime, provider, container, data, or first-pair files | ❌ | Never |
 
 ---
 
-## 2. Preconditions
+## 2. Non-Negotiable Boundaries
 
-Before any documentation correction:
-
-1. **Repository state is GREEN**:
-   ```powershell
-   git status -sb
-   git rev-parse HEAD
-   git rev-parse origin/master
-   git ls-remote origin refs/heads/master
-   pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -ExpectedSha <current-head-sha>
-   ```
-   All must report clean tree, branch `master`, triple-SHA alignment, and verifier GREEN.
-
-2. **Working tree is clean** — no unstaged, staged, or untracked files except the intended correction.
-
-3. **Current HEAD matches origin/master** — no local commits ahead.
-
-4. **No W2B, W3, or 10II work in progress** — this runbook is for documentation corrections only.
+- **Gate-7 remains closed** — 10CP is the sole world-state/ledger writer.
+- **FIRST_PAIR_CREATION_AUTHORIZED = False** — no first-pair creation.
+- **10HD is named-only** — no 10HD work has begun.
+- **No force push** — never use `--force`, `--force-with-lease`, or any
+  rewrite of public history.
+- **Never amend Commit A** after its SHA has been referenced or pushed.
+- **No-op creates no pointer commit** — if dry-run or Apply produces no
+  diff, there is nothing to commit.
 
 ---
 
-## 3. Documentation Correction Workflow
+## 3. Required Tools and Paths
 
-### 3.1 Identify the Correction
+- **Shell**: PowerShell 7 only (`pwsh -NoProfile`)
+- **Repository root**: `S:\Genesis Kernel World Sim`
+- **Phase index**: `world-sim/docs/phase_index.md` (relative to repo root)
+- **Verify helper**: `world-sim/scripts/verify_repo_state.ps1`
+- **Sync helper**: `world-sim/scripts/sync_phase_index_sha.ps1`
 
-- Locate the target file(s) in `world-sim/docs/`.
-- Confirm the change is **prose, formatting, cross-reference, or metadata clarification only**.
-- Document the exact change (old text → new text) in a scratch note.
+---
 
-### 3.2 Apply the Correction
+## 4. Exit Codes and GREEN/RED Meaning
+
+| Helper | GREEN Meaning | RED Meaning |
+|--------|---------------|-------------|
+| `verify_repo_state.ps1` | All checks pass; state is correct | At least one check failed |
+| `sync_phase_index_sha.ps1` | Validation passed; operation is safe | Validation failed; do not proceed |
+
+Both helpers exit 0 for GREEN and 2 for RED.
+
+---
+
+## 5. Before Touching a File
 
 ```powershell
-# Example: fix a typo in phase_index.md
-# 1. Read the file
-$path = 'S:\Genesis Kernel World Sim\world-sim\docs\phase_index.md'
-$content = [IO.File]::ReadAllText($path, [Text.UTF8Encoding]::new($false))
+Set-Location 'S:\Genesis Kernel World Sim'
 
-# 2. Make the targeted replacement (exact string match)
-$old = 'exmaple'
-$new = 'example'
-if ($content -notmatch [regex]::Escape($old)) { throw "Old text not found" }
-$content = $content.Replace($old, $new)
+git status -sb
+git rev-parse --abbrev-ref HEAD
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
 
-# 3. Write with LF-only, no BOM
-[IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha c5b6f366fbfab02a1574f9e5affb73d63bcecba5
 
-# 4. Verify no CRLF/BOM introduced
-$bytes = [IO.File]::ReadAllBytes($path)
-if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { throw "BOM introduced" }
-for ($i = 0; $i -lt $bytes.Length - 1; $i++) {
-    if ($bytes[$i] -eq 0x0D -and $bytes[$i+1] -eq 0x0A) { throw "CRLF introduced at $i" }
-}
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -SelfTest
 ```
 
-### 3.3 Verify the Correction
+**STOP unless all of the following are true:**
+
+> - branch is `master`
+> - tree is clean
+> - local HEAD, origin/master, and git ls-remote are identical
+> - verifier is **GREEN**
+> - helper self-test exits 0 and prints `SELF-TEST PASSED` exactly once
+
+If any check fails:
+
+> - **STOP**
+> - **Preserve evidence** — copy the failing command and output
+> - **Do not merge, rebase, reset, revert, restore, stash, clean, or
+>   force-push**
+> - **Return to Sean for direction**
+
+---
+
+## 6. Documentation-Correction Commit Procedure
+
+This procedure produces **Commit A** — the approved documentation correction.
+
+### Step 1: Confirm Authorization
+
+- Sean has explicitly named the exact file path and the nature of the change.
+- The file is in `world-sim/docs/` and is not a phase-index row operation.
+
+### Step 2: Confirm Starting State
+
+Run the checks from Section 5 (Before Touching a File). All must pass.
+
+### Step 3: Run Starting Verifier
 
 ```powershell
-# Run repo verifier (no -Path; we trust the verifier to scan changes)
-pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -ExpectedSha <current-head-sha>
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD>
+```
 
-# Confirm diff is exactly the intended change
-git diff -- world-sim/docs/phase_index.md
+Must be GREEN.
+
+### Step 4: Edit Exactly the Authorized Document
+
+Make the targeted edit. Use exact-string replacement when possible. Do not
+modify any other file.
+
+### Step 5: Verify Byte Integrity
+
+```powershell
+$bytes = [IO.File]::ReadAllBytes('world-sim/docs/<file>')
+
+# UTF-8 no BOM
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+  throw 'BOM detected'
+}
+
+# LF only
+for ($i = 0; $i -lt $bytes.Length - 1; $i++) {
+  if ($bytes[$i] -eq 0x0D -and $bytes[$i+1] -eq 0x0A) { throw "CRLF at byte $i" }
+}
+
+# Exactly one final LF
+if ($bytes[-1] -ne 0x0A) { throw 'Missing final LF' }
+if ($bytes.Length -gt 1 -and $bytes[-2] -eq 0x0A) { throw 'More than one final LF' }
+```
+
+### Step 6: Check Status and Diff
+
+```powershell
+git status --short
+git diff -- world-sim/docs/<file>
 git diff --check
 ```
 
-### 3.4 Stop Before Commit
+### Step 7: Run Dirty-State Verifier with Explicit Path
 
-**Do not commit or push.** Documentation corrections in this phase are **spec/audit only**. The commit/push decision belongs to Sean.
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -AllowDirty `
+  -Path world-sim/docs/<file>
+```
 
-Record the exact change for the handoff:
-- File(s) changed
-- Exact diff
-- Verifier output (GREEN)
+Must be GREEN. This checks the changed file for CRLF, BOM, credential-shaped
+patterns, and whitespace issues.
+
+### Step 8: Review the Complete Diff
+
+Confirm every changed line is intentional.
+
+### Step 9: Redacted Credential-Shaped Scan
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -AllowDirty `
+  -Path world-sim/docs/<file> `
+  -SkipCrlfCheck `
+  -SkipDiffCheck
+```
+
+Review the output. Never print raw credential values. The scan keyword-matches
+credential-shaped patterns and surfaces NOTICE-level lines.
+
+### Step 10: Stage Exactly the Authorized File
+
+```powershell
+git add world-sim/docs/<file>
+```
+
+Never use `git add .` or `git add -A`.
+
+### Step 11: Verify Staged Content
+
+```powershell
+git diff --cached --check
+git diff --cached --name-only
+git diff --cached --numstat
+git diff --cached -- world-sim/docs/<file>
+```
+
+The staged file list must contain exactly the one authorized file.
+
+### Step 12: Commit with the Authorized Message
+
+```powershell
+git commit -m '<authorized commit message>'
+```
+
+### Step 13: Push Non-Force Immediately
+
+```powershell
+git push origin master
+```
+
+### Step 14: Fetch and Triple-Verify
+
+```powershell
+git fetch origin master
+git status -sb
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
+```
+
+Require triple-SHA alignment and clean tree.
+
+### Step 15: Run Clean-State Verifier
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <NEW_40_HEX>
+```
+
+Must be GREEN.
+
+### Step 16: Confirm Helper Integrity
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -SelfTest
+
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -SelfTest
+```
+
+Both must print self-test passed.
 
 ---
 
-## 4. Phase Pointer Synchronization (Post-Push)
-
-This section applies **only after a phase has been pushed to `origin/master`** and the real pushed SHA is known.
-
-### 4.1 When to Run
-
-- A phase implementation commit has been pushed to `origin/master`.
-- The public `phase_index.md` still shows the old short SHA or "Pushed / CI pending" status.
-- Sean authorizes the metadata sync.
-
-### 4.2 Procedure
-
-1. **Confirm the pushed SHA**:
-   ```powershell
-   git ls-remote origin refs/heads/master
-   # Record the 40-char SHA
-   ```
-
-2. **Identify the target row** in `phase_index.md`:
-   - Phase ID (e.g., `10FH`)
-   - Current short SHA in Commit cell (e.g., `bbbbbbb`)
-   - New short SHA = first 7 chars of pushed 40-char SHA
-
-3. **Run the sync helper in dry-run mode** (does not write):
-   ```powershell
-   pwsh -NoProfile -File world-sim/scripts/sync_phase_index_sha.ps1 `
-       -PhaseId '10FH' `
-       -OldShortSha 'bbbbbbb' `
-       -NewFullSha '<40-char-pushed-sha>' `
-       -IndexPath 'world-sim/docs/phase_index.md'
-   ```
-   Verify output shows `APPLIED:false` and `GREEN`.
-
-4. **Run with `-Apply`** (only after Sean authorization):
-   ```powershell
-   pwsh -NoProfile -File world-sim/scripts/sync_phase_index_sha.ps1 `
-       -PhaseId '10FH' `
-       -OldShortSha 'bbbbbbb' `
-       -NewFullSha '<40-char-pushed-sha>' `
-       -IndexPath 'world-sim/docs/phase_index.md' `
-       -Apply
-   ```
-   Verify output shows `APPLIED:true` and `GREEN`.
-
-5. **Verify the result**:
-   ```powershell
-   git diff -- world-sim/docs/phase_index.md
-   # Should show exactly the 7-char SHA replacement in the Commit cell
-   ```
-
-6. **Commit the sync** (separate commit, message format):
-```
-    fix: sync phase_index.md 10FH commit to <short-sha>
-
-    Phase 10FH pushed as <full-sha>; update index pointer.
-    ```
-
-7. **Push the sync commit**:
-   ```powershell
-   git push origin master
-   ```
-
-8. **Record the new triple-SHA alignment**:
-   ```powershell
-   git rev-parse HEAD
-   git rev-parse origin/master
-   git ls-remote origin refs/heads/master
-   ```
+At this point, **Commit A** exists. It is the pushed documentation correction.
+Do not amend it.
 
 ---
 
-## 5. Helper Script Reference
+## 7. Decide Whether Phase-Index Synchronisation Is Required
 
-### `sync_phase_index_sha.ps1`
+**Pointer synchronization is required only when ALL of the following are
+true:**
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `-PhaseId` | Yes | Exact Phase ID from table (e.g., `10FH`) |
-| `-OldShortSha` | Yes | Current 7-char SHA in Commit cell |
-| `-NewFullSha` | Yes | Full 40-char SHA from `git ls-remote` |
-| `-IndexPath` | No | Default: `world-sim/docs/phase_index.md` |
-| `-Apply` | No | Switch: write changes; omit for dry-run |
-| `-SelfTest` | No | Switch: run internal self-test suite |
+- The corrected document belongs to a named existing phase (has a row in
+  `phase_index.md`)
+- Exactly one current phase row matches the `PhaseId`
+- That row's `Commit` cell currently points to the superseded SHA
+- The new documentation correction commit is the authorized replacement
+  pointer
 
-**Exit codes**: 0 = GREEN, 2 = RED (validation failure)
+**Do NOT synchronize for:**
 
-**Output format**:
+- Workflow infrastructure such as W1, W2A, or W2B
+- Unrelated documentation that does not belong to any existing phase
+- An already-correct pointer (Commit cell already matches)
+- A phase with no authorized row in the index
+- An attempt to create or start a new phase
+
+If pointer synchronization is not required, stop here. No Commit B is needed.
+
+---
+
+## 8. Two-Commit Protocol
+
 ```
-Found phase row: | 10FH | Done | Purpose | `bbbbbbb` | Low | Notes |
-OLD COMMIT: bbbbbbb
-NEW COMMIT: 1234567
-APPLIED: true
+Commit A — Approved documentation correction (prose, format, cross-ref)
+           Push first. Never amend after SHA is stable.
+
+Commit B — Phase-index Commit-cell pointer synchronization
+           Only if the corrected document belongs to a named phase and the
+           Commit cell must be updated. Created only when Apply produces a
+           real diff.
+```
+
+**Rules:**
+
+- Commit A must be pushed and triple-aligned before any dry-run for Commit B.
+- Commit A's full SHA must be stable before dry-run.
+- Never amend Commit A after its SHA has been referenced.
+- Commit B changes only `world-sim/docs/phase_index.md`.
+- No-op dry-run or no-op Apply creates no Commit B.
+
+---
+
+## 9. Pointer-Decision Record and Dry-Run
+
+### Record
+
+Before the dry-run, record:
+
+- **PhaseId**: the exact phase ID (e.g., `10FH`)
+- **OldShortSha**: the current 7-char SHA in the Commit cell
+- **NewFullSha**: the full 40-char SHA of Commit A
+- **NewShortSha**: first 7 characters of NewFullSha
+- **Reason**: why the phase pointer must change
+- **Approval**: Sean has explicitly approved the proposed BEFORE/AFTER row
+
+### Dry-Run
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -PhaseId '<PhaseId>' `
+  -OldShortSha '<OldShortSha>' `
+  -NewFullSha '<NewFullSha>'
+```
+
+**Review the helper's actual output:**
+
+- `Found phase row` — confirm the correct row was matched
+- `OLD COMMIT` — must match OldShortSha
+- `NEW COMMIT` — must match NewShortSha
+- `BEFORE` — the existing row
+- `AFTER` — the proposed updated row
+- `APPLIED:false` — dry-run did not write
+- `GREEN` — validation passed
+
+**Confirm no file change:**
+
+```powershell
+git diff -- world-sim/docs/phase_index.md
+```
+
+Must show no diff.
+
+---
+
+## 10. Authorized Phase-Index Apply
+
+Apply may occur only when:
+
+- Commit A is already pushed and triple-aligned
+- Dry-run was GREEN
+- BEFORE and AFTER rows are approved by Sean
+- Tree is clean
+- Pointer change is explicitly authorized by Sean
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -PhaseId '<PhaseId>' `
+  -OldShortSha '<OldShortSha>' `
+  -NewFullSha '<NewFullSha>' `
+  -Apply
+```
+
+Verify:
+
+- Only `world-sim/docs/phase_index.md` changed
+- Exactly one row changed
+- Only its Commit cell changed
+- All other rows and prose unchanged
+- Byte integrity correct
+- `git diff --check` clean
+
+Run dirty-state verifier:
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -AllowDirty `
+  -Path world-sim/docs/phase_index.md
+```
+
+Must be GREEN.
+
+---
+
+The helper only edits the file. It never stages, commits, fetches, or pushes.
+No-op Apply (when old and new SHA are the same) still enforces safety but
+creates no diff and no commit.
+
+---
+
+## 11. Pointer-Sync Commit Procedure
+
+### Stage Exactly the Phase Index
+
+```powershell
+git add world-sim/docs/phase_index.md
+```
+
+### Verify Staged Content
+
+```powershell
+git diff --cached --check
+git diff --cached --name-only
+git diff --cached --numstat
+git diff --cached -- world-sim/docs/phase_index.md
+```
+
+The staged file list must contain exactly `world-sim/docs/phase_index.md`.
+
+### Commit with Authorized Message
+
+```powershell
+git commit -m 'fix: sync phase_index.md <PhaseId> commit to <NewShortSha>'
+```
+
+### Push Non-Force Immediately
+
+```powershell
+git push origin master
+```
+
+### Fetch and Triple-Verify
+
+```powershell
+git fetch origin master
+git status -sb
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
+```
+
+Require triple-SHA alignment and clean tree.
+
+### Run Clean-State Verifier
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <NEW_40_HEX>
+```
+
+Must be GREEN.
+
+---
+
+## 12. Final Verification (After Any Commit)
+
+Run after every commit and push:
+
+```powershell
+# Repository state
+git status -sb
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
+
+# Verifier
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <NEW_40_HEX>
+
+# Helper integrity
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -SelfTest
+```
+
+Confirm:
+
+- Triple-SHA alignment
+- Clean tree
+- Verifier GREEN
+- Helper self-test PASSED
+- `phase_index.md` byte-identical to HEAD (unless Commit B was created)
+- Both helpers, `AGENTS.md`, and `README.md` unchanged (unless explicitly
+  authorized)
+
+---
+
+## 13. Abort and Recovery Cases
+
+For every case below:
+
+> - **STOP**
+> - **Preserve evidence** — copy the failing command and its output
+> - **Do not merge, rebase, reset, revert, restore, stash, clean, or
+>   force-push**
+> - **Return to Sean for direction**
+
+| Scenario | Stop Signal |
+|----------|-------------|
+| Dirty tree before starting | `git status -sb` shows staged/unstaged/untracked |
+| Wrong branch | `git rev-parse --abbrev-ref HEAD` is not `master` |
+| SHA divergence | HEAD, origin/master, or ls-remote differ |
+| Missing origin | `git rev-parse origin/master` fails |
+| Unexpected untracked/changed paths | `git status --short` shows unexpected files |
+| Verifier RED | `FINAL STATE: RED` |
+| Helper self-test RED | Not `SELF-TEST PASSED` |
+| Zero or multiple phase matches | `sync_phase_index_sha.ps1` reports zero/duplicate |
+| Wrong OldShortSha | OLD COMMIT does not match expected |
+| Malformed phase row | Helper exits RED on row parsing |
+| Path outside repository | `sync_phase_index_sha.ps1` ST24 |
+| Preflight drift | Drift check fails (ST36a) |
+| Apply RED | Apply exits non-zero or shows RED |
+| Unexpected extra diff | More rows changed than expected |
+| Rejected push (remote advanced) | `git push` fails with non-fast-forward |
+| Credential-shaped material | Verifier NOTICE with actual credential pattern |
+
+---
+
+## 14. Evidence Checklist
+
+After every complete run:
+
+- Starting state checks (Section 5 output)
+- Commit A full SHA and message
+- Non-force push output
+- Commit B full SHA and message (if created)
+- Final triple-SHA alignment
+- Clean tree confirmation
+- Verifier GREEN output
+- Helper self-test PASSED
+- Changed file list and numstat
+- Proof exactly one final LF
+- Byte-integrity results (UTF-8 no BOM, LF-only, no NUL)
+- Credential-shaped scan result
+- Policy corrections made (if runbook was the target)
+- Confirmation `phase_index.md` unchanged (unless Commit B was created)
+- Confirmation helpers, AGENTS.md, README.md unchanged
+- Confirmation W3 and 10II not started
+- Gate-7 still closed
+- 10CP sole writer
+- 10HD named-only
+- FIRST_PAIR_CREATION_AUTHORIZED = False
+
+---
+
+## 15. Fully Worked 10IH No-Op Example
+
+This example demonstrates a no-op dry-run against the existing 10IH phase
+row. It does not change `phase_index.md`.
+
+### Context
+
+- **PhaseId**: `10IH`
+- **OldShortSha**: `f3317e1`
+- **NewFullSha**: `f3317e106a8c59d39498a1e4cd708e134ff1f389`
+- **NewShortSha**: `f3317e1` (same as OldShortSha)
+- This is a **no-op**: old and new SHA are identical
+
+### Command
+
+```powershell
+Set-Location 'S:\Genesis Kernel World Sim'
+
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -PhaseId '10IH' `
+  -OldShortSha 'f3317e1' `
+  -NewFullSha 'f3317e106a8c59d39498a1e4cd708e134ff1f389'
+```
+
+### Expected Output
+
+```
+Found phase row: | 10IH | Sub/Active | (long purpose) | `f3317e1` | Low | (notes) |
+OLD COMMIT: f3317e1
+NEW COMMIT: f3317e1
+BEFORE: | 10IH | Sub/Active | (purpose) | `f3317e1` | Low | (notes) |
+AFTER:  | 10IH | Sub/Active | (purpose) | `f3317e1` | Low | (notes) |
+APPLIED: false
 GREEN
 ```
 
-### `verify_repo_state.ps1`
+### Verification
 
-Read-only repository health check. Key parameters:
+```powershell
+git diff -- world-sim/docs/phase_index.md
+```
 
-| Parameter | Description |
-|-----------|-------------|
-| `-ExpectedSha` | Required: 40-char lowercase SHA to match local HEAD |
-| `-Remote` | Default `origin` |
-| `-Branch` | Default `master` |
-| `-Path` | Explicit paths to scan for CRLF/BOM/credentials |
-| `-AllTracked` | Scan all tracked files |
-| `-AllowDirty` | Allow dirty tree **only** with `-Path` |
-| `-SkipDiffCheck` | Skip `git diff --check` |
-| `-SkipCrlfCheck` | Skip CRLF/BOM scan |
-| `-SkipSecretScan` | Skip credential-shaped scan |
-| `-SelfTest` | Run internal self-test |
+Must show no diff — `phase_index.md` stays unchanged.
+
+### Rules
+
+- Do not add `-Apply`
+- Do not commit anything
+- This is a no-op; it creates no Commit B
 
 ---
 
-## 6. Invariants to Preserve
+## 16. Copy-Paste PowerShell Reference
 
-| Invariant | Check Method |
-|-----------|--------------|
-| `phase_index.md` is UTF-8, no BOM, LF-only | `verify_repo_state.ps1` |
-| Exactly one final LF | `verify_repo_state.ps1` |
-| No CRLF in any tracked text file | `verify_repo_state.ps1` / `git diff --check` |
-| Production helper SHA256 unchanged | `Get-FileHash world-sim/scripts/sync_phase_index_sha.ps1` |
-| Phase index SHA256 only changes on authorized sync | `Get-FileHash world-sim/docs/phase_index.md` |
-| Triple-SHA alignment (local, remote-tracking, ls-remote) | `verify_repo_state.ps1` |
-| No untracked debug/temp files in repo root | `git status --short` |
-| Self-test passes for both scripts | `...ps1 -SelfTest` |
+### Check Starting State
+
+```powershell
+Set-Location 'S:\Genesis Kernel World Sim'
+
+git status -sb
+git rev-parse --abbrev-ref HEAD
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
+
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha c5b6f366fbfab02a1574f9e5affb73d63bcecba5
+
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -SelfTest
+```
+
+### Verify Dirty Work
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -AllowDirty `
+  -Path world-sim/docs/<file>
+```
+
+### Verify Clean State
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <NEW_40_HEX>
+```
+
+### Sync Dry-Run
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -PhaseId '<PhaseId>' `
+  -OldShortSha '<OldShortSha>' `
+  -NewFullSha '<NewFullSha>'
+```
+
+### Sync Apply (authorized only)
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/sync_phase_index_sha.ps1 `
+  -PhaseId '<PhaseId>' `
+  -OldShortSha '<OldShortSha>' `
+  -NewFullSha '<NewFullSha>' `
+  -Apply
+```
+
+### Stage, Commit, Push
+
+```powershell
+git add world-sim/docs/<file>
+git diff --cached --check
+git diff --cached --name-only
+git diff --cached --numstat
+git diff --cached -- world-sim/docs/<file>
+git commit -m '<message>'
+git push origin master
+
+git fetch origin master
+git status -sb
+git rev-parse HEAD
+git rev-parse origin/master
+git ls-remote origin refs/heads/master
+```
+
+### Credential-Shaped Scan
+
+```powershell
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha <CURRENT_40_HEX_HEAD> `
+  -AllowDirty `
+  -Path world-sim/docs/<file> `
+  -SkipCrlfCheck `
+  -SkipDiffCheck
+```
+
+### Helper Self-Tests
+
+```powershell
+pwsh -NoProfile -File world-sim/scripts/sync_phase_index_sha.ps1 -SelfTest
+pwsh -NoProfile -File world-sim/scripts/verify_repo_state.ps1 -SelfTest
+```
+
+### Byte Integrity Check
+
+```powershell
+$bytes = [IO.File]::ReadAllBytes('world-sim/docs/<file>')
+
+# UTF-8 no BOM
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+  throw 'BOM detected'
+}
+
+# LF only
+for ($i = 0; $i -lt $bytes.Length - 1; $i++) {
+  if ($bytes[$i] -eq 0x0D -and $bytes[$i+1] -eq 0x0A) { throw "CRLF at byte $i" }
+}
+
+# Exactly one final LF
+if ($bytes[-1] -ne 0x0A) { throw 'Missing final LF' }
+if ($bytes.Length -gt 1 -and $bytes[-2] -eq 0x0A) { throw 'More than one final LF' }
+```
 
 ---
 
-## 7. Escalation & Handoff
-
-If any check fails or the correction scope is unclear:
-
-1. **Stop** — do not guess, do not force.
-2. **Document** the exact failure (command, output, expected vs actual).
-3. **Report** to Sean with the minimal reproducible case.
-4. **Wait** for explicit direction before proceeding.
-
----
-
-## 8. Version
+## 17. Version
 
 Runbook created: 2026-07-24
-Applies to: Genesis Kernel World Sim, post-W2A validation
-Next review: After W2B completion
+Correction commit: corrects the initial W2B runbook (base commit
+`c5b6f366fbfab02a1574f9e5affb73d63bcecba5`)
+
+This runbook is Commit A of the correction. No pointer synchronization is
+needed for W2B (workflow infrastructure — see Section 7).
