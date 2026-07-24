@@ -79,7 +79,10 @@ git rev-parse origin/master
 git ls-remote origin refs/heads/master
 
 # Resolve current HEAD dynamically; do NOT hard-code a SHA
-$headSha = git rev-parse HEAD
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha
@@ -123,7 +126,10 @@ Run the checks from Section 5 (Before Touching a File). All must pass.
 ### Step 3: Run Starting Verifier
 
 ```powershell
-$headSha = git rev-parse HEAD
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha
@@ -167,7 +173,10 @@ git diff --check
 ### Step 7: Run Dirty-State Verifier with Explicit Path
 
 ```powershell
-$headSha = git rev-parse HEAD
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha `
@@ -185,7 +194,10 @@ Confirm every changed line is intentional.
 ### Step 9: Redacted Credential-Shaped Scan
 
 ```powershell
-$headSha = git rev-parse HEAD
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha `
@@ -246,12 +258,16 @@ Require triple-SHA alignment and clean tree.
 ### Step 15: Run Clean-State Verifier
 
 ```powershell
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <NEW_40_HEX>
+  -ExpectedSha $headSha
 ```
 
-Must be GREEN.
+Must be GREEN. After Commit A, current HEAD is Commit A.
 
 ### Step 16: Confirm Helper Integrity
 
@@ -458,12 +474,16 @@ Require triple-SHA alignment and clean tree.
 ### Run Clean-State Verifier
 
 ```powershell
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <NEW_40_HEX>
+  -ExpectedSha $headSha
 ```
 
-Must be GREEN.
+Must be GREEN. After Commit B, current HEAD is Commit B. **NewFullSha (Commit A) remains the phase-row pointer target — never use Commit A NewFullSha as ExpectedSha after Commit B.**
 
 ---
 
@@ -479,9 +499,13 @@ git rev-parse origin/master
 git ls-remote origin refs/heads/master
 
 # Verifier
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <NEW_40_HEX>
+  -ExpectedSha $headSha
 
 # Helper integrity
 pwsh -NoProfile -File `
@@ -625,8 +649,11 @@ git rev-parse HEAD
 git rev-parse origin/master
 git ls-remote origin refs/heads/master
 
-# Resolve current HEAD dynamically
-$headSha = git rev-parse HEAD
+# Resolve current HEAD dynamically with validation
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha
@@ -639,7 +666,10 @@ pwsh -NoProfile -File `
 ### Verify Dirty Work
 
 ```powershell
-$headSha = git rev-parse HEAD
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
   -ExpectedSha $headSha `
@@ -650,9 +680,13 @@ pwsh -NoProfile -File `
 ### Verify Clean State
 
 ```powershell
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
 pwsh -NoProfile -File `
   world-sim/scripts/verify_repo_state.ps1 `
-  -ExpectedSha <NEW_40_HEX>
+  -ExpectedSha $headSha
 ```
 
 ### Sync Dry-Run
@@ -692,6 +726,15 @@ git status -sb
 git rev-parse HEAD
 git rev-parse origin/master
 git ls-remote origin refs/heads/master
+
+# Resolve new HEAD dynamically
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') {
+  throw 'Could not resolve current 40-character HEAD SHA'
+}
+pwsh -NoProfile -File `
+  world-sim/scripts/verify_repo_state.ps1 `
+  -ExpectedSha $headSha
 ```
 
 ### Credential-Shaped Scan
