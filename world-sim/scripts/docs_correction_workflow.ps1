@@ -1476,7 +1476,19 @@ function Run-SelfTest {
         $t05Result = Invoke-Dispatcher -Action 'InspectDocs' -Path 'world-sim/docs/a.md','world-sim/docs/b.md' -ExpectedSha $sha05 -Branch master -Remote origin -ConfirmProvider $provider05
         $t05Exit = $LASTEXITCODE
         Pop-Location
-        Assert-Condition 'T05' { $t05Exit -eq 0 } "multiple authorized paths work through one explicit array"
+        Push-Location $repo05
+        $staged05 = Get-StagedPaths -RepoRoot $repo05
+        $unstaged05 = Get-UnstagedPaths -RepoRoot $repo05
+        Pop-Location
+        $t05Output = $t05Result | Out-String
+        Assert-Condition 'T05' {
+            $t05Exit -eq 0 -and
+            $t05Result.Checkpoint -eq 'INSPECT_COMPLETE' -and
+            $t05Output -notmatch 'positional parameter cannot be found' -and
+            $t05Output -notmatch 'FAILED_INSPECT' -and
+            $staged05.Count -eq 0 -and
+            $unstaged05.Count -eq 2
+        } "multiple authorized paths work through one explicit array: INSPECT_COMPLETE, no pos-param error, no FAILED_INSPECT, zero staged, two unstaged"
 
         # T06: CONTENT-REVIEWED decline leaves nothing staged
         Write-Host "`nT06-T10: CommitDocs decline/push tests"
@@ -1772,10 +1784,33 @@ function Run-SelfTest {
         Pop-Location
         Assert-Condition 'T17' { $t17Result.ExitCode -eq 0 -and $head17 -ne $sha17 -and $head17 -eq $tracking17 } "Commit B is created and pushed"
 
-        # T18: after Commit B, row points to Commit A while verification uses Commit B
+        # T18: after Commit B, invoke FinalVerify and prove triple alignment with row still pointing to 1234567
+        $queue18 = New-Object System.Collections.Generic.Queue[string]
+        $null = $queue18.Enqueue('IGNORE')
+        $provider18 = Get-QueueProvider -Queue $queue18
+        Push-Location $repo17
+        $t18Result = Invoke-Dispatcher -Action 'FinalVerify' -Path 'world-sim/docs/phase_index.md' -ExpectedSha $head17 -Branch master -Remote origin -ConfirmProvider $provider18
+        Pop-Location
         $content18 = [System.IO.File]::ReadAllText($idx17, [System.Text.UTF8Encoding]::new($false))
-        $rowPointsToA = $content18 -match '\| W4 \| Done \| Test \| `1234567` \| Low \| Notes \|'
-        Assert-Condition 'T18' { $rowPointsToA -and $head17 -ne $sha17 } "after Commit B, row points to Commit A while verification uses Commit B"
+        $rowPointsTo1234567 = $content18 -match '\| W4 \| Done \| Test \| `1234567` \| Low \| Notes \|'
+        Push-Location $repo17
+        $head18 = (& git rev-parse HEAD) | Select-Object -First 1
+        $tracking18 = (& git rev-parse origin/master) | Select-Object -First 1
+        $lsremote18 = (& git ls-remote origin master) 2>&1 | Select-Object -First 1
+        $lsremote18 = ($lsremote18 -split '\s+')[0]
+        $staged18 = Get-StagedPaths -RepoRoot $repo17
+        $unstaged18 = Get-UnstagedPaths -RepoRoot $repo17
+        Pop-Location
+        Assert-Condition 'T18' {
+            $t18Result.ExitCode -eq 0 -and
+            $t18Result.Checkpoint -eq 'FINAL_VERIFY_COMPLETE' -and
+            $head18 -eq $head17 -and
+            $tracking18 -eq $head17 -and
+            $lsremote18 -eq $head17 -and
+            $staged18.Count -eq 0 -and
+            $unstaged18.Count -eq 0 -and
+            $rowPointsTo1234567
+        } "FinalVerify against Commit B: EXIT=0, FINAL_VERIFY_COMPLETE, triple alignment HEAD=origin/ls-remote=CommitB, clean tree, row still 1234567"
 
         # T19: FinalVerify succeeds on clean triple alignment
         Write-Host "`nT19-T22: Edge case tests"

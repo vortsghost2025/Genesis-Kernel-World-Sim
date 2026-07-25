@@ -30,6 +30,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Exit code constants (must precede PathJson decode for error handling)
+$script:ExitCodeGreen = 0
+$script:ExitCodeYellow = 1
+$script:ExitCodeRed = 2
+
 # Reconstruct Path array from Base64 JSON if provided (preserves array across process boundary)
 if ($PathJson) {
     try {
@@ -45,10 +50,6 @@ if ($PathJson) {
 # ---------------------------------------------------------------------------
 # Constants and helpers
 # ---------------------------------------------------------------------------
-
-$script:ExitCodeGreen = 0
-$script:ExitCodeYellow = 1
-$script:ExitCodeRed = 2
 
 function Write-CheckLine {
     param([string]$Level, [string]$Check, [string]$Result)
@@ -1036,7 +1037,7 @@ function Invoke-SelfTest {
         Assert-Condition -Name 'T15-akia-form-red' -Test { $test15Exit -eq 2 } -Description "exit=$test15Exit (expected 2=RED for AKIA-form key)"
         Remove-Item -LiteralPath $test15File -Force
 
-        # Test 16: PathJson array preservation => GREEN with multiple paths
+        # Test 16: PathJson array preservation => exact GREEN with multiple paths, two files processed, no positional-parameter error
         Write-Host "`n[Test 16] PathJson array preserves multiple paths"
         $authFile1 = Join-Path $repoDir 'auth1.txt'
         $authFile2 = Join-Path $repoDir 'auth2.txt'
@@ -1046,9 +1047,22 @@ function Invoke-SelfTest {
         $pathJson = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($pathArray | ConvertTo-Json -Compress)))
         $jsonResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson $pathJson 2>&1)
         $jsonExit = $LASTEXITCODE
-        Assert-Condition -Name 'T16-pathjson-multi' -Test { $jsonExit -ne 2 } -Description "exit=$jsonExit (expected non-RED with PathJson array)"
+        $jsonText = $jsonResult -join "`n"
+        Assert-Condition -Name 'T16-pathjson-multi-exit' -Test { $jsonExit -eq 0 } -Description "exit=$jsonExit (expected exact GREEN 0)"
+        Assert-Condition -Name 'T16-pathjson-multi-files' -Test { $jsonText -match 'selected 2 file\(s\) via explicit -Path' } -Description "exactly two files selected via PathJson"
+        Assert-Condition -Name 'T16-pathjson-no-posparam-error' -Test { -not $jsonText.Contains('positional parameter cannot be found') } -Description "no positional-parameter error"
+        Assert-Condition -Name 'T16-pathjson-clean' -Test { $jsonText -match 'FINAL STATE: GREEN' -and $jsonText -notmatch 'ERROR:' } -Description "clean GREEN, no unexpected RED"
         Remove-Item -LiteralPath $authFile1 -Force
         Remove-Item -LiteralPath $authFile2 -Force
+
+        # Test 17: Malformed PathJson => exact RED (exit 2), no uninitialized-variable error
+        Write-Host "`n[Test 17] Malformed PathJson exits RED"
+        $badJsonResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson 'not-base64!' 2>&1)
+        $badJsonExit = $LASTEXITCODE
+        $badJsonText = $badJsonResult -join "`n"
+        Assert-Condition -Name 'T17-pathjson-malformed-exit' -Test { $badJsonExit -eq 2 } -Description "exit=$badJsonExit (expected exact RED 2)"
+        Assert-Condition -Name 'T17-pathjson-malformed-message' -Test { $badJsonText -match 'Failed to decode -PathJson' } -Description "prints decoding error"
+        Assert-Condition -Name 'T17-pathjson-malformed-no-crash' -Test { -not $badJsonText.Contains('ExitCodeRed') -and -not $badJsonText.Contains('variable') } -Description "no uninitialized-variable or raw constant leak"
 
         # Cleanup: remove any leftovers from tests
         Get-ChildItem -LiteralPath $repoDir -File | Where-Object { $_.Name -ne 'README.md' -and $_.Name -ne 'verify_repo_state.ps1' } | Remove-Item -Force -ErrorAction SilentlyContinue
