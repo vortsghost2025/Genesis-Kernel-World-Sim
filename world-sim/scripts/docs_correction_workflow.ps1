@@ -281,12 +281,15 @@ function Invoke-Verifier {
         return $script:ExitCodeRed
     }
     $allowDirtyArg = if ($AllowDirty) { '-AllowDirty' } else { '' }
-    $pathArgs = @()
-    foreach ($p in $Path) { $pathArgs += $p }
+    # Serialize Path array to Base64 JSON to preserve array structure across process boundary
+    $pathJson = ''
+    if ($Path.Count -gt 0) {
+        $pathJson = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($Path | ConvertTo-Json -Compress)))
+    }
     $argList = @('-NoProfile','-File',$helper,'-ExpectedSha',$ExpectedSha,'-Remote',$Remote,'-Branch',$Branch)
-    if ($pathArgs.Count -gt 0) {
-        $argList += '-Path'
-        $argList += $pathArgs
+    if ($pathJson) {
+        $argList += '-PathJson'
+        $argList += $pathJson
     }
     if ($AllowDirty) { $argList += '-AllowDirty' }
     & pwsh @argList 2>&1 | ForEach-Object { Write-Host $_ }
@@ -752,9 +755,10 @@ function Action-SyncDryRun {
     }
 
     $resolvedIndex = $IndexPath
-    if (-not (Test-Path -LiteralPath $resolvedIndex -PathType Leaf)) {
-        $resolvedIndex = Join-Path $repoRoot $IndexPath
+    if (-not [System.IO.Path]::IsPathRooted($resolvedIndex)) {
+        $resolvedIndex = Join-Path $repoRoot $resolvedIndex
     }
+    $resolvedIndex = [System.IO.Path]::GetFullPath($resolvedIndex)
     if (-not (Test-Path -LiteralPath $resolvedIndex -PathType Leaf)) {
         Write-Host "ERROR: IndexPath not found: $IndexPath" -ForegroundColor Red
         $staged = Get-StagedPaths -RepoRoot $repoRoot
@@ -847,9 +851,10 @@ function Action-SyncApply {
     }
 
     $resolvedIndex = $IndexPath
-    if (-not (Test-Path -LiteralPath $resolvedIndex -PathType Leaf)) {
-        $resolvedIndex = Join-Path $repoRoot $IndexPath
+    if (-not [System.IO.Path]::IsPathRooted($resolvedIndex)) {
+        $resolvedIndex = Join-Path $repoRoot $resolvedIndex
     }
+    $resolvedIndex = [System.IO.Path]::GetFullPath($resolvedIndex)
     if (-not (Test-Path -LiteralPath $resolvedIndex -PathType Leaf)) {
         Write-Host "ERROR: IndexPath not found: $IndexPath" -ForegroundColor Red
         $staged = Get-StagedPaths -RepoRoot $repoRoot
@@ -1611,7 +1616,7 @@ function Run-SelfTest {
         Pop-Location
         Assert-Condition 'T11' { $t11Result.ExitCode -eq 0 -and $head11 -eq $tracking11 -and $head11 -eq $lsr11sha } "Prompted PUSH pushes Commit A and triple-aligns"
 
-        # T12: SyncDryRun changes zero bytes and reports APPLIED:false
+        # T12: SyncDryRun changes zero bytes and reports APPLIED:false with relative public Path
         Write-Host "`nT12-T15: SyncDryRun and SyncApply tests"
         $repo12 = Join-Path $tempDir 'repo12'
         New-TempGitRepo $repo12
@@ -1627,14 +1632,16 @@ function Run-SelfTest {
         $queue12 = New-Object System.Collections.Generic.Queue[string]
         $null = $queue12.Enqueue('IGNORE')
         $provider12 = Get-QueueProvider -Queue $queue12
+        $before12 = [System.IO.File]::ReadAllBytes($idx12)
+        $before12Hash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData($before12)).Replace('-', '').ToLowerInvariant()
         Push-Location $repo12
-        $t12Result = Invoke-Dispatcher -Action 'SyncDryRun' -Path $idx12 -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha12 -Branch master -Remote origin -ConfirmProvider $provider12
+        $t12Result = Invoke-Dispatcher -Action 'SyncDryRun' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha12 -Branch master -Remote origin -ConfirmProvider $provider12
         Pop-Location
-        $beforeHash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData([System.IO.File]::ReadAllBytes($idx12))).Replace('-', '').ToLowerInvariant()
-        $afterHash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData([System.IO.File]::ReadAllBytes($idx12))).Replace('-', '').ToLowerInvariant()
-        Assert-Condition 'T12' { $t12Result.ExitCode -eq 0 -and $beforeHash -eq $afterHash -and $t12Result.Checkpoint -eq 'SYNC_DRY_RUN_COMPLETE' } "SyncDryRun changes zero bytes and reports APPLIED:false"
+        $after12 = [System.IO.File]::ReadAllBytes($idx12)
+        $after12Hash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData($after12)).Replace('-', '').ToLowerInvariant()
+        Assert-Condition 'T12' { $t12Result.ExitCode -eq 0 -and $before12Hash -eq $after12Hash -and $t12Result.Checkpoint -eq 'SYNC_DRY_RUN_COMPLETE' } "SyncDryRun changes zero bytes and reports APPLIED:false with relative public Path"
 
-        # T13: APPLY decline changes zero bytes
+        # T13: APPLY decline changes zero bytes with relative public Path
         $repo13 = Join-Path $tempDir 'repo13'
         New-TempGitRepo $repo13
         $idx13 = Join-Path $repo13 'world-sim/docs/phase_index.md'
@@ -1649,14 +1656,14 @@ function Run-SelfTest {
         $queue13 = New-Object System.Collections.Generic.Queue[string]
         $null = $queue13.Enqueue('WRONG')
         $provider13 = Get-QueueProvider -Queue $queue13
-        Push-Location $repo13
-        $t13Result = Invoke-Dispatcher -Action 'SyncApply' -Path $idx13 -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha13 -Branch master -Remote origin -ConfirmProvider $provider13
-        Pop-Location
         $hash13before = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData([System.IO.File]::ReadAllBytes($idx13))).Replace('-', '').ToLowerInvariant()
+        Push-Location $repo13
+        $t13Result = Invoke-Dispatcher -Action 'SyncApply' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha13 -Branch master -Remote origin -ConfirmProvider $provider13
+        Pop-Location
         $hash13after = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData([System.IO.File]::ReadAllBytes($idx13))).Replace('-', '').ToLowerInvariant()
-        Assert-Condition 'T13' { $t13Result.ExitCode -eq 0 -and $hash13before -eq $hash13after } "APPLY decline changes zero bytes"
+        Assert-Condition 'T13' { $t13Result.ExitCode -eq 0 -and $hash13before -eq $hash13after } "APPLY decline changes zero bytes with relative public Path"
 
-        # T14: SyncApply changes exactly seven bytes in one Commit cell
+        # T14: SyncApply changes exactly seven bytes in one Commit cell with relative public Path
         $repo14 = Join-Path $tempDir 'repo14'
         New-TempGitRepo $repo14
         $idx14 = Join-Path $repo14 'world-sim/docs/phase_index.md'
@@ -1673,7 +1680,7 @@ function Run-SelfTest {
         $provider14 = Get-QueueProvider -Queue $queue14
         $before14 = [System.IO.File]::ReadAllBytes($idx14)
         Push-Location $repo14
-        $t14Result = Invoke-Dispatcher -Action 'SyncApply' -Path $idx14 -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha14 -Branch master -Remote origin -ConfirmProvider $provider14
+        $t14Result = Invoke-Dispatcher -Action 'SyncApply' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha14 -Branch master -Remote origin -ConfirmProvider $provider14
         Pop-Location
         $after14 = [System.IO.File]::ReadAllBytes($idx14)
         $diff14 = 0
@@ -1682,7 +1689,12 @@ function Run-SelfTest {
             $a = if ($i -lt $after14.Length) { $after14[$i] } else { -1 }
             if ($b -ne $a) { $diff14++ }
         }
-        Assert-Condition 'T14' { $t14Result.ExitCode -eq 0 -and $diff14 -eq 7 -and $t14Result -match 'POINTER_APPLIED_COMMIT_B_PENDING' } "SyncApply changes exactly seven bytes in one Commit cell"
+        Push-Location $repo14
+        $staged14 = Get-StagedPaths -RepoRoot $repo14
+        $unstaged14 = Get-UnstagedPaths -RepoRoot $repo14
+        Pop-Location
+        $rowContains1234567 = [System.IO.File]::ReadAllText($idx14, [System.Text.UTF8Encoding]::new($false)) -match '\| W4 \| Done \| Test \| `1234567` \| Low \| Notes \|'
+        Assert-Condition 'T14' { $t14Result.ExitCode -eq 0 -and $t14Result.Checkpoint -eq 'POINTER_APPLIED_COMMIT_B_PENDING' -and $diff14 -eq 7 -and $staged14.Count -eq 0 -and $unstaged14.Count -eq 1 -and $unstaged14[0] -eq 'world-sim/docs/phase_index.md' -and $rowContains1234567 } "SyncApply changes exactly seven bytes in one Commit cell with relative public Path"
 
         # T15: no-op sync creates no Commit B
         Write-Host "`nT15-T19: CommitIndex and FinalVerify tests"
@@ -1702,7 +1714,7 @@ function Run-SelfTest {
         $null = $queue15.Enqueue('IGNORE')
         $provider15 = Get-QueueProvider -Queue $queue15
         Push-Location $repo15
-        $t15Result = Invoke-Dispatcher -Action 'SyncApply' -Path $idx15 -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha $noopSha -ExpectedSha $sha15 -Branch master -Remote origin -ConfirmProvider $provider15
+        $t15Result = Invoke-Dispatcher -Action 'SyncApply' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha $noopSha -ExpectedSha $sha15 -Branch master -Remote origin -ConfirmProvider $provider15
         Pop-Location
         Push-Location $repo15
         $head15 = (& git rev-parse HEAD) | Select-Object -First 1
@@ -1802,7 +1814,7 @@ function Run-SelfTest {
         $null = $queue20.Enqueue('IGNORE')
         $provider20 = Get-QueueProvider -Queue $queue20
         Push-Location $repo20
-        $t20Result = Invoke-Dispatcher -Action 'SyncApply' -Path $idx20 -PhaseId 'W4' -OldShortSha '0000000' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha20 -Branch master -Remote origin -ConfirmProvider $provider20
+        $t20Result = Invoke-Dispatcher -Action 'SyncApply' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha '0000000' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha20 -Branch master -Remote origin -ConfirmProvider $provider20
         Pop-Location
         Assert-Condition 'T20' { $t20Result.ExitCode -eq 2 } "wrong OldShortSha fails safely"
 
@@ -1822,7 +1834,7 @@ function Run-SelfTest {
         $null = $queue21.Enqueue('IGNORE')
         $provider21 = Get-QueueProvider -Queue $queue21
         Push-Location $repo21
-        $t21Result = Invoke-Dispatcher -Action 'SyncApply' -Path $idx21 -PhaseId 'NOPE' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha21 -Branch master -Remote origin -ConfirmProvider $provider21
+        $t21Result = Invoke-Dispatcher -Action 'SyncApply' -Path 'world-sim/docs/phase_index.md' -PhaseId 'NOPE' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha21 -Branch master -Remote origin -ConfirmProvider $provider21
         Pop-Location
         Assert-Condition 'T21' { $t21Result.ExitCode -eq 2 } "zero phase matches fail safely"
 
@@ -1845,7 +1857,7 @@ function Run-SelfTest {
         $null = $queue22.Enqueue('IGNORE')
         $provider22 = Get-QueueProvider -Queue $queue22
         Push-Location $repo22
-        $t22Result = Invoke-Dispatcher -Action 'SyncDryRun' -Path $idx22 -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha22 -Branch master -Remote origin -ConfirmProvider $provider22
+        $t22Result = Invoke-Dispatcher -Action 'SyncDryRun' -Path 'world-sim/docs/phase_index.md' -PhaseId 'W4' -OldShortSha 'abcdef1' -NewFullSha '1234567890123456789012345678901234567890' -ExpectedSha $sha22 -Branch master -Remote origin -ConfirmProvider $provider22
         Pop-Location
         $bytes22after = [System.IO.File]::ReadAllBytes($idx22)
         $bytes22diff = 0

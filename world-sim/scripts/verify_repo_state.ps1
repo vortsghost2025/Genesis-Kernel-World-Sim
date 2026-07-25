@@ -18,6 +18,7 @@ param(
     [string]$Remote = 'origin',
     [string]$Branch = 'master',
     [string[]]$Path,
+    [string]$PathJson,
     [switch]$AllTracked,
     [switch]$AllowDirty,
     [switch]$SkipDiffCheck,
@@ -28,6 +29,18 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Reconstruct Path array from Base64 JSON if provided (preserves array across process boundary)
+if ($PathJson) {
+    try {
+        $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PathJson))
+        $Path = $decoded | ConvertFrom-Json
+        if ($null -eq $Path -or $Path.Count -eq 0) { $Path = @() }
+    } catch {
+        Write-Host "ERROR: Failed to decode -PathJson: $($_.Exception.Message)" -ForegroundColor Red
+        exit $script:ExitCodeRed
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Constants and helpers
@@ -1022,6 +1035,20 @@ function Invoke-SelfTest {
         $test15Exit = $LASTEXITCODE
         Assert-Condition -Name 'T15-akia-form-red' -Test { $test15Exit -eq 2 } -Description "exit=$test15Exit (expected 2=RED for AKIA-form key)"
         Remove-Item -LiteralPath $test15File -Force
+
+        # Test 16: PathJson array preservation => GREEN with multiple paths
+        Write-Host "`n[Test 16] PathJson array preserves multiple paths"
+        $authFile1 = Join-Path $repoDir 'auth1.txt'
+        $authFile2 = Join-Path $repoDir 'auth2.txt'
+        [System.IO.File]::WriteAllText($authFile1, "auth1`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($authFile2, "auth2`n", [System.Text.UTF8Encoding]::new($false))
+        $pathArray = @('auth1.txt','auth2.txt')
+        $pathJson = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($pathArray | ConvertTo-Json -Compress)))
+        $jsonResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson $pathJson 2>&1)
+        $jsonExit = $LASTEXITCODE
+        Assert-Condition -Name 'T16-pathjson-multi' -Test { $jsonExit -ne 2 } -Description "exit=$jsonExit (expected non-RED with PathJson array)"
+        Remove-Item -LiteralPath $authFile1 -Force
+        Remove-Item -LiteralPath $authFile2 -Force
 
         # Cleanup: remove any leftovers from tests
         Get-ChildItem -LiteralPath $repoDir -File | Where-Object { $_.Name -ne 'README.md' -and $_.Name -ne 'verify_repo_state.ps1' } | Remove-Item -Force -ErrorAction SilentlyContinue
