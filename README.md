@@ -4,9 +4,9 @@ Genesis Kernel World Sim is a proof-of-concept for applying Rosetta Stone's self
 
 The current milestone is not autonomous civilization yet. It is the verified epistemic kernel that prevents known multi-agent failure modes before autonomy is turned loose.
 
-A civilization-simulation kernel that models persistent agents, their perceptions, memories, actions, and the evidence-backed world events they produce.
+A civilization-simulation kernel designed to model persistent agents, their perceptions, memories, actions, and the evidence-backed world events they produce.
 
-This project is a **simulation engine**, not a real-world claim. The founding agents — Adam and Eve — are simulation entities with canonical identities, continuity across cycles, and bounded perception. They are not religious figures, real-world authorities, or conscious beings.
+This project is a **simulation engine**, not a real-world claim. The founding agents — Adam and Eve — are simulation entities with canonical identity and continuity contracts and bounded perception; they are not religious figures, real-world authorities, or conscious beings. No persistent autonomous First Pair runtime is currently active.
 
 ## Core Principle
 
@@ -105,11 +105,39 @@ The ledger and mapper are currently **pure modules** — they can be imported, t
 
 Each rung of the ladder is a pure module: it consumes the previous rung's output and produces a deterministic, sanitized, replayable artifact. No rung performs true map lookup, route planning, route-intent creation/revalidation, movement execution, runtime/daemon/scheduler/provider/Docker/network activity, or `world-sim/data` access.
 
+## First Pair Preflight Lane
+
+The First Pair work is presented separately from the compact Public Phase
+Ladder above.
+
+- 10IC — First Pair Birth Candidate Heartbeat (Done)
+- 10ID — First Pair Habitat Boundary (Done)
+- 10IE — First Pair Memory Boundary (Done)
+- 10IF — First Pair Preflight Authorization Spec (Done)
+- 10IG — First Pair Provenance Commitment Validation and Agent-ID Binding
+  Spec (Done)
+- 10IH — First Pair Rollback Anchor Envelope Format and Validation Spec
+  (Done)
+
+10IC through 10IE are pure in-memory boundaries. 10IF through 10IH are
+docs-only authorization, correction, and format specifications. All six are
+complete and pushed to origin/master, but they do not create persistent
+autonomous NPCs, authorize First Pair creation, or start a live runtime.
+Gate-7 remains closed, 10CP remains the sole world-state/ledger writer, 10HD
+remains named-only, and FIRST_PAIR_CREATION_AUTHORIZED = False.
+
 ## Current Status
 
-The public stack now reaches Phase 10BL, the shared public known tile IDs set equality contract (10AS was the two-agent public merge; 10AU was the shared public anchor contract; 10AW was the shared public route destination contract; 10AY was the shared public snapshot hash equality contract; 10AZ through 10BK added scalar public equality contracts, 10BL closes the current 10AS equality ladder with set equality, Phase 10BM — Public Ladder Reassessment & Runtime Wiring Readiness Gate (`world-sim/docs/phase_10bm_public_ladder_reassessment_readiness_gate_spec.md`) establishes the readiness gate that any future rung must satisfy without crossing into same map knowledge, exploration, observation-event, co-presence, route/path/destination/timing/plan, or relationship inference, Phase 10BN — Public Observation Depth Boundary Contract (`world-sim/docs/phase_10bn_public_observation_depth_boundary_contract_spec.md`) introduces a new dimension (observation depth) but does not create an equality rung and does not reopen any 10AS bundle scalar, and Phase 10BO — Post-10BN Depth Surface Readiness Audit (`world-sim/docs/phase_10bo_post_10bn_depth_surface_readiness_audit_spec.md`) closes the depth surface at 10BN unless a future rung introduces a new non-comparative dimension beyond depth).
+The repository phase index is current through 10IH. After the compact Public
+Phase Ladder shown above, the completed inert runtime-governance and
+reporting sequence continues through 10HC; the completed First Pair
+preflight lane is 10IC through 10IH. 10II has not started. None of this
+authorizes a persistent autonomous First Pair runtime. Gate-7 remains
+closed, 10CP remains the sole world-state/ledger writer, 10HD remains
+named-only, and FIRST_PAIR_CREATION_AUTHORIZED = False.
 
-Completed locally (mixed pure modules and harness proof):
+Implemented or documented on master (mixed pure modules, harness proof, and
+specifications):
 - 10K: pure world event ledger
 - 10L: pure candidate event mapper
 - 10T: pure event verifier
@@ -232,6 +260,14 @@ Completed locally (mixed pure modules and harness proof):
 - 10GX: Minimal Inert Model Routing Authorization Report Status Verification Verifier Status Verification Verifier Status Verification Verifier Status Reporter - implements only the 10GV-authorized candidate as a pure read-only, in-process, caller-driven meta-meta-verifier over one exact caller-supplied 38-field 10GR.1 meta-verification report dict; validates strict built-in types, exact meta/verification/status/identity/claim-boundary coupling, all seven gate flags False, and the complete immediate 10GR decision ID from all 37 other source fields; treats 10GL/10GF/10FZ/10FT/approval/lane/provider/model identities as opaque syntax-checked contract values; emits an exact compact safe 42-field 10GX.1 report whose own decision ID commits to all 41 other output fields; verified_authorized_verification_status produces verified_authorized_meta_verification_status/ok=True, verified_not_authorized_verification_status produces verified_not_authorized_meta_verification_status/ok=True, malformed/tampered input collapses to generic invalid_meta_verification_report/ok=False; strict deterministic exporter reconstructs the immediate 10GR material to prevent source-ID rebinding but never recomputes 10GL or deeper IDs; no 10GR/10GL/10GF/10FZ/10FT/10FN/10CP/backend import or call and no provider/model/config/agent/file/process/network/runtime/data access or mutation; targeted tests 408 passed, optional regressions 10GR 362, 10GL 307, 10GF 298, 10FZ 337, 10FT 238, 10FN 184; CI pure-test list includes 10GX; recursion attests only artifact-integrity-of-10GR.1, not new governance authority; 10CP remains the sole writer; gate-7 stays closed
 - 10GZ: Post-10GX Runtime Boundary Audit - docs-only audit confirming the pushed 10GX (`115ac48`) plus 10GY sync (`58895eb`) plus 10GY hash correction (`ad79ec5`) satisfy the 10GV-authorized boundary; 10GX implements only the single 10GV candidate, is pure read-only/in-process/caller-driven over one exact caller-supplied 38-field 10GR.1 meta-verification report dict, has no path parameter and reads no file (no open/pathlib/os file I/O; forbidden-token scan clean), performs no directory scan/walk/glob/list/inspection, does not import or call any backend/provider/model/config/agent/proof-chain module (imports limited to `__future__/hashlib/json/typing`, AST-confirmed), performs no write/append/overwrite/truncate/delete/rename/repair/directory creation, validates the exact 38-field source and 42-field output envelopes with detached list snapshots and recomputes only the source 10GR decision ID from safe 37-field material and its own 10GX decision ID from safe 41-field output material (treating opaque 10GL/10GF/10FZ/10FT/approval/lane/provider/model decision IDs as syntax-checked identifiers, not recomputed), never emits secrets/tokens/raw config/equality values/raw source detail, keeps all runtime/daemon/scheduler/network/world-data/gate-7 flags False in its 42-field envelope, keeps gate-7 closed, touches no production world-sim/data, and never promotes results into runtime/world state or creates movement/map/route execution/event/NPC/social/timing behavior; verified_authorized_verification_status produces verified_authorized_meta_verification_status/ok=True while verified_not_authorized_verification_status produces verified_not_authorized_meta_verification_status/ok=True and malformed/tampered input collapses to sanitized invalid_meta_verification_report/ok=False; TOCTOU snapshot-first ordering and list-detach fixes locked by the 408-test suite (incl. static AST snapshot-order and immediate-list-detach tests plus hostile-subclass, tainted-artifact, computed-subscript dynamic-lookup guards, public-input assignment/delete mutation guards, and allowlisted-call-shape AST rules); fresh bounded regression evidence (408 targeted + 362 10GR + 307 10GL + 298 10GF + 337 10FZ + 238 10FT + 184 10FN + compileall clean + forbidden-token scan clean)
 - 10HB: Next Runtime Boundary Candidate Spec - docs-only spec naming the single next authorized candidate 10HD (Minimal Inert Model Routing Authorization Report Status Verification Verifier Status Verification Verifier Status Verification Verifier Status Verification Verifier Status Reporter, identity proposed for operator confirmation); does not implement it; 10HD consumes only a caller-supplied 10GX.1 meta-meta-verification report dict (the safe 42-field output of create_minimal_inert_model_routing_authorization_report_status_verification_verifier_status_verification_verifier_status_verification_verifier_status_report / export_minimal_inert_model_routing_authorization_report_status_verification_verifier_status_verification_verifier_status_verification_verifier_status_report), has no default ledger/config path, does not read a file, does not call any provider/model/agent-launch/backend module, performs no runtime execution/model invocation/provider call/config mutation/agent launching, does not scan world-sim/data, independently validates the exact 42-field 10GX.1 envelope and recomputes only the 10GX meta-meta-verification decision ID (treating any source meta-verification, source verification, source status-report, source authorization/provenance/policy/approval, lane, provider, and model decision IDs as opaque, not recomputed), never reads/emits secrets/tokens/raw config/equality values, never promotes results into runtime/world state, never creates movement/map/route execution/event/NPC behavior, keeps all runtime/daemon/scheduler/network/world-data/gate-7 flags False, gate-7 closed by absence; 10HB only names 10HD as a meta-meta-meta-verifier layered over the already-safe 10GX.1 meta-meta-verification output (NOT a routing executor, NOT an approval re-authorizer, NOT a recursive authorization/verification verifier re-deriving source approval, and NOT a recursive verifier re-deriving the 10GR meta-verification report or the 10GL verification report or the 10GF status report; it recomputes only the 10GX decision ID from safe 10GX.1 material, treating all deeper source IDs as opaque); the proof-chain branch is closed at 10FN, the provenance branch through 10FW, the approval-authorization branch through 10GC, the status-report branch through 10GI, the status-verification branch through 10GN (over 10GL), the meta-verification branch through 10GU (over 10GR), and the meta-meta-verification branch through 10HA (over 10GX); 10HD implementation later requires GPT-5.6 Sol/Luna plus operator approval; 10HC will be the 10HB metadata sync
+
+First Pair preflight evidence (pushed to origin/master):
+- 10IC: First Pair Birth Candidate Heartbeat (Done) — pure in-memory Adam/Eve birth candidate and observation-only heartbeat verifier; validates provenance_commitment hex64 shape, deterministic agent_id derivation, fail-closed identity drift; 75 targeted tests, 107 bounded regression; no runtime/persistence/network/provider/model/daemon/scheduler/Docker/world-sim/data; gate-7 closed; 10CP sole writer; 10HD named-only; commit `2e1d189`
+- 10ID: First Pair Habitat Boundary (Done) — pure in-memory habitat boundary associating authorized 10IC birth candidate with bounded habitat declaration; validates identity/habitat inputs, rejects duplicates/OOB/bool-as-int/non-string/unknown; fog-of-war preserved; 35 targeted tests, 142 bounded regression; gate-7 closed; commit `c5b0656`
+- 10IE: First Pair Memory Boundary (Done) — pure in-memory memory boundary associating verified 10ID habitat boundary with agent-scoped Adam/Eve memory-reference lists; validates boundary + memory refs, rejects cross-agent/hidden/private leakage; 82 targeted tests, 225 bounded regression; gate-7 closed; commit `f5bfa21`
+- 10IF: First Pair Preflight Authorization Spec (Done) — docs-only authorization gate consolidating all six First Pair preflight specs; confirms FIRST_PAIR_CREATION_AUTHORIZED = False; gate-7 closed; commit `ae0dce5`
+- 10IG: First Pair Provenance Commitment Validation and Agent-ID Binding Spec (Done) — docs-only correction documenting the provenance_commitment validation and agent_id derivation enforced by 10IC; gate-7 closed; commit `c4bc015`
+- 10IH: First Pair Rollback Anchor Envelope Format and Validation Spec (Done) — docs-only spec documenting the rollback_anchor envelope format and validation rules enforced by 10IC; gate-7 closed; commit `f3317e1`
 
 Documentation/spec phases:
 - 10M: public README and phase index
