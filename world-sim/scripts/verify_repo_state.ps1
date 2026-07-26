@@ -411,7 +411,7 @@ function Invoke-CredentialScan {
 # ---------------------------------------------------------------------------
 
 function Get-PorcelainStatus {
-    $output = Invoke-GitSafe -Arguments @('status', '--porcelain=v1')
+    $output = Invoke-GitSafe -Arguments @('status', '--porcelain=v1', '--untracked-files=all')
     $entries = @()
     foreach ($line in $output) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -573,22 +573,7 @@ function Invoke-RepoStateCheck {
         $unauthorized = @()
         foreach ($e in $entries) {
             if (-not (Test-PathAuthorized -Candidate $e.FilePath -Authorized $Path)) {
-                # Allow untracked directory entries (ending with /) if they contain authorized files
-                $isDirEntry = $e.FilePath.EndsWith('/')
-                $containsAuthorized = $false
-                if ($isDirEntry) {
-                    $dirPrefix = $e.FilePath.TrimEnd('/')
-                    foreach ($auth in $Path) {
-                        $authNorm = Normalize-RepoRelativePath -Value ($auth -replace '\\', '/')
-                        if ($authNorm.StartsWith($dirPrefix + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
-                            $containsAuthorized = $true
-                            break
-                        }
-                    }
-                }
-                if (-not $containsAuthorized) {
-                    $unauthorized += $e.FilePath
-                }
+                $unauthorized += $e.FilePath
             }
         }
         if ($unauthorized.Count -gt 0) {
@@ -1112,6 +1097,35 @@ function Invoke-SelfTest {
         Assert-Condition -Name 'T18-hidden-path-no-posparam' -Test { -not $t18Text.Contains('positional parameter cannot be found') } -Description "no positional-parameter error"
         Remove-Item -LiteralPath $permFile -Force
         Remove-Item -LiteralPath $hiddenDir -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Test 19: Untracked sibling rejection — authorized .kilo/command/permission-test.md but unauthorized .kilo/command/unauthorized-sibling.md
+        Write-Host "`n[Test 19] Untracked sibling rejection in same hidden directory"
+        $hiddenDir19 = Join-Path $repoDir '.kilo/command'
+        $null = New-Item -ItemType Directory -Path $hiddenDir19 -Force
+        $authFile19 = Join-Path $hiddenDir19 'permission-test.md'
+        $unauthFile19 = Join-Path $hiddenDir19 'unauthorized-sibling.md'
+        [System.IO.File]::WriteAllText($authFile19, "Do not collapse into generic ask-permission mode.`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($unauthFile19, "Harmless documentation content.`n", [System.Text.UTF8Encoding]::new($false))
+        $pathArray19 = @('.kilo/command/permission-test.md')
+        $pathJson19 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($pathArray19 | ConvertTo-Json -Compress)))
+        $t19aResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson $pathJson19 2>&1)
+        $t19aExit = $LASTEXITCODE
+        $t19aText = $t19aResult -join "`n"
+        Assert-Condition -Name 'T19-sibling-red-exit' -Test { $t19aExit -eq 2 } -Description "exit=$t19aExit (expected exact RED 2 for unauthorized sibling)"
+        Assert-Condition -Name 'T19-sibling-red-state' -Test { $t19aText -match 'FINAL STATE: RED' } -Description "FINAL STATE: RED"
+        Assert-Condition -Name 'T19-sibling-exact-unauth' -Test { $t19aText -match '\.kilo/command/unauthorized-sibling\.md' } -Description "exact unauthorized sibling path reported"
+        Assert-Condition -Name 'T19-sibling-no-collapse' -Test { $t19aText -match 'unauthorized changed paths: \.kilo/command/unauthorized-sibling\.md' } -Description "unauthorized path reported at file level, not collapsed to directory"
+        Assert-Condition -Name 'T19-sibling-no-cred-false' -Test { -not ($t19aText -match 'credential-shaped match —') } -Description "no credential-shaped false positive"
+        Assert-Condition -Name 'T19-sibling-no-posparam' -Test { -not $t19aText.Contains('positional parameter cannot be found') } -Description "no positional-parameter error"
+        Remove-Item -LiteralPath $unauthFile19 -Force
+        $t19bResult = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson $pathJson19 2>&1)
+        $t19bExit = $LASTEXITCODE
+        $t19bText = $t19bResult -join "`n"
+        Assert-Condition -Name 'T19-sibling-green-exit' -Test { $t19bExit -eq 0 } -Description "exit=$t19bExit (expected exact GREEN 0 after sibling removed)"
+        Assert-Condition -Name 'T19-sibling-green-state' -Test { $t19bText -match 'FINAL STATE: GREEN' } -Description "FINAL STATE: GREEN"
+        Assert-Condition -Name 'T19-sibling-green-no-unauth' -Test { -not ($t19bText -match 'unauthorized') } -Description "no unauthorized-path failure after cleanup"
+        Remove-Item -LiteralPath $authFile19 -Force
+        Remove-Item -LiteralPath $hiddenDir19 -Recurse -Force -ErrorAction SilentlyContinue
 
         # Cleanup: remove any leftovers from tests
         Get-ChildItem -LiteralPath $repoDir -File | Where-Object { $_.Name -ne 'README.md' -and $_.Name -ne 'verify_repo_state.ps1' } | Remove-Item -Force -ErrorAction SilentlyContinue
