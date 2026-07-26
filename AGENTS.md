@@ -82,6 +82,34 @@ Before producing output following a context reset:
 
 ---
 
+## Documentation-Correction Routing (W4 proven path)
+
+For an authorized repository documentation or instruction-file correction,
+use `world-sim/scripts/docs_correction_workflow.ps1`. Use
+`world-sim/docs/docs_correction_runbook.md` only as the manual fallback.
+
+- Run with `pwsh -NoProfile`, never Windows PowerShell 5.1.
+- Follow `InspectDocs` → human content review → `CommitDocs` (Commit A).
+- Run `SyncDryRun` → `SyncApply` → `CommitIndex` (Commit B) only when an
+  existing phase row actually requires pointer synchronization.
+- Commit A never includes `world-sim/docs/phase_index.md`. `SyncApply`
+  leaves that file unstaged; `CommitIndex` alone owns its staging.
+- `Manual` is the default `PushMode`. An exact manual `git push` is allowed
+  only after the coordinator returns the corresponding
+  `*_PUSH_PENDING` checkpoint.
+- Preserve every `Read-Host` boundary. Enter `CONTENT-REVIEWED`, `STAGE`,
+  `COMMIT`, `APPLY`, or `PUSH` only after its named evidence has been
+  reviewed and explicitly authorized.
+- Stop on every RED result. Never force-push, amend, reset, revert, rebase,
+  squash, stash, clean, `git add -A`, or `git add .`.
+- Multiple paths passed inside PowerShell use a real string array. The
+  coordinator handles its child-verifier transport internally.
+- Workflow infrastructure W1–W5 is not 10II. Gate-7 remains closed;
+  10CP remains sole world-state/ledger writer; 10HD remains named-only;
+  `FIRST_PAIR_CREATION_AUTHORIZED = False`.
+
+---
+
 ## Self-State Continuity (for Sean)
 
 Auto-compaction is the papers' "complete context loss" and the flattening
