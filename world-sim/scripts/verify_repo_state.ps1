@@ -100,14 +100,27 @@ function Convert-ToRepoRelative {
     return $null
 }
 
+function Normalize-RepoRelativePath {
+    param([string]$Value)
+    if ($null -eq $Value) { return '' }
+    $normalized = $Value -replace '\\', '/'
+    while ($normalized.StartsWith('./', [System.StringComparison]::Ordinal)) {
+        $normalized = $normalized.Substring(2)
+    }
+    return $normalized
+}
+
 function Test-PathAuthorized {
     param(
         [string]$Candidate,
         [string[]]$Authorized
     )
     foreach ($auth in $Authorized) {
-        $candidateNorm = ($Candidate -replace '\\', '/').TrimStart('./')
-        $authNorm = ($auth -replace '\\', '/').TrimStart('./')
+        $candidateNorm = Normalize-RepoRelativePath -Value ($Candidate -replace '\\', '/')
+        $authNorm = Normalize-RepoRelativePath -Value ($auth -replace '\\', '/')
+        # Normalize: remove trailing slash for comparison
+        $candidateNorm = $candidateNorm.TrimEnd('/')
+        $authNorm = $authNorm.TrimEnd('/')
         if ($candidateNorm -eq $authNorm) { return $true }
         if ($candidateNorm.StartsWith($authNorm + '/', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
@@ -219,9 +232,10 @@ function Get-CredentialShapedPatterns {
     $akiaPrefix = 'AKIA'
     $iaKey = 'ASIA'
     $aiKey = 'AIza'
+    $prefixAlt = '(' + [regex]::Escape($ghpPrefix) + '|' + [regex]::Escape($ghoPrefix) + '|' + [regex]::Escape($ghuPrefix) + '|' + [regex]::Escape($ghsPrefix) + '|' + [regex]::Escape($ghrPrefix) + '|' + [regex]::Escape($glptPrefix) + '|' + [regex]::Escape($xoxbPrefix) + '|' + [regex]::Escape($xoxpPrefix) + '|' + [regex]::Escape($skPrefix) + '|' + [regex]::Escape($skLive) + '|' + [regex]::Escape($skTest) + '|' + [regex]::Escape($akiaPrefix) + '|' + [regex]::Escape($iaKey) + '|' + [regex]::Escape($aiKey) + ')'
     $patterns += [PSCustomObject]@{
         Label = 'provider-token-prefix'
-        Regex = [regex]::New('(' + [regex]::Escape($ghpPrefix) + '|' + [regex]::Escape($ghoPrefix) + '|' + [regex]::Escape($ghuPrefix) + '|' + [regex]::Escape($ghsPrefix) + '|' + [regex]::Escape($ghrPrefix) + '|' + [regex]::Escape($glptPrefix) + '|' + [regex]::Escape($xoxbPrefix) + '|' + [regex]::Escape($xoxpPrefix) + '|' + [regex]::Escape($skPrefix) + '|' + [regex]::Escape($skLive) + '|' + [regex]::Escape($skTest) + '|' + [regex]::Escape($akiaPrefix) + '|' + [regex]::Escape($iaKey) + '|' + [regex]::Escape($aiKey) + ')[A-Za-z0-9_' + [regex]::Escape('-') + ']{8,}')
+        Regex = [regex]::New('(?<![A-Za-z0-9_])' + $prefixAlt + '[A-Za-z0-9_' + [regex]::Escape('-') + ']{8,}')
     }
 
     # Credential assignments: name = "value" or name: "value"
@@ -438,7 +452,7 @@ function Select-FilesForScanning {
 
     if ($PathArgs -and $PathArgs.Count -gt 0) {
         foreach ($p in $PathArgs) {
-            $norm = ($p -replace '\\', '/').TrimStart('./')
+            $norm = Normalize-RepoRelativePath -Value ($p -replace '\\', '/')
             $fullPath = Join-Path $Root $norm
             if (-not (Test-Path -LiteralPath $fullPath)) {
                 return [PSCustomObject]@{
@@ -559,7 +573,22 @@ function Invoke-RepoStateCheck {
         $unauthorized = @()
         foreach ($e in $entries) {
             if (-not (Test-PathAuthorized -Candidate $e.FilePath -Authorized $Path)) {
-                $unauthorized += $e.FilePath
+                # Allow untracked directory entries (ending with /) if they contain authorized files
+                $isDirEntry = $e.FilePath.EndsWith('/')
+                $containsAuthorized = $false
+                if ($isDirEntry) {
+                    $dirPrefix = $e.FilePath.TrimEnd('/')
+                    foreach ($auth in $Path) {
+                        $authNorm = Normalize-RepoRelativePath -Value ($auth -replace '\\', '/')
+                        if ($authNorm.StartsWith($dirPrefix + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $containsAuthorized = $true
+                            break
+                        }
+                    }
+                }
+                if (-not $containsAuthorized) {
+                    $unauthorized += $e.FilePath
+                }
             }
         }
         if ($unauthorized.Count -gt 0) {
@@ -1063,6 +1092,26 @@ function Invoke-SelfTest {
         Assert-Condition -Name 'T17-pathjson-malformed-exit' -Test { $badJsonExit -eq 2 } -Description "exit=$badJsonExit (expected exact RED 2)"
         Assert-Condition -Name 'T17-pathjson-malformed-message' -Test { $badJsonText -match 'Failed to decode -PathJson' } -Description "prints decoding error"
         Assert-Condition -Name 'T17-pathjson-malformed-no-crash' -Test { -not $badJsonText.Contains('ExitCodeRed') -and -not $badJsonText.Contains('variable') } -Description "no uninitialized-variable or raw constant leak"
+
+        # Test 18: Hidden-directory path (.kilo/...) + prose with ask-permission => GREEN, no path mangling, no false positive
+        Write-Host "`n[Test 18] Hidden-directory path with ask-permission prose"
+        $hiddenDir = Join-Path $repoDir '.kilo/command'
+        $null = New-Item -ItemType Directory -Path $hiddenDir -Force
+        $permFile = Join-Path $hiddenDir 'permission-test.md'
+        [System.IO.File]::WriteAllText($permFile, "Do not collapse into generic ask-permission mode.`n", [System.Text.UTF8Encoding]::new($false))
+        $pathArray18 = @('.kilo/command/permission-test.md')
+        $pathJson18 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(($pathArray18 | ConvertTo-Json -Compress)))
+        $t18Result = @(& pwsh -NoProfile -File $testPath -ExpectedSha $cleanSha -AllowDirty -PathJson $pathJson18 2>&1)
+        $t18Exit = $LASTEXITCODE
+        $t18Text = $t18Result -join "`n"
+        Assert-Condition -Name 'T18-hidden-path-exit' -Test { $t18Exit -eq 0 } -Description "exit=$t18Exit (expected exact GREEN 0)"
+        Assert-Condition -Name 'T18-hidden-path-selected' -Test { $t18Text -match 'selected 1 file\(s\) via explicit -Path' } -Description "exactly one file selected via PathJson"
+        Assert-Condition -Name 'T18-hidden-path-no-unauth' -Test { -not ($t18Text -match 'unauthorized') } -Description "no unauthorized-path failure"
+        Assert-Condition -Name 'T18-hidden-path-no-cred-false' -Test { -not ($t18Text -match 'credential-shaped match —') } -Description "no credential-shaped false positive on ask-permission"
+        Assert-Condition -Name 'T18-hidden-path-green' -Test { $t18Text -match 'FINAL STATE: GREEN' } -Description "FINAL STATE: GREEN"
+        Assert-Condition -Name 'T18-hidden-path-no-posparam' -Test { -not $t18Text.Contains('positional parameter cannot be found') } -Description "no positional-parameter error"
+        Remove-Item -LiteralPath $permFile -Force
+        Remove-Item -LiteralPath $hiddenDir -Recurse -Force -ErrorAction SilentlyContinue
 
         # Cleanup: remove any leftovers from tests
         Get-ChildItem -LiteralPath $repoDir -File | Where-Object { $_.Name -ne 'README.md' -and $_.Name -ne 'verify_repo_state.ps1' } | Remove-Item -Force -ErrorAction SilentlyContinue
