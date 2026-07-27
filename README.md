@@ -118,23 +118,38 @@ Ladder above.
   Spec (Done)
 - 10IH — First Pair Rollback Anchor Envelope Format and Validation Spec
   (Done)
+- 10II — First Pair Per-Call Write Allow-List Specification (docs-only)
 
-10IC through 10IE are pure in-memory boundaries. 10IF through 10IH are
-docs-only authorization, correction, and format specifications. All six are
-complete and pushed to origin/master, but they do not create persistent
-autonomous NPCs, authorize First Pair creation, or start a live runtime.
-Gate-7 remains closed, 10CP remains the sole world-state/ledger writer, 10HD
-remains named-only, and FIRST_PAIR_CREATION_AUTHORIZED = False.
+10IC through 10IE are pure in-memory boundaries. 10IF through 10II are
+docs-only authorization, correction, format, and write-allow-list
+specifications. 10II defines the per-call First Pair write allow-list
+contract: it enables only sanitized proof references and sanitized
+observe-only evidence references as future candidate categories, with
+operator approval, exact-call binding, validated-chain identity binding,
+and complete validated-chain rollback-anchor binding as mandatory control
+context (never writable payload). Its operative authorization artifact has
+25 fields, with the integrity field committing to the other 24.
+operator_approval_ref is mandatory control context; 10II validates its
+reference shape and claim classification only; independent operator-
+approval artifact verification remains separately governed; structural
+allow-list validation alone does not authorize execution. 10II implements
+no validator or tests, authorizes no write or persistence, and does not
+modify 10CP. 10IJ and 10IK have not started. All of the above do not
+create persistent autonomous NPCs, authorize First Pair creation, or
+start a live runtime. Gate-7 remains closed, 10CP remains the sole
+world-state/ledger writer, 10HD remains named-only, and
+FIRST_PAIR_CREATION_AUTHORIZED = False.
 
 ## Current Status
 
 The repository phase index is current through 10IH. After the compact Public
 Phase Ladder shown above, the completed inert runtime-governance and
-reporting sequence continues through 10HC; the completed First Pair
-preflight lane is 10IC through 10IH. 10II has not started. None of this
-authorizes a persistent autonomous First Pair runtime. Gate-7 remains
-closed, 10CP remains the sole world-state/ledger writer, 10HD remains
-named-only, and FIRST_PAIR_CREATION_AUTHORIZED = False.
+reporting sequence continues through 10HC; the First Pair preflight lane
+is 10IC through 10II, with 10II as a docs-only write-allow-list spec.
+10IJ and 10IK have not started. None of this authorizes a persistent
+autonomous First Pair runtime. Gate-7 remains closed, 10CP remains the
+sole world-state/ledger writer, 10HD remains named-only, and
+FIRST_PAIR_CREATION_AUTHORIZED = False.
 
 Implemented or documented on master (mixed pure modules, harness proof, and
 specifications):
