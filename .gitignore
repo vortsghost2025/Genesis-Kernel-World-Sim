@@ -6,3 +6,4 @@ kilo.jsonc
 .kilo/node_modules/
 .kilo/package-lock.json
 .kilo/package.json
+world-sim/.runtime/
