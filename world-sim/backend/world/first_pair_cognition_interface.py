@@ -12,7 +12,7 @@ I/O, mutation, or external calls.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -34,6 +34,12 @@ class AgentContext:
     habitat_movement_allowed: bool
     previous_action: dict | None
     timestamp_utc: str
+    # Dynamic pair identity (not hard-coded in model module)
+    other_agent_id: str = ""
+    other_agent_name: str = ""
+    other_agent_ref: str = ""
+    # Answered question history for this agent
+    answered_questions: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -15,7 +15,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -27,42 +26,14 @@ if _proj_root not in sys.path:
 
 from backend.world.first_pair_persistence import (
     FirstPairPersistenceStore,
-    get_persistence_root,
     load_goals,
     load_heartbeat_history,
     load_memory,
     list_unanswered_questions,
-    save_questions,
+    mark_question_answered,
     validate_persistence_integrity,
 )
 from backend.world.first_pair_runtime import FirstPairRuntime
-
-
-def _handle_answer(
-    store: FirstPairPersistenceStore,
-    question_id: str,
-    answer_text: str,
-) -> dict:
-    questions = store.load_document("questions.json")
-    if not isinstance(questions, list):
-        sys.exit("error: no questions found in store")
-
-    found = None
-    for i, q in enumerate(questions):
-        if isinstance(q, dict) and q.get("question_id") == question_id:
-            q["status"] = "answered"
-            q["answer"] = answer_text
-            q["answered_at_utc"] = __import__(
-                "datetime"
-            ).datetime.now(__import__("datetime").timezone.utc).isoformat()
-            found = q
-            break
-
-    if found is None:
-        sys.exit(f"error: question {question_id} not found")
-
-    store.save_document("questions.json", questions)
-    return found
 
 
 def main() -> None:
@@ -73,7 +44,7 @@ def main() -> None:
         "--heartbeats",
         type=int,
         default=5,
-        help="Number of heartbeat cycles (default: 5)",
+        help="Number of heartbeat cycles (default: 5; use 0 with --answer)",
     )
     parser.add_argument(
         "--root",
@@ -114,39 +85,63 @@ def main() -> None:
     parser.add_argument(
         "--answer-text",
         type=str,
-        default="",
-        help="Text of the answer to the question specified by --answer",
+        default=None,
+        help="Text of the answer to the question specified by --answer (required with --answer)",
     )
 
     args = parser.parse_args()
+
+    # --answer requires --answer-text
+    if args.answer is not None:
+        if not args.answer_text or not args.answer_text.strip():
+            sys.exit("error: --answer requires non-empty --answer-text")
+    if args.answer_text is not None and args.answer is None:
+        sys.exit("error: --answer-text requires --answer")
+
     heartbeats = args.heartbeats
-    if heartbeats < 1:
-        sys.exit("error: --heartbeats must be a positive integer")
+    if heartbeats < 0:
+        sys.exit("error: --heartbeats must be a non-negative integer")
 
     root: Path | None = Path(args.root) if args.root else None
     export_path: Path | None = Path(args.export) if args.export else None
 
     store = FirstPairPersistenceStore(root)
 
-    # --- handle --answer (run before the main loop) ---
-    if args.answer:
-        result = _handle_answer(store, args.answer, args.answer_text)
-        print(f"Answered: {result['question_id']}")
-        print(f"  Question: {result['question'][:120]}")
-        print(f"  Answer:   {result.get('answer', '')[:120]}")
-
     # --- determine whether we are initialising or resuming ---
+    # (before --answer so state is stable)
     integrity = validate_persistence_integrity(store)
     existing = any(integrity.values())
     state_label = "resumed" if existing else "initialised"
 
-    # --- run the runtime ---
-    runtime = FirstPairRuntime(
-        persistence_root=root,
-        heartbeat_limit=heartbeats,
-        backend=args.backend,
-    )
-    results = runtime.run()
+    # --- handle --answer using the governed persistence operation ---
+    if args.answer:
+        result = mark_question_answered(
+            store, args.answer, args.answer_text.strip(),
+            provenance="operator_script",
+        )
+        if result is None:
+            sys.exit(f"error: question {args.answer} not found in store")
+        print(f"Answered: {result['question_id']}")
+        print(f"  Question: {result.get('question', '')[:120]}")
+        print(f"  Answer:   {result.get('provenance', {}).get('answer', '')[:120]}")
+        print(f"  Status:   {result.get('status', '')}")
+
+    # --- run the runtime only when heartbeats > 0 ---
+    if heartbeats == 0:
+        results = {"heartbeats_completed": 0, "errors": []}
+        runtime = FirstPairRuntime(
+            persistence_root=root,
+            heartbeat_limit=1,
+            backend=args.backend,
+        )
+        runtime._load_or_initialize()
+    else:
+        runtime = FirstPairRuntime(
+            persistence_root=root,
+            heartbeat_limit=heartbeats,
+            backend=args.backend,
+        )
+        results = runtime.run()
 
     # --- gather state ---
     adam_view = runtime._agent_view("east_adam") if runtime._identity_record else {}

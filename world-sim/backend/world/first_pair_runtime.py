@@ -35,6 +35,7 @@ from backend.world.first_pair_persistence import (
     append_heartbeat,
     get_persistence_root,
     initialize_first_pair_state,
+    list_answered_questions_for_agent,
     list_unanswered_questions,
     load_goals,
     load_heartbeat_history,
@@ -52,6 +53,9 @@ _DEFAULT_HEARTBEAT_LIMIT = 10
 _SAFE_OBJECT_ID_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
 )
+_ALLOWED_MUTABLE_FIELDS = frozenset({
+    "public_description", "object_type", "tile_id",
+})
 
 
 def _is_safe_object_id(value: str) -> bool:
@@ -104,12 +108,18 @@ class FirstPairRuntime:
                 "agent_id": self._identity_record.adam_agent_id,
                 "canonical_name": raw["canonical_name"],
                 "canonical_agent_ref": agent_ref,
+                "other_agent_id": self._identity_record.eve_agent_id,
+                "other_agent_name": candidate["eve_identity"]["canonical_name"],
+                "other_agent_ref": "east_eve",
             }
         raw = candidate["eve_identity"]
         return {
             "agent_id": self._identity_record.eve_agent_id,
             "canonical_name": raw["canonical_name"],
             "canonical_agent_ref": agent_ref,
+            "other_agent_id": self._identity_record.adam_agent_id,
+            "other_agent_name": candidate["adam_identity"]["canonical_name"],
+            "other_agent_ref": "east_adam",
         }
 
     # ------------------------------------------------------------------
@@ -162,10 +172,15 @@ class FirstPairRuntime:
         )
 
         agent_goals = [g for g in self._goals if g.agent_id == view["agent_id"]]
-        agent_questions = [
+        agent_pending_questions = [
             q
             for q in self._questions
             if q.asking_agent_id == view["agent_id"] and q.status == "pending"
+        ]
+        agent_answered_questions = [
+            q.__dict__
+            for q in self._questions
+            if q.asking_agent_id == view["agent_id"] and q.status == "answered"
         ]
 
         position = (
@@ -199,12 +214,18 @@ class FirstPairRuntime:
             observation=observation,
             memory=list(memory_list),
             goals=[g.__dict__ for g in agent_goals],
-            unanswered_questions=[q.__dict__ for q in agent_questions],
+            unanswered_questions=[q.__dict__ for q in agent_pending_questions],
             world_public_objects=self._world_state.public_objects,
             habitat_allowed_tiles=self._habitat.get("allowed_tile_ids", []),
             habitat_movement_allowed=self._habitat.get("movement_allowed", False),
             previous_action=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            # Dynamic pair identity
+            other_agent_id=view["other_agent_id"],
+            other_agent_name=view["other_agent_name"],
+            other_agent_ref=view["other_agent_ref"],
+            # Answered questions for this agent
+            answered_questions=agent_answered_questions,
         )
 
     # ------------------------------------------------------------------
@@ -222,13 +243,13 @@ class FirstPairRuntime:
         if action_type == "inspect_public_object":
             return self._execute_inspect_public_object(action)
         if action_type == "modify_owned_public_object":
-            return self._execute_modify_owned_public_object(agent_ref, action)
+            return self._execute_modify_owned_public_object(agent_ref, action, heartbeat_number)
         if action_type == "leave_public_message":
-            return self._execute_leave_public_message(action)
+            return self._execute_leave_public_message(agent_ref, action, heartbeat_number)
         if action_type == "ask_human":
             return self._execute_ask_human(agent_ref, action, heartbeat_number)
         if action_type == "request_capability":
-            return self._execute_request_capability(action)
+            return self._execute_request_capability(agent_ref, action, heartbeat_number)
         return {"status": "unknown_action", "action": action}
 
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
@@ -252,9 +273,7 @@ class FirstPairRuntime:
             }
 
         self._world_state.tile_occupancy[agent_ref] = target
-        self._world_state.tick += 1
-        self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
-        return {"status": "success", "from": current_pos, "to": target, "tick": self._world_state.tick}
+        return {"status": "success", "from": current_pos, "to": target}
 
     def _execute_create_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
@@ -283,13 +302,12 @@ class FirstPairRuntime:
             created_heartbeat=heartbeat_number,
         )
         self._world_state.public_objects[object_id] = record.to_envelope()
-        self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
-
         return {
             "status": "success",
             "object_id": object_id,
             "tile_id": tile_id,
             "object_type": object_type,
+            "sanitized_description": sanitized[:200],
         }
 
     def _execute_inspect_public_object(self, action: dict) -> dict:
@@ -301,7 +319,7 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
         return {"status": "success", "object": obj}
 
-    def _execute_modify_owned_public_object(self, agent_ref: str, action: dict) -> dict:
+    def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
         obj_id = action.get("target_object_id")
         if not obj_id or not isinstance(obj_id, str):
@@ -314,27 +332,52 @@ class FirstPairRuntime:
         modifications = action.get("modifications")
         if not isinstance(modifications, dict):
             return {"status": "rejected", "reason": "Missing or invalid modifications"}
+        applied: dict[str, Any] = {}
         for key, value in modifications.items():
-            if key in ("object_id", "creator_agent_id", "created_heartbeat"):
-                return {"status": "rejected", "reason": f"Cannot modify protected field: {key}"}
-            if isinstance(value, str) and not sanitize_public_text(value).strip():
-                return {"status": "rejected", "reason": f"Empty text after sanitization for {key}"}
-            obj[key] = value
-        obj["modified_heartbeat"] = self._world_state.tick
-        self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
-        return {"status": "success", "object_id": obj_id, "updates": list(modifications.keys())}
+            if key not in _ALLOWED_MUTABLE_FIELDS:
+                return {"status": "rejected", "reason": f"Cannot modify field: {key}"}
+            if isinstance(value, str):
+                sanitized = sanitize_public_text(value)
+                if not sanitized.strip():
+                    return {"status": "rejected", "reason": f"Empty text after sanitization for {key}"}
+                obj[key] = sanitized
+                applied[key] = sanitized
+            else:
+                obj[key] = value
+                applied[key] = value
+        obj["modified_heartbeat"] = heartbeat_number
+        applied["modified_heartbeat"] = heartbeat_number
+        return {
+            "status": "success",
+            "object_id": obj_id,
+            "updates": list(modifications.keys()),
+            "applied_values": applied,
+        }
 
-    def _execute_leave_public_message(self, action: dict) -> dict:
+    def _execute_leave_public_message(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        view = self._agent_view(agent_ref)
         message = action.get("message", "")
         if not isinstance(message, str) or not message.strip():
             return {"status": "rejected", "reason": "Missing or empty message"}
         sanitized = sanitize_public_text(message)
         if not sanitized.strip():
             return {"status": "rejected", "reason": "Empty after sanitization"}
+        recipient = action.get("recipient", "all")
+        from hashlib import sha256
+        message_id = f"msg-{sha256(f'{agent_ref}{heartbeat_number}{sanitized[:50]}'.encode()).hexdigest()[:12]}"
+        msg_record = {
+            "message_id": message_id,
+            "sender_agent_id": view["agent_id"],
+            "message": sanitized[:2000],
+            "recipient": recipient,
+            "heartbeat": heartbeat_number,
+            "sent_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        self._world_state.public_messages.append(msg_record)
         return {
             "status": "success",
-            "message": sanitized[:200],
-            "recipient": action.get("recipient", "all"),
+            "message_id": message_id,
+            "message_preview": sanitized[:200],
         }
 
     def _execute_ask_human(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
@@ -345,6 +388,10 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Missing question_id, question, or reason_for_asking"}
         if not _is_safe_object_id(str(question_id)):
             return {"status": "rejected", "reason": "Invalid question_id"}
+        # Deduplicate
+        for existing in self._questions:
+            if existing.question_id == question_id:
+                return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
         agent_id = (
             self._identity_record.adam_agent_id
             if agent_ref == "east_adam"
@@ -366,12 +413,28 @@ class FirstPairRuntime:
         ))
         return {"status": "success", "question_id": question_id}
 
-    def _execute_request_capability(self, action: dict) -> dict:
+    def _execute_request_capability(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        view = self._agent_view(agent_ref)
         cap_id = action.get("capability_id")
         cap_reason = action.get("capability_reason", "")
-        if not cap_id or isinstance(cap_id, str) and not cap_reason:
-            return {"status": "rejected", "reason": "Missing capability_id or capability_reason"}
-        return {"status": "not_implemented", "capability_id": cap_id, "reason": cap_reason}
+        if not cap_id or not isinstance(cap_id, str) or not cap_id.strip():
+            return {"status": "rejected", "reason": "Missing or empty capability_id"}
+        if not cap_reason or not isinstance(cap_reason, str) or not cap_reason.strip():
+            return {"status": "rejected", "reason": "Missing or empty capability_reason"}
+        record = {
+            "capability_id": cap_id,
+            "requesting_agent_id": view["agent_id"],
+            "reason": cap_reason,
+            "heartbeat": heartbeat_number,
+            "status": "pending",
+            "requested_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        self._world_state.capability_requests.append(record)
+        return {
+            "status": "success",
+            "capability_id": cap_id,
+            "reason": cap_reason,
+        }
 
     def _execute_modify_world(self, agent_ref: str, action: dict) -> dict:
         return {"status": "not_implemented", "action": action}
@@ -413,19 +476,23 @@ class FirstPairRuntime:
 
         if output.questions_raised:
             for q in output.questions_raised:
+                qid = q["question_id"]
+                # Deduplicate against existing questions
+                if any(existing.question_id == qid for existing in self._questions):
+                    continue
                 agent_id = (
                     self._identity_record.adam_agent_id
                     if agent_ref == "east_adam"
                     else self._identity_record.eve_agent_id
                 )
                 self._questions.append(QuestionRecord(
-                    question_id=q["question_id"],
+                    question_id=qid,
                     asking_agent_id=agent_id,
                     heartbeat=heartbeat_number,
                     question=q["question"],
                     reason_for_asking=q["reason_for_asking"],
                     related_goal_id=q.get("related_goal_id"),
-                    requested_human_capability=q["requested_human_capability"],
+                    requested_human_capability=q.get("requested_human_capability", ""),
                     urgency=q.get("urgency", "low"),
                     status="pending",
                 ))
@@ -452,7 +519,7 @@ class FirstPairRuntime:
             adam_outcome: dict = {}
             eve_action: dict | None = None
             eve_outcome: dict = {}
-            world_mutations: list[str] = []
+            world_mutations: list[dict] = []
 
             for agent_ref in ("east_adam", "east_eve"):
                 backend = self._get_cognition_backend(agent_ref)
@@ -481,9 +548,31 @@ class FirstPairRuntime:
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 })
 
-                if outcome.get("status") in ("success",):
-                    wm_id = f"{agent_ref}-{hb}"
-                    world_mutations.append(wm_id)
+                # Structured mutation evidence — only actual state mutations
+                if outcome.get("status") == "success":
+                    action_type = (output.action or {}).get("action_type", "unknown")
+                    # Only world-changing actions count as mutations
+                    if action_type in (
+                        "create_public_object",
+                        "modify_owned_public_object",
+                        "leave_public_message",
+                        "request_capability",
+                        "move",
+                    ):
+                        view = self._agent_view(agent_ref)
+                        mutation = {
+                            "acting_agent_id": view["agent_id"],
+                            "heartbeat": hb,
+                            "action_type": action_type,
+                            "target": outcome.get("object_id") or outcome.get("target_tile") or outcome.get("message_id", ""),
+                            "input": dict(output.action) if output.action else {},
+                            "outcome": outcome,
+                        }
+                        world_mutations.append(mutation)
+
+            # Set world_state.tick to actual heartbeat before saving
+            self._world_state.tick = hb
+            self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
 
             # End-of-tick persistence
             self._persist_shared_state(
@@ -500,7 +589,7 @@ class FirstPairRuntime:
         adam_outcome: dict | None = None,
         eve_action: dict | None = None,
         eve_outcome: dict | None = None,
-        world_mutations: list[str] | None = None,
+        world_mutations: list[dict] | None = None,
     ) -> None:
         save_world_state(self._store, self._world_state)
 
@@ -555,7 +644,7 @@ class FirstPairRuntime:
                     "heartbeat_number": h.heartbeat_number,
                     "agent_id": h.agent_id,
                     "action_taken": h.action_taken,
-                    "world_mutations": h.world_mutations,
+                    "world_mutations": h.world_mutations[:3],
                 }
                 for h in load_heartbeat_history(self._store)
             ],

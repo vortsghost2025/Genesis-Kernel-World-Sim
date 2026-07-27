@@ -143,6 +143,8 @@ class WorldStateRecord:
     world_state_id: str = ""
     habitat: dict = field(default_factory=dict)
     public_objects: dict[str, dict] = field(default_factory=dict)
+    public_messages: list[dict] = field(default_factory=list)
+    capability_requests: list[dict] = field(default_factory=list)
     tile_occupancy: dict[str, str] = field(default_factory=dict)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -193,6 +195,54 @@ class QuestionRecord:
             "type": "question_record",
             "schema_version": _PERSISTENCE_SCHEMA_VERSION,
             "data": asdict(self),
+        }
+
+
+@dataclass
+class PublicMessageRecord:
+    message_id: str
+    sender_agent_id: str
+    message: str
+    recipient: str
+    heartbeat: int
+    sent_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_envelope(self) -> dict:
+        return {
+            "type": "public_message_record",
+            "schema_version": _PERSISTENCE_SCHEMA_VERSION,
+            "data": {
+                "message_id": self.message_id,
+                "sender_agent_id": self.sender_agent_id,
+                "message": self.message,
+                "recipient": self.recipient,
+                "heartbeat": self.heartbeat,
+                "sent_at_utc": self.sent_at_utc,
+            },
+        }
+
+
+@dataclass
+class CapabilityRequestRecord:
+    capability_id: str
+    requesting_agent_id: str
+    reason: str
+    heartbeat: int
+    status: str = "pending"
+    requested_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_envelope(self) -> dict:
+        return {
+            "type": "capability_request_record",
+            "schema_version": _PERSISTENCE_SCHEMA_VERSION,
+            "data": {
+                "capability_id": self.capability_id,
+                "requesting_agent_id": self.requesting_agent_id,
+                "reason": self.reason,
+                "heartbeat": self.heartbeat,
+                "status": self.status,
+                "requested_at_utc": self.requested_at_utc,
+            },
         }
 
 
@@ -421,16 +471,53 @@ def list_unanswered_questions(store: FirstPairPersistenceStore) -> list[Question
     return [q for q in load_questions(store) if q.status == "pending"]
 
 
-def mark_question_answered(store: FirstPairPersistenceStore, question_id: str, answer: str) -> bool:
+def mark_question_answered(
+    store: FirstPairPersistenceStore,
+    question_id: str,
+    answer: str,
+    provenance: str = "",
+) -> dict | None:
     questions = load_questions(store)
     for q in questions:
         if q.question_id == question_id:
             q.status = "answered"
             q.provenance["answer"] = answer
             q.provenance["answered_at_utc"] = datetime.now(timezone.utc).isoformat()
+            q.provenance["operator_provenance"] = provenance
             save_questions(store, questions)
-            return True
-    return False
+            store._append_provenance("answer_question", {
+                "question_id": question_id,
+                "asking_agent_id": q.asking_agent_id,
+            })
+            return asdict(q)
+    return None
+
+
+def list_answered_questions_for_agent(
+    store: FirstPairPersistenceStore, agent_id: str
+) -> list[QuestionRecord]:
+    return [
+        q for q in load_questions(store)
+        if q.asking_agent_id == agent_id and q.status == "answered"
+    ]
+
+
+def append_public_message(
+    store: FirstPairPersistenceStore,
+    state: WorldStateRecord,
+    message: dict,
+) -> None:
+    state.public_messages.append(message)
+    state.updated_at_utc = datetime.now(timezone.utc).isoformat()
+
+
+def persist_capability_request(
+    store: FirstPairPersistenceStore,
+    state: WorldStateRecord,
+    request: dict,
+) -> None:
+    state.capability_requests.append(request)
+    state.updated_at_utc = datetime.now(timezone.utc).isoformat()
 
 
 def validate_persistence_integrity(store: FirstPairPersistenceStore) -> dict:
