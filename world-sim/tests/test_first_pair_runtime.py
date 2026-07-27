@@ -202,7 +202,7 @@ class TestCreatePublicObject:
             "object_type": "test",
             "description": "second",
             "tile_id": "public-start-adam",
-        })
+        }, 99)
         assert outcome["status"] == "rejected"
         assert "Duplicate" in outcome.get("reason", "")
 
@@ -216,7 +216,7 @@ class TestCreatePublicObject:
             "object_type": "test",
             "description": "outside",
             "tile_id": "forbidden-zone",
-        })
+        }, 99)
         assert outcome["status"] == "rejected"
         assert "not in allowed tiles" in outcome.get("reason", "")
 
@@ -230,7 +230,7 @@ class TestCreatePublicObject:
             "object_type": "test",
             "description": "",  # empty string -> sanitized empty
             "tile_id": "public-start-adam",
-        })
+        }, 99)
         assert outcome["status"] == "rejected"
         assert "Empty" in outcome.get("reason", "")
 
@@ -250,6 +250,20 @@ class TestCreatePublicObject:
         at_tile = [o for o in ws.public_objects.values()
                    if isinstance(o, dict) and o.get("tile_id") == eve_tile]
         assert any(o["object_id"] == obj["object_id"] for o in at_tile)
+
+    def test_exact_heartbeat_provenance(self, tmp_path: Path) -> None:
+        """Object created during heartbeat N must have created_heartbeat = N."""
+        store = _fresh_store(tmp_path)
+        _run(store, 2)  # Eve creates object during heartbeat 2
+        ws = store._read_json(store._path("world_state.json"))
+        assert ws is not None
+        for oid, o in ws["data"]["public_objects"].items():
+            if oid == "eve-marker-stone-1":
+                assert o["created_heartbeat"] == 2, (
+                    f"Expected heartbeat 2, got {o['created_heartbeat']}"
+                )
+                return
+        pytest.fail("eve-marker-stone-1 not found in public objects")
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +340,74 @@ class TestDemoHelper:
         results = run_first_pair_demo(heartbeats=3, persistence_root=tmp_path / "demo")
         assert results["heartbeats_completed"] == 3
         assert "errors" in results
+
+
+# ---------------------------------------------------------------------------
+# 14 – Deterministic stub output
+# ---------------------------------------------------------------------------
+
+class TestDeterministicStub:
+    def test_identical_context_yields_identical_output(self) -> None:
+        from backend.world.first_pair_cognition_stub import DeterministicStubBackend
+        from backend.world.first_pair_cognition_interface import AgentContext
+
+        ctx = AgentContext(
+            agent_id="test-agent-1",
+            canonical_name="Test",
+            canonical_ref="test",
+            heartbeat_number=1,
+            position="tile-1",
+            observation={"tile_id": "tile-1", "objects_here": []},
+            memory=[],
+            goals=[],
+            unanswered_questions=[],
+            world_public_objects={},
+            habitat_allowed_tiles=["tile-1"],
+            habitat_movement_allowed=False,
+            previous_action=None,
+            timestamp_utc="2025-01-01T00:00:00Z",
+        )
+        backend = DeterministicStubBackend(seed=42)
+        output1 = backend.observe_and_orient(ctx)
+        backend2 = DeterministicStubBackend(seed=42)
+        output2 = backend2.observe_and_orient(ctx)
+
+        assert output1.action == output2.action
+        assert output1.memory_write == output2.memory_write
+        assert output1.goal_updates == output2.goal_updates
+        assert output1.questions_raised == output2.questions_raised
+        assert output1.internal_reasoning == output2.internal_reasoning
+
+    def test_alternating_stub_question_id_deterministic(self) -> None:
+        """AlternatingStubBackend question IDs must not contain random components."""
+        from backend.world.first_pair_cognition_stub import AlternatingStubBackend
+        from backend.world.first_pair_cognition_interface import AgentContext
+
+        ctx = AgentContext(
+            agent_id="test-adam",
+            canonical_name="Adam",
+            canonical_ref="east_adam",
+            heartbeat_number=2,
+            position="public-start-adam",
+            observation={"tile_id": "public-start-adam", "objects_here": []},
+            memory=[{"type": "observation", "content": "seen tile"}],
+            goals=[{"goal_id": "adam-goal-1", "description": "map", "status": "active"}],
+            unanswered_questions=[],
+            world_public_objects={},
+            habitat_allowed_tiles=["public-start-adam", "public-start-eve"],
+            habitat_movement_allowed=False,
+            previous_action=None,
+            timestamp_utc="2025-01-01T00:00:00Z",
+        )
+        backend = AlternatingStubBackend("east_adam")
+        out1 = backend.observe_and_orient(ctx)
+        backend2 = AlternatingStubBackend("east_adam")
+        out2 = backend2.observe_and_orient(ctx)
+
+        qid1 = out1.questions_raised[0]["question_id"] if out1.questions_raised else None
+        qid2 = out2.questions_raised[0]["question_id"] if out2.questions_raised else None
+        assert qid1 is not None
+        assert qid1 == qid2, f"Question IDs differ: {qid1} vs {qid2}"
 
 
 if __name__ == "__main__":

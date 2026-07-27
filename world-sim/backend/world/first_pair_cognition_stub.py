@@ -9,7 +9,6 @@ dependencies.
 from __future__ import annotations
 
 import hashlib
-import uuid
 from typing import Any
 
 from backend.world.first_pair_cognition_interface import (
@@ -120,7 +119,7 @@ class DeterministicStubBackend(CognitionBackend):
         # Raise a question if stuck with no movement allowed and no goals
         if not context.habitat_movement_allowed and not context.goals:
             questions.append({
-                "question_id": f"q-{context.agent_id}-{context.heartbeat_number}-{uuid.uuid4().hex[:8]}",
+                "question_id": f"q-{context.agent_id}-{context.heartbeat_number}-{'d' + hashlib.sha256(f'{context.agent_id}{context.heartbeat_number}movement-stuck'.encode()).hexdigest()[:7]}",
                 "question": f"Movement is currently disabled. May I request permission to enable movement for exploration?",
                 "reason_for_asking": "Cannot pursue exploration goals while movement is prohibited by habitat boundary.",
                 "related_goal_id": None,

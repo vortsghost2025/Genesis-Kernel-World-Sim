@@ -17,6 +17,9 @@ from backend.world.first_pair_cognition_interface import (
     CognitionBackend,
     CognitiveCycle,
 )
+from backend.world.first_pair_cognition_model import (
+    ModelCognitionBackend,
+)
 from backend.world.first_pair_cognition_stub import (
     AlternatingStubBackend,
     DeterministicStubBackend,
@@ -70,14 +73,14 @@ class FirstPairRuntime:
         self,
         persistence_root: Path | None = None,
         heartbeat_limit: int = _DEFAULT_HEARTBEAT_LIMIT,
-        use_stub: bool = True,
+        backend: str = "stub",
         store: FirstPairPersistenceStore | None = None,
     ) -> None:
         if store is None:
             store = FirstPairPersistenceStore(persistence_root)
         self._store = store
         self._heartbeat_limit = heartbeat_limit
-        self._use_stub = use_stub
+        self._backend = backend
 
         self._identity_record: IdentityRecord | None = None
         self._habitat: dict | None = None
@@ -140,9 +143,11 @@ class FirstPairRuntime:
     # ------------------------------------------------------------------
 
     def _get_cognition_backend(self, agent_ref: str) -> CognitionBackend:
-        if self._use_stub:
-            return AlternatingStubBackend(agent_ref)
-        raise NotImplementedError("Non-stub backend not yet implemented")
+        if self._backend == "model":
+            return ModelCognitionBackend(agent_ref)
+        if self._backend == "deterministic_stub":
+            return DeterministicStubBackend(agent_ref)
+        return AlternatingStubBackend(agent_ref)
 
     # ------------------------------------------------------------------
     # Context builder
@@ -206,16 +211,24 @@ class FirstPairRuntime:
     # Action execution
     # ------------------------------------------------------------------
 
-    def _execute_action(self, agent_ref: str, action: dict | None) -> dict:
+    def _execute_action(self, agent_ref: str, action: dict | None, heartbeat_number: int) -> dict:
         if action is None:
             return {"status": "no_action", "detail": "No action chosen"}
         action_type = action.get("action_type")
         if action_type == "move":
             return self._execute_move(agent_ref, action)
         if action_type == "create_public_object":
-            return self._execute_create_public_object(agent_ref, action)
-        if action_type == "modify_world":
-            return self._execute_modify_world(agent_ref, action)
+            return self._execute_create_public_object(agent_ref, action, heartbeat_number)
+        if action_type == "inspect_public_object":
+            return self._execute_inspect_public_object(action)
+        if action_type == "modify_owned_public_object":
+            return self._execute_modify_owned_public_object(agent_ref, action)
+        if action_type == "leave_public_message":
+            return self._execute_leave_public_message(action)
+        if action_type == "ask_human":
+            return self._execute_ask_human(agent_ref, action, heartbeat_number)
+        if action_type == "request_capability":
+            return self._execute_request_capability(action)
         return {"status": "unknown_action", "action": action}
 
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
@@ -243,7 +256,7 @@ class FirstPairRuntime:
         self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
         return {"status": "success", "from": current_pos, "to": target, "tick": self._world_state.tick}
 
-    def _execute_create_public_object(self, agent_ref: str, action: dict) -> dict:
+    def _execute_create_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
         object_id = action.get("object_id")
         object_type = action.get("object_type", "generic")
@@ -267,7 +280,7 @@ class FirstPairRuntime:
             tile_id=tile_id,
             object_type=object_type,
             public_description=sanitized,
-            created_heartbeat=self._world_state.tick,
+            created_heartbeat=heartbeat_number,
         )
         self._world_state.public_objects[object_id] = record.to_envelope()
         self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
@@ -278,6 +291,87 @@ class FirstPairRuntime:
             "tile_id": tile_id,
             "object_type": object_type,
         }
+
+    def _execute_inspect_public_object(self, action: dict) -> dict:
+        obj_id = action.get("target_object_id")
+        if not obj_id or not isinstance(obj_id, str):
+            return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
+        obj = self._world_state.public_objects.get(obj_id)
+        if obj is None or not isinstance(obj, dict):
+            return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
+        return {"status": "success", "object": obj}
+
+    def _execute_modify_owned_public_object(self, agent_ref: str, action: dict) -> dict:
+        view = self._agent_view(agent_ref)
+        obj_id = action.get("target_object_id")
+        if not obj_id or not isinstance(obj_id, str):
+            return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
+        obj = self._world_state.public_objects.get(obj_id)
+        if obj is None or not isinstance(obj, dict):
+            return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
+        if obj.get("creator_agent_id") != view["agent_id"]:
+            return {"status": "rejected", "reason": "Not the owner of this object"}
+        modifications = action.get("modifications")
+        if not isinstance(modifications, dict):
+            return {"status": "rejected", "reason": "Missing or invalid modifications"}
+        for key, value in modifications.items():
+            if key in ("object_id", "creator_agent_id", "created_heartbeat"):
+                return {"status": "rejected", "reason": f"Cannot modify protected field: {key}"}
+            if isinstance(value, str) and not sanitize_public_text(value).strip():
+                return {"status": "rejected", "reason": f"Empty text after sanitization for {key}"}
+            obj[key] = value
+        obj["modified_heartbeat"] = self._world_state.tick
+        self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
+        return {"status": "success", "object_id": obj_id, "updates": list(modifications.keys())}
+
+    def _execute_leave_public_message(self, action: dict) -> dict:
+        message = action.get("message", "")
+        if not isinstance(message, str) or not message.strip():
+            return {"status": "rejected", "reason": "Missing or empty message"}
+        sanitized = sanitize_public_text(message)
+        if not sanitized.strip():
+            return {"status": "rejected", "reason": "Empty after sanitization"}
+        return {
+            "status": "success",
+            "message": sanitized[:200],
+            "recipient": action.get("recipient", "all"),
+        }
+
+    def _execute_ask_human(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        question_id = action.get("question_id")
+        question = action.get("question", "")
+        reason = action.get("reason_for_asking", "")
+        if not question_id or not question or not reason:
+            return {"status": "rejected", "reason": "Missing question_id, question, or reason_for_asking"}
+        if not _is_safe_object_id(str(question_id)):
+            return {"status": "rejected", "reason": "Invalid question_id"}
+        agent_id = (
+            self._identity_record.adam_agent_id
+            if agent_ref == "east_adam"
+            else self._identity_record.eve_agent_id
+        )
+        urgency = action.get("urgency", "low")
+        if urgency not in ("low", "medium", "high"):
+            return {"status": "rejected", "reason": "Invalid urgency value"}
+        self._questions.append(QuestionRecord(
+            question_id=question_id,
+            asking_agent_id=agent_id,
+            heartbeat=heartbeat_number,
+            question=question,
+            reason_for_asking=reason,
+            related_goal_id=action.get("related_goal_id"),
+            requested_human_capability=action.get("requested_human_capability", ""),
+            urgency=urgency,
+            status="pending",
+        ))
+        return {"status": "success", "question_id": question_id}
+
+    def _execute_request_capability(self, action: dict) -> dict:
+        cap_id = action.get("capability_id")
+        cap_reason = action.get("capability_reason", "")
+        if not cap_id or isinstance(cap_id, str) and not cap_reason:
+            return {"status": "rejected", "reason": "Missing capability_id or capability_reason"}
+        return {"status": "not_implemented", "capability_id": cap_id, "reason": cap_reason}
 
     def _execute_modify_world(self, agent_ref: str, action: dict) -> dict:
         return {"status": "not_implemented", "action": action}
@@ -365,7 +459,7 @@ class FirstPairRuntime:
                 cycle = CognitiveCycle(backend)
                 ctx = self._build_context(agent_ref, hb)
                 output = cycle.run_cycle(ctx)
-                outcome = self._execute_action(agent_ref, output.action)
+                outcome = self._execute_action(agent_ref, output.action, hb)
 
                 if agent_ref == "east_adam":
                     adam_action = output.action
@@ -479,12 +573,13 @@ def run_first_pair_demo(
     heartbeats: int = 5,
     persistence_root: Path | None = None,
     export_path: Path | None = None,
+    backend: str = "stub",
 ) -> dict:
     """Convenience harness — builds a fresh runtime and runs it once."""
     runtime = FirstPairRuntime(
         persistence_root=persistence_root,
         heartbeat_limit=heartbeats,
-        use_stub=True,
+        backend=backend,
     )
     results = runtime.run()
     if export_path:

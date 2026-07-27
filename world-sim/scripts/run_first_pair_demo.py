@@ -4,12 +4,18 @@ Usage:
     python scripts/run_first_pair_demo.py --heartbeats 2 \\
         --root .runtime/first-pair-manual-proof \\
         --export .runtime/first-pair-manual-proof/evidence.json \\
-        --seed 42 --questions
+        --seed 42 --questions --backend stub
+
+    python scripts/run_first_pair_demo.py --heartbeats 1 --backend model
+
+    python scripts/run_first_pair_demo.py --answer adam-question-1 \\
+        --answer-text "The world is made of digital tiles."
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -26,9 +32,37 @@ from backend.world.first_pair_persistence import (
     load_heartbeat_history,
     load_memory,
     list_unanswered_questions,
+    save_questions,
     validate_persistence_integrity,
 )
 from backend.world.first_pair_runtime import FirstPairRuntime
+
+
+def _handle_answer(
+    store: FirstPairPersistenceStore,
+    question_id: str,
+    answer_text: str,
+) -> dict:
+    questions = store.load_document("questions.json")
+    if not isinstance(questions, list):
+        sys.exit("error: no questions found in store")
+
+    found = None
+    for i, q in enumerate(questions):
+        if isinstance(q, dict) and q.get("question_id") == question_id:
+            q["status"] = "answered"
+            q["answer"] = answer_text
+            q["answered_at_utc"] = __import__(
+                "datetime"
+            ).datetime.now(__import__("datetime").timezone.utc).isoformat()
+            found = q
+            break
+
+    if found is None:
+        sys.exit(f"error: question {question_id} not found")
+
+    store.save_document("questions.json", questions)
+    return found
 
 
 def main() -> None:
@@ -57,12 +91,31 @@ def main() -> None:
         "--seed",
         type=int,
         default=None,
-        help="Optional deterministic seed (not yet supported by stub)",
+        help="Optional deterministic seed",
     )
     parser.add_argument(
         "--questions",
         action="store_true",
         help="Print pending human questions after the run",
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="stub",
+        choices=["stub", "deterministic_stub", "model"],
+        help="Cognition backend: stub (alternating), deterministic_stub, or model (default: stub)",
+    )
+    parser.add_argument(
+        "--answer",
+        type=str,
+        default=None,
+        help="Answer a pending question by question_id",
+    )
+    parser.add_argument(
+        "--answer-text",
+        type=str,
+        default="",
+        help="Text of the answer to the question specified by --answer",
     )
 
     args = parser.parse_args()
@@ -73,8 +126,16 @@ def main() -> None:
     root: Path | None = Path(args.root) if args.root else None
     export_path: Path | None = Path(args.export) if args.export else None
 
-    # --- determine whether we are initialising or resuming ---
     store = FirstPairPersistenceStore(root)
+
+    # --- handle --answer (run before the main loop) ---
+    if args.answer:
+        result = _handle_answer(store, args.answer, args.answer_text)
+        print(f"Answered: {result['question_id']}")
+        print(f"  Question: {result['question'][:120]}")
+        print(f"  Answer:   {result.get('answer', '')[:120]}")
+
+    # --- determine whether we are initialising or resuming ---
     integrity = validate_persistence_integrity(store)
     existing = any(integrity.values())
     state_label = "resumed" if existing else "initialised"
@@ -83,7 +144,7 @@ def main() -> None:
     runtime = FirstPairRuntime(
         persistence_root=root,
         heartbeat_limit=heartbeats,
-        use_stub=True,
+        backend=args.backend,
     )
     results = runtime.run()
 
@@ -99,6 +160,7 @@ def main() -> None:
 
     # --- report ---
     print(f"State:        {state_label}")
+    print(f"Backend:      {args.backend}")
     print(f"Adam ID:      {adam_view.get('agent_id', '?')}")
     print(f"Eve ID:       {eve_view.get('agent_id', '?')}")
     print(f"Heartbeats:   {results['heartbeats_completed']} completed"

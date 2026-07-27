@@ -28,3 +28,6 @@ test_write.txt
 AGENT_RUNTIME_PRIVATE.md
 PRIVATE_RUNTIME.md
 runtime-private.md
+
+# Protected quarantined spec — never tracked
+docs/phase_10ij_first_pair_starting_habitat_tiles_spec.md
