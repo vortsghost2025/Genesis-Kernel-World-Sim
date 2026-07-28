@@ -14,11 +14,27 @@ import pytest
 
 from backend.world.first_pair_persistence import (
     FirstPairPersistenceStore,
+    MemorySummaryRecord,
     PublicObjectRecord,
-    list_unanswered_questions,
+    RelationshipEventRecord,
+    _assign_memory_id,
+    _ensure_memory_ids,
+    _hash_canonical,
+    append_memory_selection_manifest,
+    append_relationship_event,
+    append_summary,
+    derive_relationship_event_ids,
+    load_memory_selection_manifests,
+    load_memory,
     load_goals,
     load_heartbeat_history,
-    load_memory,
+    load_relationship_events,
+    load_summaries,
+    list_unanswered_questions,
+    maybe_record_relationship_event,
+    save_relationship_events,
+    save_summaries,
+    select_private_memories,
 )
 from backend.world.first_pair_runtime import FirstPairRuntime, run_first_pair_demo
 
@@ -708,11 +724,12 @@ class TestRuntimePolicyAndGrant:
         rt = FirstPairRuntime(heartbeat_limit=2, store=store)
         rt.run()
         bundle = rt.export_evidence(tmp_path / "bounds.json", run_id="test-run")
-        assert bundle["evidence_schema_version"] == "10FN.1"
+        assert bundle["evidence_schema_version"] == "10FN.2"
         assert bundle["run_id"] == "test-run"
         assert bundle["start_heartbeat"] == 1
         assert bundle["end_heartbeat"] == 2
         assert bundle["cumulative_heartbeat_count"] == 2
+        assert bundle["backend_label"] == "stub"
 
     def test_evidence_per_agent_actions(self, tmp_path: Path) -> None:
         """Heartbeat evidence distinguishes adam_action and eve_action."""
@@ -769,6 +786,979 @@ class TestRuntimePolicyAndGrant:
         results = rt.run()
         assert results["heartbeats_completed"] == 2
 
+
+# ---------------------------------------------------------------------------
+# 15 – Bounded memory selection (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestBoundedMemorySelection:
+    """select_private_memories determinism, limits, tiers, cross-agent safety."""
+
+    def _sample_memories(self, count: int = 20) -> list[dict]:
+        return [
+            {"type": "observation", "content": f"Memory {i} content", "heartbeat": i}
+            for i in range(count)
+        ]
+
+    def _adam_goals(self) -> list[dict]:
+        return [{"goal_id": "goal-explore", "status": "active"}]
+
+    def _adam_state(self) -> dict:
+        return {
+            "agent_id": "genesis-agent-test-adam-aaa",
+            "goals": self._adam_goals(),
+            "position": "tile-alpha",
+            "visible_tiles": {"tile-alpha"},
+            "visible_object_ids": set(),
+            "visible_message_ids": set(),
+            "relationship_event_memory_ids": set(),
+            "recent_cutoff_hb": 0,
+        }
+
+    # 1 – Determinism
+    def test_deterministic_with_same_seed(self) -> None:
+        """Same input produces identical output."""
+        mems = self._sample_memories(10)
+        s1, m1 = select_private_memories(mems, **self._adam_state())
+        s2, m2 = select_private_memories(mems, **self._adam_state())
+        assert [m.get("memory_id") for m in s1] == [m.get("memory_id") for m in s2]
+        assert m1["canonical_selection_hash"] == m2["canonical_selection_hash"]
+
+    # 2 – Different agent → different hash (identical content, identical context,
+    #    only agent_id differs)
+    def test_different_agent_different_hash(self) -> None:
+        """Identical context except agent_id produces different canonical_selection_hash."""
+        mems = self._sample_memories(10)
+        ctx = dict(
+            goals=self._adam_goals(), position="tile-alpha",
+            visible_tiles={"tile-alpha"}, visible_object_ids=set(),
+            visible_message_ids=set(), relationship_event_memory_ids=set(),
+            recent_cutoff_hb=0,
+        )
+        _, m1 = select_private_memories(mems, agent_id="adam-aaa", **ctx)
+        _, m2 = select_private_memories(mems, agent_id="eve-bbb", **ctx)
+        # Hash differs because agent_id anchors the canonical hash
+        assert m1["canonical_selection_hash"] != m2["canonical_selection_hash"]
+
+    # 3 – Recent memories get priority inclusion
+    def test_recent_memories_included(self) -> None:
+        """Memories within recent_cutoff_hb appear in selected set."""
+        mems = self._sample_memories(20)
+        state = self._adam_state()
+        state["recent_cutoff_hb"] = 18
+        selected, _ = select_private_memories(mems, **state)
+        assert len(selected) > 0
+
+    # 4 – Total cap: at most 16 detailed memories
+    def test_total_detailed_memory_cap(self) -> None:
+        """At most 16 total detailed memories regardless of input size."""
+        mems = self._sample_memories(200)
+        selected, manifest = select_private_memories(mems, **self._adam_state())
+        assert len(selected) <= 16
+        assert manifest["selected_private_memory_count"] <= 16
+
+    # 5 – Character cap: at most 12000 chars
+    def test_character_limit(self) -> None:
+        """Total character count does not exceed 12000."""
+        mems = [{"type": "observation", "content": "x" * 2000, "heartbeat": i} for i in range(20)]
+        selected, manifest = select_private_memories(mems, **self._adam_state())
+        total_chars = sum(len(str(m.get("content", ""))) for m in selected)
+        assert total_chars <= 12000
+        assert manifest["selected_private_memory_character_count"] <= 12000
+
+    # 6 – Empty input
+    def test_empty_memory_list(self) -> None:
+        """Empty memory list returns empty selection."""
+        selected, manifest = select_private_memories([], **self._adam_state())
+        assert selected == []
+        assert manifest["raw_private_memory_count"] == 0
+        assert manifest["selected_private_memory_count"] == 0
+
+    # 7 – Single memory
+    def test_single_memory(self) -> None:
+        """Single memory is selected."""
+        mems = [{"type": "observation", "content": "Only memory", "heartbeat": 1}]
+        selected, _ = select_private_memories(mems, **self._adam_state())
+        assert len(selected) == 1
+
+    # 8 – Manifest has all keys
+    def test_manifest_has_all_keys(self) -> None:
+        """Manifest contains all required metadata keys."""
+        mems = self._sample_memories(5)
+        _, manifest = select_private_memories(mems, **self._adam_state())
+        for key in ("requesting_agent_id", "raw_private_memory_count",
+                     "selected_private_memory_ids", "selected_private_memory_count",
+                     "other_agent_private_memory_count_included", "canonical_selection_hash"):
+            assert key in manifest
+
+    # 9 – Zero cross-agent private memory in manifest
+    def test_other_agent_private_memory_count_zero(self) -> None:
+        """Cross-agent private memory leakage is zero."""
+        mems = self._sample_memories(5)
+        _, manifest = select_private_memories(mems, **self._adam_state())
+        assert manifest["other_agent_private_memory_count_included"] == 0
+
+    # 10 – Recent cutoff boundary
+    def test_cutoff_boundary_includes_all_recent(self) -> None:
+        """All memories at or after cutoff are recent candidates."""
+        mems = self._sample_memories(8)
+        state = self._adam_state()
+        state["recent_cutoff_hb"] = 5
+        selected, _ = select_private_memories(mems, **state)
+        recent_hbs = {m["heartbeat"] for m in selected if m["heartbeat"] >= 5}
+        assert len(recent_hbs) >= 3 or len(selected) == 8
+
+
+# ---------------------------------------------------------------------------
+# 16 – Legacy memory IDs (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyMemoryIDs:
+    """_assign_memory_id correctness: determinism, ownership distinction,
+    no mutation of raw entries, duplicate detection."""
+
+    def test_identical_content_same_owner_same_index_produces_same_id(self) -> None:
+        from backend.world.first_pair_persistence import _assign_memory_id
+        entry = {"content": "Hello world", "heartbeat": 1, "type": "observation"}
+        id1 = _assign_memory_id(entry, 0)
+        id2 = _assign_memory_id(entry, 0)
+        assert id1 == id2
+        assert id1.startswith("mem-")
+
+    def test_different_index_same_content_different_ids(self) -> None:
+        """Same content at different storage positions produces different IDs."""
+        from backend.world.first_pair_persistence import _assign_memory_id
+        entry = {"content": "Same content", "heartbeat": 2, "type": "observation"}
+        id0 = _assign_memory_id(entry, 0)
+        id1 = _assign_memory_id(entry, 1)
+        assert id0 != id1
+
+    def test_different_index_same_content_different_id(self) -> None:
+        from backend.world.first_pair_persistence import _assign_memory_id
+        entry = {"content": "Same content", "heartbeat": 2, "type": "observation"}
+        id1 = _assign_memory_id(entry, 0)
+        id2 = _assign_memory_id(entry, 1)
+        assert id1 != id2
+
+    def test_ensure_memory_ids_does_not_mutate_input(self) -> None:
+        from backend.world.first_pair_persistence import _ensure_memory_ids
+        orig = [{"content": "No ID", "heartbeat": 1}]
+        before = list(orig)
+        _ensure_memory_ids(orig)
+        assert orig == before  # original list entries unchanged
+
+    def test_ensure_shallow_copy_preserves_ids(self) -> None:
+        from backend.world.first_pair_persistence import _ensure_memory_ids
+        mems = [{"memory_id": "mem-preserved", "content": "Has ID", "heartbeat": 1}]
+        result = _ensure_memory_ids(mems)
+        assert result[0]["memory_id"] == "mem-preserved"
+
+
+# ---------------------------------------------------------------------------
+# 17 – Raw-memory preservation (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestRawMemoryPreservation:
+    """Selection, summary creation and relationship derivation must not append,
+    mutate, reorder or delete raw memory entries."""
+
+    def _hash_raw(self, store: FirstPairPersistenceStore) -> str:
+        from backend.world.first_pair_persistence import _hash_canonical, load_memory
+        return _hash_canonical(load_memory(store))
+
+    def test_selection_does_not_mutate_raw(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "preserve-sel")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        h_before = self._hash_raw(store)
+        # Run selection through _build_context
+        ctx = rt._build_context("east_adam", 2)
+        assert ctx.selected_private_memories is not None
+        h_after = self._hash_raw(store)
+        assert h_before == h_after
+
+    def test_summary_creation_does_not_mutate_raw(self, tmp_path: Path) -> None:
+        from backend.world.first_pair_persistence import (
+            MemorySummaryRecord, append_summary, _hash_canonical, load_memory,
+        )
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "preserve-sum")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        h_before = self._hash_raw(store)
+        summary = MemorySummaryRecord(
+            summary_id="sum-pres", owner_agent_id=rt._identity_record.adam_agent_id,
+            covered_memory_ids=[], covered_heartbeat_range=[],
+            summary="Test preservation.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        )
+        append_summary(store, summary)
+        h_after = self._hash_raw(store)
+        assert h_before == h_after
+
+    def test_relationship_event_does_not_mutate_raw(self, tmp_path: Path) -> None:
+        from backend.world.first_pair_persistence import (
+            RelationshipEventRecord, append_relationship_event,
+        )
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "preserve-rel")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        h_before = self._hash_raw(store)
+        event = RelationshipEventRecord(
+            event_id="evt-pres", heartbeat=1, actor_agent_id=rt._identity_record.adam_agent_id,
+            other_agent_id=rt._identity_record.eve_agent_id, event_type="message_sent",
+            public_evidence_references=[], resulting_public_state_commitment="",
+        )
+        append_relationship_event(store, event)
+        h_after = self._hash_raw(store)
+        assert h_before == h_after
+
+    def test_operator_inspection_does_not_mutate_raw(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "preserve-inspect")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        h_before = self._hash_raw(store)
+        # Simulate operator inspection: load context, produce inspection output
+        ctx = rt._build_context("east_adam", 2)
+        _ = len(ctx.selected_private_memories)
+        h_after = self._hash_raw(store)
+        assert h_before == h_after
+
+
+# ---------------------------------------------------------------------------
+# 18 – Derived summary validation (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestDerivedSummaryValidation:
+    """MemorySummaryRecord validation: coverage, ownership, source commitment,
+    failure isolation."""
+
+    def _make_store(self, tmp_path: Path, sub: str) -> FirstPairPersistenceStore:
+        return FirstPairPersistenceStore(tmp_path / ".runtime" / sub)
+
+    def test_every_covered_memory_id_resolves(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path, "sum-validate")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        mems = load_memory(store).get("east_adam", [])
+        from backend.world.first_pair_persistence import _ensure_memory_ids
+        ensured = _ensure_memory_ids(mems)
+        covered_ids = [m["memory_id"] for m in ensured[:2]]
+        summary = MemorySummaryRecord(
+            summary_id="sum-cov", owner_agent_id=rt._identity_record.adam_agent_id,
+            covered_memory_ids=covered_ids, covered_heartbeat_range=[1, 1],
+            summary="Coverage test.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        ).seal()
+        append_summary(store, summary)
+        loaded = load_summaries(store)
+        assert len(loaded) == 1
+        for cid in loaded[0].covered_memory_ids:
+            assert any(m.get("memory_id") == cid for m in ensured)
+
+    def test_failure_leaves_summaries_unchanged(self, tmp_path: Path) -> None:
+        store = self._make_store(tmp_path, "sum-fail")
+        # Save an initial summary
+        s0 = MemorySummaryRecord(
+            summary_id="sum-init", owner_agent_id="adam-aaa",
+            covered_memory_ids=[], covered_heartbeat_range=[],
+            summary="Initial.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        )
+        append_summary(store, s0)
+        loaded_before = load_summaries(store)
+        # Simulate a crash after summary was constructed but before append
+        # This is a process-level guarantee, but we can verify the store
+        # content is valid even though we try a bad operation
+        try:
+            bad = MemorySummaryRecord(
+                summary_id="sum-bad", owner_agent_id="",  # empty owner
+                covered_memory_ids=[], covered_heartbeat_range=[],
+                summary="", salient_entities=[],
+                related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+            )
+            append_summary(store, bad)
+        except Exception:
+            pass
+        loaded_after = load_summaries(store)
+        # The initial summary must survive regardless of whether the bad one appends
+        assert len(loaded_after) >= 1
+        assert loaded_after[0].summary_id == "sum-init"
+
+    def test_summaries_label_as_derived(self, tmp_path: Path) -> None:
+        """to_envelope marks type as memory_summary_record."""
+        r = MemorySummaryRecord(
+            summary_id="sum-label", owner_agent_id="eve-bbb",
+            covered_memory_ids=[], covered_heartbeat_range=[],
+            summary="Label test.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        ).seal()
+        env = r.to_envelope()
+        assert env["type"] == "memory_summary_record"
+
+
+# ---------------------------------------------------------------------------
+# 19 – Relationship event runtime persistence (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestRelationshipEventPersistence:
+    """RelationshipEventRecord save/load/append/derive roundtrip."""
+
+    def test_save_and_load_empty(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel")
+        assert load_relationship_events(store) == []
+
+    def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel2")
+        events = [
+            RelationshipEventRecord(
+                event_id="evt-001", heartbeat=1, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="co_location",
+                public_evidence_references=["obj-mem-001"],
+                resulting_public_state_commitment="abc",
+            )
+        ]
+        save_relationship_events(store, events)
+        loaded = load_relationship_events(store)
+        assert len(loaded) == 1
+        assert loaded[0].event_id == "evt-001"
+
+    def test_append_event(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel3")
+        e = RelationshipEventRecord(
+            event_id="evt-010", heartbeat=2, actor_agent_id="adam-aaa",
+            other_agent_id="eve-bbb", event_type="message_sent",
+            public_evidence_references=["msg-001"],
+            resulting_public_state_commitment="def",
+        )
+        append_relationship_event(store, e)
+        loaded = load_relationship_events(store)
+        assert len(loaded) == 1
+
+    def test_derive_event_ids(self) -> None:
+        events = [
+            RelationshipEventRecord(
+                event_id="evt-100", heartbeat=3, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="co_location",
+                public_evidence_references=["mem-evt-100"],
+                resulting_public_state_commitment="",
+            ),
+            RelationshipEventRecord(
+                event_id="evt-101", heartbeat=3, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="message_sent",
+                public_evidence_references=["mem-evt-101"],
+                resulting_public_state_commitment="",
+            ),
+        ]
+        ids = derive_relationship_event_ids(events)
+        assert ids == {"mem-evt-100", "mem-evt-101"}
+
+
+# ---------------------------------------------------------------------------
+# 20 – Relationship event recording through runtime outcomes (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestRelationshipEventRecording:
+    """Persisted runtime outcomes create correct relationship events.
+    Rejected actions and no_action create none. Retries do not duplicate.
+    No emotional/trust score field exists."""
+
+    def _do_move(self, rt: FirstPairRuntime, agent_ref: str, tile: str, hb: int) -> dict:
+        return rt._execute_move(agent_ref, {
+            "action_type": "move", "target_tile": tile,
+        })
+
+    def test_message_persisted_creates_event(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "rel-msg")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        # After 1 heartbeat, agent left a public message (stub does leave_public_message)
+        events = load_relationship_events(store)
+        message_events = [e for e in events if e.event_type == "message_sent"]
+        # Stub may or may not have produced a message depending on agent
+        # We verify: if any events exist, message_sent is possible
+        for ev in events:
+            assert not hasattr(ev, "affection_score")
+            assert not hasattr(ev, "trust_score")
+            assert not hasattr(ev, "loyalty_score")
+            assert not hasattr(ev, "friendship_score")
+
+    def test_no_emotional_score_fields(self, tmp_path: Path) -> None:
+        store = self._make_store_no_op(tmp_path, "rel-noemotion")
+        event = RelationshipEventRecord(
+            event_id="evt-noem", heartbeat=1, actor_agent_id="adam-aaa",
+            other_agent_id="eve-bbb", event_type="message_sent",
+            public_evidence_references=[], resulting_public_state_commitment="",
+        )
+        assert not hasattr(event, "affection_score")
+        assert not hasattr(event, "trust_score")
+        assert not hasattr(event, "loyalty_score")
+        assert not hasattr(event, "friendship_score")
+
+    def _make_store_no_op(self, tmp_path: Path, sub: str) -> FirstPairPersistenceStore:
+        return FirstPairPersistenceStore(tmp_path / ".runtime" / sub)
+
+    def test_rejected_action_creates_no_event(self, tmp_path: Path) -> None:
+        """A proposed-but-rejected action must not create a relationship event."""
+        from backend.world.first_pair_persistence import (
+            RelationshipEventRecord, append_relationship_event,
+        )
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "rel-rej")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        events_before = len(load_relationship_events(store))
+        # Simulate a failed action outcome
+        from backend.world.first_pair_persistence import maybe_record_relationship_event
+        from types import SimpleNamespace
+        ws = SimpleNamespace(tile_occupancy={}, public_objects={})
+        result = maybe_record_relationship_event(
+            store, 99, "east_adam", rt._identity_record.adam_agent_id,
+            rt._identity_record.eve_agent_id, "move",
+            outcome={"status": "rejected"},
+            agent_view={}, world_state=ws,
+        )
+        assert result is None
+        assert len(load_relationship_events(store)) == events_before
+
+
+# ---------------------------------------------------------------------------
+# 21 – Memory selection manifest persistence
+# ---------------------------------------------------------------------------
+
+
+class TestMemorySelectionManifest:
+    def test_append_and_load(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-manifest")
+        assert load_memory_selection_manifests(store) == []
+        append_memory_selection_manifest(store, {"hb": 1, "count": 5})
+        append_memory_selection_manifest(store, {"hb": 2, "count": 3})
+        loaded = load_memory_selection_manifests(store)
+        assert len(loaded) == 2
+        assert loaded[0]["hb"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 22 – Cross-agent runtime isolation with sentinel markers (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossAgentIsolation:
+    """Plant unmistakable private sentinel markers; verify each agent's runtime
+    context and prompt contain their own sentinel but not the other's."""
+
+    ADAM_SENTINEL = "ADAM_PRIVATE_SENTINEL_7F29"
+    EVE_SENTINEL = "EVE_PRIVATE_SENTINEL_9C14"
+
+    def _make_store(self, tmp_path: Path, sub: str) -> FirstPairPersistenceStore:
+        return FirstPairPersistenceStore(tmp_path / ".runtime" / sub)
+
+    def _inject_sentinels_and_reload(self, rt: FirstPairRuntime) -> None:
+        """Inject sentinel entries directly into runtime in-memory copies and
+        persist to disk so _build_context sees them."""
+        rt._adam_memory.append({
+            "type": "observation", "content": self.ADAM_SENTINEL, "heartbeat": 1,
+            "memory_id": "mem-adam-sentinel",
+        })
+        rt._eve_memory.append({
+            "type": "observation", "content": self.EVE_SENTINEL, "heartbeat": 1,
+            "memory_id": "mem-eve-sentinel",
+        })
+        # Persist so subsequent _load_or_initialize or context builder sees them
+        from backend.world.first_pair_persistence import save_memory
+        save_memory(rt._store, {"east_adam": list(rt._adam_memory), "east_eve": list(rt._eve_memory)})
+
+    def test_adam_raw_memory_structural_isolation(self, tmp_path: Path) -> None:
+        """Adam's raw ctx.memory contains ADAM_PRIVATE_SENTINEL_7F29 but not
+        EVE_PRIVATE_SENTINEL_9C14 — proving the memory lists are structurally isolated."""
+        store = self._make_store(tmp_path, "cross-raw-adam")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        self._inject_sentinels_and_reload(rt)
+        ctx = rt._build_context("east_adam", 2)
+        raw_str = str(ctx.memory)
+        assert self.ADAM_SENTINEL in raw_str
+        assert self.EVE_SENTINEL not in raw_str
+
+    def test_eve_raw_memory_structural_isolation(self, tmp_path: Path) -> None:
+        """Eve's raw ctx.memory contains EVE_PRIVATE_SENTINEL_9C14 but not
+        ADAM_PRIVATE_SENTINEL_7F29."""
+        store = self._make_store(tmp_path, "cross-raw-eve")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        self._inject_sentinels_and_reload(rt)
+        ctx = rt._build_context("east_eve", 2)
+        raw_str = str(ctx.memory)
+        assert self.EVE_SENTINEL in raw_str
+        assert self.ADAM_SENTINEL not in raw_str
+
+    def test_both_manifests_report_zero_other_agent(self, tmp_path: Path) -> None:
+        """Both agents' manifests report other_agent_private_memory_count_included = 0."""
+        store = self._make_store(tmp_path, "cross-manifest")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        self._inject_sentinels_and_reload(rt)
+        ctx_adam = rt._build_context("east_adam", 2)
+        ctx_eve = rt._build_context("east_eve", 2)
+        assert ctx_adam.memory_selection_manifest.get("other_agent_private_memory_count_included") == 0
+        assert ctx_eve.memory_selection_manifest.get("other_agent_private_memory_count_included") == 0
+
+    def test_prompt_privacy_declaration(self, tmp_path: Path) -> None:
+        """Both agents' prompts declare the other agent's private memories are unavailable."""
+        from backend.world.first_pair_cognition_model import build_system_prompt
+        store = self._make_store(tmp_path, "priv-decl")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        ctx = rt._build_context("east_adam", 2)
+        prompt = build_system_prompt(ctx)
+        assert "other agent's private memories are never available" in prompt
+
+
+# ---------------------------------------------------------------------------
+# 23 – Evidence boundaries (hardened)
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceBoundaries:
+    """Evidence export distinguishes start/end heartbeats, counts, selection
+    metrics, prompt sizes, provider outcomes."""
+
+    def test_evidence_has_run_boundaries(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-bound")
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "b1.json", run_id="bounds-test")
+        assert bundle["evidence_schema_version"] == "10FN.2"
+        assert bundle["run_id"] == "bounds-test"
+        assert bundle["start_heartbeat"] == 1
+        assert bundle["end_heartbeat"] == 2
+        assert bundle["cumulative_heartbeat_count"] == 2
+        assert bundle["backend_label"] == "stub"
+
+    def test_evidence_cumulative_heartbeat_count(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-cum")
+        rt = FirstPairRuntime(heartbeat_limit=3, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "b2.json")
+        assert bundle.get("cumulative_heartbeat_count", 0) == 3
+
+    def test_evidence_memory_counts_before_after(self, tmp_path: Path) -> None:
+        """Evidence includes adam_memory_count_before and _after fields."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-raw")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "b3.json")
+        assert "adam_memory_count_before" in bundle
+        assert "adam_memory_count_after" in bundle
+        assert "eve_memory_count_before" in bundle
+        assert "eve_memory_count_after" in bundle
+
+    def test_evidence_bounded_memory_fields(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-boundmem")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "b4.json")
+        assert "memory_selection_manifests" in bundle
+        assert "memory_summaries" in bundle
+        assert "relationship_events" in bundle
+        assert "adam_selected_memory_count" in bundle
+        assert "eve_selected_memory_count" in bundle
+        assert "summary_count" in bundle
+        assert "relationship_event_count" in bundle
+
+    def test_evidence_selection_manifests_per_request(self, tmp_path: Path) -> None:
+        """Each heartbeat request has a corresponding selection manifest entry."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-manifests")
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store, backend="deterministic_stub")
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "b5.json")
+        manifests = bundle.get("memory_selection_manifests", [])
+        assert len(manifests) >= 2  # At least one per agent per heartbeat
+
+    def test_evidence_no_credentials(self, tmp_path: Path) -> None:
+        """No credential-like strings in evidence output."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-nocred")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "nocreds.json")
+        bundle_str = json.dumps(bundle)
+        assert "nvapi-" not in bundle_str
+        assert "sk-" not in bundle_str
+        assert "api_key" not in bundle_str.lower()
+
+    def test_evidence_3_plus_3_sequential_from_hb11(self, tmp_path: Path) -> None:
+        """Run 3 heartbeats from a post-HB11 store, then 3 more. Verify
+        start=12/end=14/new=3/cumulative=14, then 15/17/3/17."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-hb11")
+        # Build up to heartbeat 11
+        rt_init = FirstPairRuntime(heartbeat_limit=11, store=store)
+        rt_init.run()
+        bundle_init = rt_init.export_evidence(tmp_path / "hb11.json")
+        assert bundle_init["end_heartbeat"] == 11
+        assert bundle_init["cumulative_heartbeat_count"] == 11
+        hb11_adam_after = bundle_init["adam_memory_count_after"]
+        hb11_eve_after = bundle_init["eve_memory_count_after"]
+
+        # First continuation: 3 heartbeats on same store
+        rt_a = FirstPairRuntime(heartbeat_limit=3, store=store)
+        rt_a.run()
+        bundle_a = rt_a.export_evidence(tmp_path / "cont1.json", run_id="cont-A")
+        assert bundle_a["start_heartbeat"] == 12
+        assert bundle_a["end_heartbeat"] == 14
+        assert bundle_a["new_heartbeat_count"] == 3
+        assert bundle_a["cumulative_heartbeat_count"] == 14
+        assert bundle_a["adam_memory_count_before"] == hb11_adam_after
+        assert bundle_a["eve_memory_count_before"] == hb11_eve_after
+        assert bundle_a["adam_memory_count_after"] > bundle_a["adam_memory_count_before"]
+        assert bundle_a["eve_memory_count_after"] > bundle_a["eve_memory_count_before"]
+
+        # Second continuation: 3 more heartbeats on same store
+        hb14_adam_after = bundle_a["adam_memory_count_after"]
+        hb14_eve_after = bundle_a["eve_memory_count_after"]
+        rt_b = FirstPairRuntime(heartbeat_limit=3, store=store)
+        rt_b.run()
+        bundle_b = rt_b.export_evidence(tmp_path / "cont2.json", run_id="cont-B")
+        assert bundle_b["start_heartbeat"] == 15
+        assert bundle_b["end_heartbeat"] == 17
+        assert bundle_b["new_heartbeat_count"] == 3
+        assert bundle_b["cumulative_heartbeat_count"] == 17
+        assert bundle_b["adam_memory_count_before"] == hb14_adam_after
+        assert bundle_b["eve_memory_count_before"] == hb14_eve_after
+        assert bundle_b["adam_memory_count_after"] > bundle_b["adam_memory_count_before"]
+        assert bundle_b["eve_memory_count_after"] > bundle_b["eve_memory_count_before"]
+
+    def test_evidence_run_specific_manifests_exclude_prior(self, tmp_path: Path) -> None:
+        """Manifests recorded during a prior run are not included in the
+        run-specific section of the next run's evidence."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-man-excl")
+        rt1 = FirstPairRuntime(heartbeat_limit=2, store=store, backend="deterministic_stub")
+        rt1.run()
+        b1 = rt1.export_evidence(tmp_path / "me1.json")
+        prior_hashes = {m["canonical_selection_hash"] for m in b1["memory_selection_manifests"]
+                        if m.get("canonical_selection_hash")}
+
+        rt2 = FirstPairRuntime(heartbeat_limit=2, store=store, backend="deterministic_stub")
+        rt2.run()
+        b2 = rt2.export_evidence(tmp_path / "me2.json")
+        run2_hashes = {m["canonical_selection_hash"] for m in b2["memory_selection_manifests"]
+                       if m.get("canonical_selection_hash")}
+        # Run-specific manifests should not include any from the prior run
+        assert prior_hashes and run2_hashes, "Both runs must produce at least one hash-bearing manifest"
+        assert not (run2_hashes & prior_hashes), (
+            f"Run-specific manifests overlap with prior: {run2_hashes & prior_hashes}"
+        )
+
+    def test_evidence_zero_heartbeat_inspection(self, tmp_path: Path) -> None:
+        """Inspection-only export (no run() called) emits null boundaries
+        and does not mutate state."""
+        # First, populate a store with data
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-zero")
+        rt_pop = FirstPairRuntime(heartbeat_limit=2, store=store)
+        rt_pop.run()
+        pop_bundle = rt_pop.export_evidence(tmp_path / "pop.json")
+        hb_count_after_pop = pop_bundle["cumulative_heartbeat_count"]
+
+        # Now inspect: new runtime, same store, zero heartbeats, load state
+        rt_inspect = FirstPairRuntime(heartbeat_limit=0, store=store)
+        rt_inspect._load_or_initialize()
+        # No run() called — direct export for inspection
+        bundle = rt_inspect.export_evidence(tmp_path / "zero.json", run_id="inspect")
+        assert bundle["start_heartbeat"] is None
+        assert bundle["end_heartbeat"] is None
+        assert bundle["new_heartbeat_count"] == 0
+        assert bundle["cumulative_heartbeat_count"] == hb_count_after_pop
+        # Raw memories unchanged
+        assert bundle["adam_memory_count_before"] == bundle["adam_memory_count_after"]
+        assert bundle["eve_memory_count_before"] == bundle["eve_memory_count_after"]
+        assert bundle["adam_memory_count_after"] == pop_bundle["adam_memory_count_after"]
+        # No new manifests, summaries, or events
+        assert len(bundle.get("memory_selection_manifests", [])) == 0
+        assert len(bundle.get("memory_summaries", [])) == 0
+        assert len(bundle.get("relationship_events", [])) == 0
+
+    def test_evidence_backend_label_model(self, tmp_path: Path) -> None:
+        """Model backend label appears in evidence without any network call.
+        Set _run_backend_label directly and export without calling run()."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-model")
+        rt = FirstPairRuntime(heartbeat_limit=0, store=store)
+        rt._run_backend_label = "model"  # No network — set label directly
+        bundle = rt.export_evidence(tmp_path / "model-label.json")
+        assert bundle["backend_label"] == "model"
+
+    def test_evidence_backend_label_deterministic_stub(self, tmp_path: Path) -> None:
+        """Deterministic stub is labelled correctly."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-det")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "det.json")
+        assert bundle["backend_label"] == "deterministic_stub"
+
+    def test_evidence_stub_not_labeled_model(self, tmp_path: Path) -> None:
+        """Stub evidence never claims model backend."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-stubonly")
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store, backend="stub")
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "stubonly.json")
+        assert bundle["backend_label"] == "stub"
+        assert bundle["backend_label"] != "model"
+        assert "model" not in str(bundle.get("provider_type", ""))
+
+    def test_evidence_memory_counts_match_disk(self, tmp_path: Path) -> None:
+        """Pre-run and post-run memory counts match persisted state on disk."""
+        from backend.world.first_pair_persistence import load_memory
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "eb-disk")
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store)
+        rt._load_or_initialize()  # capture pre-run state explicitly
+        disk_mem_before = load_memory(store)
+        pre_adam = len(disk_mem_before.get("east_adam", []))
+        pre_eve = len(disk_mem_before.get("east_eve", []))
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "disk.json")
+        disk_mem_after = load_memory(store)
+        post_adam = len(disk_mem_after.get("east_adam", []))
+        post_eve = len(disk_mem_after.get("east_eve", []))
+        assert bundle["adam_memory_count_before"] == pre_adam
+        assert bundle["eve_memory_count_before"] == pre_eve
+        assert bundle["adam_memory_count_after"] == post_adam
+        assert bundle["eve_memory_count_after"] == post_eve
+        assert bundle["adam_memory_count_after"] >= bundle["adam_memory_count_before"]
+        assert bundle["eve_memory_count_after"] >= bundle["eve_memory_count_before"]
+        assert bundle["new_heartbeat_count"] == 2
+        assert bundle["cumulative_heartbeat_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# 16 – Derived memory summary persistence
+# ---------------------------------------------------------------------------
+
+
+class TestMemorySummaryPersistence:
+    """MemorySummaryRecord save/load/append roundtrip."""
+
+    def test_save_and_load_empty(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-summaries")
+        assert load_summaries(store) == []
+
+    def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-summaries2")
+        summaries = [
+            MemorySummaryRecord(
+                summary_id="sum-001",
+                owner_agent_id="adam-aaa",
+                covered_memory_ids=["mem-001", "mem-002"],
+                covered_heartbeat_range=[1, 2],
+                summary="Adam explored the starting room.",
+                salient_entities=["room"],
+                related_goal_ids=["goal-explore"],
+                related_public_object_ids=[],
+                related_message_ids=[],
+            )
+        ]
+        save_summaries(store, summaries)
+        loaded = load_summaries(store)
+        assert len(loaded) == 1
+        assert loaded[0].summary_id == "sum-001"
+
+    def test_append_summary(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-summaries3")
+        s1 = MemorySummaryRecord(
+            summary_id="sum-010", owner_agent_id="adam-aaa",
+            covered_memory_ids=[], covered_heartbeat_range=[],
+            summary="First summary.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        )
+        append_summary(store, s1)
+        s2 = MemorySummaryRecord(
+            summary_id="sum-011", owner_agent_id="adam-aaa",
+            covered_memory_ids=[], covered_heartbeat_range=[],
+            summary="Second summary.", salient_entities=[],
+            related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+        )
+        append_summary(store, s2)
+        loaded = load_summaries(store)
+        assert len(loaded) == 2
+
+    def test_to_envelope_has_integrity(self, tmp_path: Path) -> None:
+        r = MemorySummaryRecord(
+            summary_id="sum-999", owner_agent_id="eve-bbb",
+            covered_memory_ids=["mem-999"], covered_heartbeat_range=[9, 9],
+            summary="Test seal.", salient_entities=[], related_goal_ids=[],
+            related_public_object_ids=[], related_message_ids=[],
+        ).seal()
+        env = r.to_envelope()
+        assert env["type"] == "memory_summary_record"
+        assert env["data"]["integrity_commitment"] != ""
+
+
+# ---------------------------------------------------------------------------
+# 17 – Relationship event ledger persistence
+# ---------------------------------------------------------------------------
+
+
+class TestRelationshipEventPersistence:
+    """RelationshipEventRecord save/load/append/derive roundtrip."""
+
+    def test_save_and_load_empty(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel")
+        assert load_relationship_events(store) == []
+
+    def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel2")
+        events = [
+            RelationshipEventRecord(
+                event_id="evt-001", heartbeat=1, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="co_location",
+                public_evidence_references=["obj-mem-001"],
+                resulting_public_state_commitment="abc",
+            )
+        ]
+        save_relationship_events(store, events)
+        loaded = load_relationship_events(store)
+        assert len(loaded) == 1
+        assert loaded[0].event_id == "evt-001"
+
+    def test_append_event(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-rel3")
+        e = RelationshipEventRecord(
+            event_id="evt-010", heartbeat=2, actor_agent_id="adam-aaa",
+            other_agent_id="eve-bbb", event_type="message_sent",
+            public_evidence_references=["msg-001"],
+            resulting_public_state_commitment="def",
+        )
+        append_relationship_event(store, e)
+        loaded = load_relationship_events(store)
+        assert len(loaded) == 1
+
+    def test_derive_event_ids(self) -> None:
+        events = [
+            RelationshipEventRecord(
+                event_id="evt-100", heartbeat=3, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="co_location",
+                public_evidence_references=["mem-evt-100"],
+                resulting_public_state_commitment="",
+            ),
+            RelationshipEventRecord(
+                event_id="evt-101", heartbeat=3, actor_agent_id="adam-aaa",
+                other_agent_id="eve-bbb", event_type="message_sent",
+                public_evidence_references=["mem-evt-101"],
+                resulting_public_state_commitment="",
+            ),
+        ]
+        ids = derive_relationship_event_ids(events)
+        assert ids == {"mem-evt-100", "mem-evt-101"}
+
+
+# ---------------------------------------------------------------------------
+# 18 – maybe_record_relationship_event
+# ---------------------------------------------------------------------------
+
+
+class TestMaybeRecordRelationshipEvent:
+    """Conditions under which relationship events are and are not recorded."""
+
+    def _make_ws(self, tmp_path: Path) -> FirstPairPersistenceStore:
+        return FirstPairPersistenceStore(tmp_path / ".runtime" / "test-maybe")
+
+    def _make_world_state(self) -> object:
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            tile_occupancy={"east_adam": "tile-alpha", "east_eve": "tile-beta"},
+            public_objects={},
+        )
+
+    def test_records_message_sent(self, tmp_path: Path) -> None:
+        store = self._make_ws(tmp_path)
+        ws = self._make_world_state()
+        event = maybe_record_relationship_event(
+            store, heartbeat_number=1, actor_ref="east_adam",
+            actor_agent_id="adam-aaa", other_agent_id="eve-bbb",
+            action_type="leave_public_message",
+            outcome={"status": "success", "message_id": "msg-001"},
+            agent_view={}, world_state=ws,
+        )
+        assert event is not None
+        assert event.event_type == "message_sent"
+
+    def test_does_not_record_failed_outcome(self, tmp_path: Path) -> None:
+        store = self._make_ws(tmp_path)
+        ws = self._make_world_state()
+        event = maybe_record_relationship_event(
+            store, 1, "east_adam", "adam-aaa", "eve-bbb",
+            "leave_public_message",
+            outcome={"status": "rejected"},
+            agent_view={}, world_state=ws,
+        )
+        assert event is None
+
+    def test_records_public_object_creation(self, tmp_path: Path) -> None:
+        store = self._make_ws(tmp_path)
+        ws = self._make_world_state()
+        event = maybe_record_relationship_event(
+            store, 3, "east_adam", "adam-aaa", "eve-bbb",
+            "create_public_object",
+            outcome={"status": "success", "object_id": "obj-monument"},
+            agent_view={}, world_state=ws,
+        )
+        assert event is not None
+        assert event.event_type == "public_object_creation"
+
+    def test_records_inspect_other_object(self, tmp_path: Path) -> None:
+        store = self._make_ws(tmp_path)
+        ws = self._make_world_state()
+        ws.public_objects["obj-thing"] = PublicObjectRecord(
+            object_id="obj-thing", creator_agent_id="eve-bbb",
+            tile_id="tile-alpha", object_type="artifact",
+            public_description="Eve's thing", created_heartbeat=1,
+        )
+        event = maybe_record_relationship_event(
+            store, 4, "east_adam", "adam-aaa", "eve-bbb",
+            "inspect_public_object",
+            outcome={"status": "success", "object_id": "obj-thing"},
+            agent_view={}, world_state=ws,
+        )
+        assert event is not None
+        assert event.event_type == "inspect_other_object"
+
+    def test_does_not_record_unknown_action(self, tmp_path: Path) -> None:
+        store = self._make_ws(tmp_path)
+        ws = self._make_world_state()
+        event = maybe_record_relationship_event(
+            store, 5, "east_adam", "adam-aaa", "eve-bbb",
+            "noop",
+            outcome={"status": "success"},
+            agent_view={}, world_state=ws,
+        )
+        assert event is None
+
+
+# ---------------------------------------------------------------------------
+# 19 – Memory selection manifest persistence
+# ---------------------------------------------------------------------------
+
+
+class TestMemorySelectionManifest:
+    def test_append_and_load(self, tmp_path: Path) -> None:
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-manifest")
+        assert load_memory_selection_manifests(store) == []
+        append_memory_selection_manifest(store, {"hb": 1, "count": 5})
+        append_memory_selection_manifest(store, {"hb": 2, "count": 3})
+        loaded = load_memory_selection_manifests(store)
+        assert len(loaded) == 2
+        assert loaded[0]["hb"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

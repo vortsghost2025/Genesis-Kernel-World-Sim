@@ -37,8 +37,12 @@ from backend.world.first_pair_persistence import (
     load_goals,
     load_heartbeat_history,
     load_memory,
+    load_memory_selection_manifests,
+    load_relationship_events,
+    load_summaries,
     list_unanswered_questions,
     mark_question_answered,
+    select_private_memories,
     validate_persistence_integrity,
 )
 from backend.world.first_pair_runtime import FirstPairRuntime
@@ -162,6 +166,13 @@ def main() -> None:
         default="",
         help="Optional run identifier for evidence export",
     )
+    parser.add_argument(
+        "--inspect-memory-selection",
+        type=str,
+        default=None,
+        choices=["east_adam", "east_eve"],
+        help="Inspect memory selection for agent (zero heartbeats)",
+    )
 
     args = parser.parse_args()
 
@@ -196,6 +207,68 @@ def main() -> None:
         print(f"  Question: {result.get('question', '')[:120]}")
         print(f"  Answer:   {result.get('provenance', {}).get('answer', '')[:120]}")
         print(f"  Status:   {result.get('status', '')}")
+
+    # --- handle --inspect-memory-selection (zero heartbeats) ---
+    if args.inspect_memory_selection:
+        from backend.world.first_pair_persistence import (
+            _ensure_memory_ids, derive_relationship_event_ids,
+        )
+        agent_ref = args.inspect_memory_selection
+        mem = load_memory(store)
+        raw_mems = mem.get(agent_ref, [])
+        goals = load_goals(store)
+        history = load_heartbeat_history(store)
+        runtime = FirstPairRuntime(
+            persistence_root=root, heartbeat_limit=1, backend="stub",
+        )
+        runtime._load_or_initialize()
+        view = runtime._agent_view(agent_ref) if runtime._identity_record else {}
+        position = runtime._world_state.tile_occupancy.get(
+            agent_ref,
+            runtime._habitat.get("starting_tile_ids", {}).get(agent_ref, "?"),
+        ) if runtime._world_state and runtime._habitat else "?"
+        # Pre-compute what selection would produce
+        last_hb = history[-1].heartbeat_number if history else 0
+        recent_cutoff = max(0, last_hb - 4)
+        rel_events = load_relationship_events(store)
+        rel_mem_ids = derive_relationship_event_ids(rel_events) if rel_events else set()
+        sel, manifest = select_private_memories(
+            memories=raw_mems,
+            agent_id=view.get("agent_id", "?"),
+            goals=[g.__dict__ for g in goals],
+            position=position,
+            visible_tiles={position},
+            visible_object_ids=set(),
+            visible_message_ids=set(),
+            relationship_event_memory_ids=rel_mem_ids,
+            recent_cutoff_hb=recent_cutoff,
+        )
+        summaries = load_summaries(store)
+        agent_summaries = [s for s in summaries if s.owner_agent_id == view.get("agent_id", "")]
+        ensured = _ensure_memory_ids(raw_mems)
+        print(f"--- Memory Selection Inspection for {agent_ref} ---")
+        print(f"Total raw memories:     {len(ensured)}")
+        print(f"Selected IDs:           {manifest['selected_private_memory_ids']}")
+        print(f"Selected count:         {manifest['selected_private_memory_count']}")
+        print(f"Selected char count:    {manifest['selected_private_memory_character_count']}")
+        print(f"Summary IDs:            {[s.summary_id for s in agent_summaries]}")
+        print(f"Omitted count:          {manifest['omitted_private_memory_count']}")
+        print(f"Other-agent private:    {manifest['other_agent_private_memory_count_included']} (must be 0)")
+        print(f"Selection hash:         {manifest['canonical_selection_hash'][:16]}...")
+        print(f"Raw memory IDs:         {[m.get('memory_id','?') for m in ensured]}")
+        print(f"Relationship events:    {len(rel_events)}")
+        if sel:
+            print(f"\nSelected memories (first 3):")
+            for m in sel[:3]:
+                print(f"  [{m.get('memory_id','?')}] hb={m.get('heartbeat')} "
+                      f"type={m.get('type')} content={str(m.get('content',''))[:80]}")
+        if agent_summaries:
+            print(f"\nSummaries ({len(agent_summaries)}):")
+            for s in agent_summaries[:3]:
+                print(f"  [{s.summary_id}] covered {len(s.covered_memory_ids)} mems, "
+                      f"summary={s.summary[:80]}")
+        print(f"Zero cross-agent private memory: {manifest['other_agent_private_memory_count_included'] == 0}")
+        return
 
     # --- handle --answer-all (all three questions, zero heartbeats) ---
     if args.answer_all:

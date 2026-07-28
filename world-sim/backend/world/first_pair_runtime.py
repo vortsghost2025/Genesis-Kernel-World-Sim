@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,9 @@ from backend.world.first_pair_persistence import (
     RuntimePolicyRecord,
     WorldStateRecord,
     append_heartbeat,
+    append_memory_selection_manifest,
     create_default_runtime_policy,
+    derive_relationship_event_ids,
     get_adjacent_tiles,
     get_persistence_root,
     initialize_first_pair_state,
@@ -46,13 +49,18 @@ from backend.world.first_pair_persistence import (
     load_goals,
     load_heartbeat_history,
     load_memory,
+    load_memory_selection_manifests,
     load_questions,
+    load_relationship_events,
     load_runtime_policy,
+    load_summaries,
+    maybe_record_relationship_event,
     save_goals,
     save_memory,
     save_questions,
     save_runtime_policy,
     save_world_state,
+    select_private_memories,
     validate_persistence_integrity,
 )
 from backend.world.world_event_sanitizer import sanitize_public_text
@@ -258,6 +266,51 @@ class FirstPairRuntime:
             "objects_here": current_tile_objects,
         }
 
+        # --- Bounded memory selection ---
+        # Compute recent cutoff (last 4 heartbeats)
+        history = load_heartbeat_history(self._store)
+        recent_cutoff = max(0, heartbeat_number - 4) if history else 0
+
+        # Get visible object IDs and message IDs
+        visible_object_ids = {o.get("object_id", "") for o in current_tile_objects}
+        visible_message_ids = {m.get("message_id", "") for m in visible_msgs}
+
+        # Get relationship event memory IDs for relevance boosting
+        rel_events = load_relationship_events(self._store)
+        rel_memory_ids = derive_relationship_event_ids(rel_events)
+
+        # Select bounded memories
+        selected_mems, sel_manifest = select_private_memories(
+            memories=memory_list,
+            agent_id=view["agent_id"],
+            goals=[g.__dict__ for g in agent_goals],
+            position=position,
+            visible_tiles=set(visible_tiles),
+            visible_object_ids=visible_object_ids,
+            visible_message_ids=visible_message_ids,
+            relationship_event_memory_ids=rel_memory_ids,
+            recent_cutoff_hb=recent_cutoff,
+        )
+
+        # Attach agent_id to manifest for per-agent tracking
+        sel_manifest["requesting_agent_id"] = view["agent_id"]
+        sel_manifest["heartbeat"] = heartbeat_number
+
+        # Persist the manifest (append-only log)
+        if self._store:
+            append_memory_selection_manifest(self._store, sel_manifest)
+
+        # Load summaries and relationship events for context
+        summaries = load_summaries(self._store)
+        agent_summaries = [
+            asdict(s) for s in summaries
+            if s.owner_agent_id == view["agent_id"]
+        ]
+        rel_events_export = [
+            asdict(e) for e in rel_events
+            if e.actor_agent_id == view["agent_id"] or e.other_agent_id == view["agent_id"]
+        ]
+
         return AgentContext(
             agent_id=view["agent_id"],
             canonical_name=view["canonical_name"],
@@ -285,6 +338,11 @@ class FirstPairRuntime:
             current_tile_occupants=other_agents_here,
             visible_public_messages=visible_msgs,
             relevant_human_answers=relevant_answers,
+            # Bounded memory selection fields
+            selected_private_memories=selected_mems,
+            derived_memory_summaries=agent_summaries,
+            public_relationship_events=rel_events_export,
+            memory_selection_manifest=sel_manifest,
         )
 
     # ------------------------------------------------------------------
@@ -592,6 +650,25 @@ class FirstPairRuntime:
         else:
             current = 1
 
+        # Capture pre-run state for evidence export
+        from backend.world.first_pair_persistence import (
+            load_memory_selection_manifests as _load_manifests,
+            load_summaries as _load_summaries,
+            load_relationship_events as _load_rel_events,
+        )
+        self._evidence_pre = {
+            "started_at_utc": datetime.now(timezone.utc).isoformat(),
+            "adam_mem_before": len(self._adam_memory),
+            "eve_mem_before": len(self._eve_memory),
+            "cumulative_hb_before": len(history),
+            "final_hb_before": history[-1].heartbeat_number if history else 0,
+            "manifest_count_before": len(_load_manifests(self._store)),
+            "summary_count_before": len(_load_summaries(self._store)),
+            "rel_event_count_before": len(_load_rel_events(self._store)),
+            "run_start_hb": current,
+        }
+        self._run_backend_label = self._backend
+
         results: dict = {"heartbeats_completed": 0, "errors": []}
 
         for hb in range(current, current + self._heartbeat_limit):
@@ -656,6 +733,20 @@ class FirstPairRuntime:
                         }
                         world_mutations.append(mutation)
 
+                    # Record social continuity event for validated public interactions
+                    if action_type in (
+                        "leave_public_message", "move", "create_public_object",
+                        "inspect_public_object",
+                    ):
+                        view = self._agent_view(agent_ref)
+                        other_id = view["other_agent_id"]
+                        maybe_record_relationship_event(
+                            self._store, hb, agent_ref,
+                            view["agent_id"], other_id,
+                            action_type, outcome, view,
+                            self._world_state,
+                        )
+
             # Set world_state.tick to actual heartbeat before saving
             self._world_state.tick = hb
             self._world_state.updated_at_utc = datetime.now(timezone.utc).isoformat()
@@ -718,19 +809,43 @@ class FirstPairRuntime:
         adam_view = self._agent_view("east_adam") if self._identity_record else {}
         eve_view = self._agent_view("east_eve") if self._identity_record else {}
 
-        # Per-agent heartbeat action evidence with decision/uncertainty
+        # --- Resolve run boundaries from pre-run state ---
+        pre = getattr(self, "_evidence_pre", None)
+        if pre is not None and pre.get("run_start_hb"):
+            new_count = history[-1].heartbeat_number - pre["final_hb_before"] if history else 0
+            start_hb = pre["run_start_hb"]
+            end_hb = pre["run_start_hb"] + new_count - 1 if new_count > 0 else None
+        else:
+            new_count = 0
+            start_hb = None
+            end_hb = None
+
+        cumulative_count = len(history)
+        adam_mem_before = pre["adam_mem_before"] if pre else len(self._adam_memory)
+        eve_mem_before = pre["eve_mem_before"] if pre else len(self._eve_memory)
+
+        # --- Run-specific records (by count slicing) ---
+        all_manifests = load_memory_selection_manifests(self._store)
+        all_summaries = load_summaries(self._store)
+        all_rel_events = load_relationship_events(self._store)
+
+        manifest_before = pre["manifest_count_before"] if pre else len(all_manifests)
+        summary_before = pre["summary_count_before"] if pre else len(all_summaries)
+        rel_before = pre["rel_event_count_before"] if pre else len(all_rel_events)
+
+        run_manifests = list(all_manifests[manifest_before:])
+        run_summaries = list(all_summaries[summary_before:])
+        run_rel_events = list(all_rel_events[rel_before:])
+
+        # --- Cumulative heartbeat detail ---
         heartbeats_export: list[dict] = []
         for h in history:
-            entry: dict = {
-                "heartbeat_number": h.heartbeat_number,
-            }
-            # Distinguish Adam and Eve actions
+            entry: dict = {"heartbeat_number": h.heartbeat_number}
             actions = h.action_taken or {}
             entry["adam_action"] = actions.get("east_adam")
             entry["eve_action"] = actions.get("east_eve")
             entry["questions_raised"] = h.questions_raised
             entry["goals_updated"] = h.goals_updated
-            # Only true mutations
             entry["world_mutations"] = [
                 m for m in (h.world_mutations or [])
                 if m.get("action_type") in (
@@ -738,9 +853,17 @@ class FirstPairRuntime:
                     "leave_public_message", "request_capability", "move",
                 ) and m.get("outcome", {}).get("status") == "success"
             ]
+            hb_manifests = [m for m in all_manifests if m.get("heartbeat", 0) == h.heartbeat_number]
+            if hb_manifests:
+                entry["memory_selection_manifests"] = hb_manifests
             heartbeats_export.append(entry)
 
-        # Privacy manifest
+        # --- Run-specific heartbeat list ---
+        run_heartbeats = [h for h in heartbeats_export
+                          if start_hb is not None and end_hb is not None
+                          and start_hb <= h["heartbeat_number"] <= end_hb]
+
+        # --- Privacy manifest ---
         privacy_manifest = {
             "requesting_agent_id_adam": adam_view.get("agent_id", ""),
             "requesting_agent_id_eve": eve_view.get("agent_id", ""),
@@ -759,9 +882,10 @@ class FirstPairRuntime:
             ).hexdigest()[:16],
         }
 
-        # Get provider info from first available backend
+        # --- Provider / backend label ---
         provider_type = ""
         model_name = ""
+        backend_label = getattr(self, "_run_backend_label", self._backend)
         try:
             backend = self._get_cognition_backend("east_adam")
             if hasattr(backend, "provider_type"):
@@ -772,24 +896,29 @@ class FirstPairRuntime:
             pass
 
         bundle: dict[str, Any] = {
-            "evidence_schema_version": "10FN.1",
+            "evidence_schema_version": "10FN.2",
             "run_id": run_id,
+            "backend_label": backend_label,
             "provider_type": provider_type,
             "model_name": model_name,
             "root": str(self._store.root) if self._store else "",
-            "process_started_at_utc": self._world_state.updated_at_utc if self._world_state else "",
+            "process_started_at_utc": pre["started_at_utc"] if pre else "",
             "process_finished_at_utc": process_start.isoformat(),
-            "start_heartbeat": history[0].heartbeat_number if history else 0,
-            "end_heartbeat": history[-1].heartbeat_number if history else 0,
-            "new_heartbeat_count": 0,
-            "cumulative_heartbeat_count": len(history),
-            "initialized_or_resumed": "resumed" if len(history) > 1 else "initialized",
+            "start_heartbeat": start_hb,
+            "end_heartbeat": end_hb,
+            "new_heartbeat_count": new_count,
+            "cumulative_heartbeat_count": cumulative_count,
+            "initialized_or_resumed": "resumed" if cumulative_count > 1 else "initialized",
             "adam_id": adam_view.get("agent_id", ""),
             "eve_id": eve_view.get("agent_id", ""),
-            "adam_memory_count_before": 0,
+            "adam_memory_count_before": adam_mem_before,
             "adam_memory_count_after": len(self._adam_memory),
-            "eve_memory_count_before": 0,
+            "eve_memory_count_before": eve_mem_before,
             "eve_memory_count_after": len(self._eve_memory),
+            "adam_selected_memory_count": len([m for m in run_manifests if m.get("requesting_agent_id") == adam_view.get("agent_id", "")]),
+            "eve_selected_memory_count": len([m for m in run_manifests if m.get("requesting_agent_id") == eve_view.get("agent_id", "")]),
+            "summary_count": len(all_summaries),
+            "relationship_event_count": len(all_rel_events),
             "goals_before": [],
             "goals_after": [g.__dict__ for g in self._goals],
             "questions_answered_during_run": [
@@ -804,7 +933,18 @@ class FirstPairRuntime:
             "eve_observation_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("observation_summary", ""),
             "eve_decision_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("decision_summary", ""),
             "eve_uncertainty": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("uncertainty", ""),
-            "heartbeats": heartbeats_export,
+            # Run-specific sections
+            "heartbeats": run_heartbeats,
+            "memory_selection_manifests": run_manifests,
+            "memory_summaries": [asdict(s) for s in run_summaries],
+            "relationship_events": [asdict(e) for e in run_rel_events],
+            # Cumulative state
+            "cumulative": {
+                "heartbeats": heartbeats_export,
+                "memory_selection_manifests": all_manifests,
+                "memory_summaries": [asdict(s) for s in all_summaries],
+                "relationship_events": [asdict(e) for e in all_rel_events],
+            },
             "privacy_manifest": privacy_manifest,
             "adam_memory": self._adam_memory,
             "eve_memory": self._eve_memory,

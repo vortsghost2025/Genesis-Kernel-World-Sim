@@ -622,7 +622,6 @@ def build_system_prompt(context: AgentContext) -> str:
         if context.world_public_objects
         else "[]"
     )
-    mem_str = json.dumps(context.memory, indent=2) if context.memory else "[]"
     answered_str = (
         json.dumps(context.answered_questions, indent=2)
         if context.answered_questions
@@ -654,6 +653,23 @@ def build_system_prompt(context: AgentContext) -> str:
         else "[]"
     )
 
+    # Bounded memory fields
+    selected_mem_str = (
+        json.dumps(context.selected_private_memories, indent=2)
+        if context.selected_private_memories
+        else "[]"
+    )
+    summaries_str = (
+        json.dumps(context.derived_memory_summaries, indent=2)
+        if context.derived_memory_summaries
+        else "[]"
+    )
+    rel_events_str = (
+        json.dumps(context.public_relationship_events, indent=2)
+        if context.public_relationship_events
+        else "[]"
+    )
+
     return f"""You are {context.canonical_name}, an agent operating inside a constructed world simulation.
 
 Your persistent identity:
@@ -669,8 +685,20 @@ Your position: {context.position}
 Your observation:
 {json.dumps(context.observation, indent=2)}
 
-Your private memories:
-{mem_str}
+--- PRIVATE MEMORIES (SELECTED SUBSET) ---
+{selected_mem_str}
+
+IMPORTANT: The memories shown above are a selected subset of your full private memory. You have {context.memory_selection_manifest.get('raw_private_memory_count', 0)} total private memories in your persistent store; only {context.memory_selection_manifest.get('selected_private_memory_count', 0)} are included in this request. Older or lower-relevance memories may be compressed into derived summaries below. Lack of a memory in this prompt does NOT prove the event never occurred. The other agent's private memories are never available to you.
+
+--- DERIVED MEMORY SUMMARIES ---
+{summaries_str}
+
+Note: These summaries are derived interpretations linked to raw evidence. They may compress older experiences. Each summary references specific raw memory IDs.
+
+--- PUBLIC RELATIONSHIP EVENTS ---
+{rel_events_str}
+
+Note: These are observable public interaction events recorded from validated world outcomes. No emotional scores, trust ratings, or social attachment values are assigned.
 
 Your current goals:
 {goals_str}

@@ -46,6 +46,11 @@ class AgentContext:
     current_tile_occupants: list = field(default_factory=list)
     visible_public_messages: list = field(default_factory=list)
     relevant_human_answers: list = field(default_factory=list)
+    # Bounded memory selection fields
+    selected_private_memories: list = field(default_factory=list)
+    derived_memory_summaries: list = field(default_factory=list)
+    public_relationship_events: list = field(default_factory=list)
+    memory_selection_manifest: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
