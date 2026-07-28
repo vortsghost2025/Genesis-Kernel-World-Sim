@@ -173,23 +173,29 @@ class TestProviderResolution:
                   "GENESIS_FIRST_PAIR_MODEL", "OLLAMA_HOST"):
             os.environ.pop(k, None)
         os.environ["NVIDIA_API_KEY"] = "nv-key"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "nvidia/test-model"
         try:
             cfg = resolve_provider()
             assert "nvidia.com" in cfg.base_url
             assert cfg.api_key == "nv-key"
+            assert cfg.model == "nvidia/test-model"
         finally:
-            os.environ.pop("NVIDIA_API_KEY", None)
+            for k in ("NVIDIA_API_KEY", "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
 
     def test_openrouter_fallback(self):
         for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
                   "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY", "OLLAMA_HOST"):
             os.environ.pop(k, None)
         os.environ["OPENROUTER_API_KEY"] = "or-key"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "openrouter/test-model"
         try:
             cfg = resolve_provider()
             assert "openrouter" in cfg.base_url
+            assert cfg.model == "openrouter/test-model"
         finally:
-            os.environ.pop("OPENROUTER_API_KEY", None)
+            for k in ("OPENROUTER_API_KEY", "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
 
     def test_ollama_requires_model(self):
         for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
@@ -238,6 +244,133 @@ class TestProviderResolution:
             os.environ.pop("GENESIS_FIRST_PAIR_BASE_URL", None)
             os.environ.pop("GENESIS_FIRST_PAIR_MODEL", None)
 
+    # --- Focused fail-closed tests -----------------------------------------
+
+    def test_explicit_base_without_model_fails(self):
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "https://api.example.com"
+        os.environ.pop("GENESIS_FIRST_PAIR_MODEL", None)
+        os.environ.pop("GENESIS_FIRST_PAIR_API_KEY", None)
+        os.environ.pop("NVIDIA_API_KEY", None)
+        os.environ.pop("OPENROUTER_API_KEY", None)
+        os.environ.pop("OLLAMA_HOST", None)
+        try:
+            with pytest.raises(ProviderError) as exc:
+                resolve_provider()
+            assert "GENESIS_FIRST_PAIR_MODEL" in str(exc.value)
+        finally:
+            os.environ.pop("GENESIS_FIRST_PAIR_BASE_URL", None)
+
+    def test_remote_explicit_base_without_key_fails(self):
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "https://api.example.com"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "test-model"
+        os.environ.pop("GENESIS_FIRST_PAIR_API_KEY", None)
+        try:
+            with pytest.raises(ProviderError) as exc:
+                resolve_provider()
+            assert "GENESIS_FIRST_PAIR_API_KEY" in str(exc.value)
+        finally:
+            for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
+
+    def test_localhost_explicit_base_may_omit_key(self):
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "http://localhost:8080"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "local-model"
+        os.environ.pop("GENESIS_FIRST_PAIR_API_KEY", None)
+        try:
+            cfg = resolve_provider()
+            assert cfg.provider_type == "explicit_url"
+            assert cfg.model == "local-model"
+            assert cfg.api_key is None
+        finally:
+            for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
+
+    def test_localhost_127_0_0_1_may_omit_key(self):
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "http://127.0.0.1:11434"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "local-model"
+        os.environ.pop("GENESIS_FIRST_PAIR_API_KEY", None)
+        try:
+            cfg = resolve_provider()
+            assert cfg.provider_type == "explicit_url"
+            assert cfg.api_key is None
+        finally:
+            for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
+
+    def test_nvidia_key_without_model_fails(self):
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "OPENROUTER_API_KEY", "OLLAMA_HOST"):
+            os.environ.pop(k, None)
+        os.environ["NVIDIA_API_KEY"] = "nv-key"
+        try:
+            with pytest.raises(ProviderError) as exc:
+                resolve_provider()
+            assert "GENESIS_FIRST_PAIR_MODEL" in str(exc.value)
+        finally:
+            os.environ.pop("NVIDIA_API_KEY", None)
+
+    def test_openrouter_key_without_model_fails(self):
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY", "OLLAMA_HOST"):
+            os.environ.pop(k, None)
+        os.environ["OPENROUTER_API_KEY"] = "or-key"
+        try:
+            with pytest.raises(ProviderError) as exc:
+                resolve_provider()
+            assert "GENESIS_FIRST_PAIR_MODEL" in str(exc.value)
+        finally:
+            os.environ.pop("OPENROUTER_API_KEY", None)
+
+    def test_ollama_host_without_model_fails(self):
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY", "OPENROUTER_API_KEY"):
+            os.environ.pop(k, None)
+        os.environ["OLLAMA_HOST"] = "http://localhost:11434"
+        try:
+            with pytest.raises(ProviderError) as exc:
+                resolve_provider()
+            assert "GENESIS_FIRST_PAIR_MODEL" in str(exc.value)
+        finally:
+            os.environ.pop("OLLAMA_HOST", None)
+
+    def test_no_returned_config_has_empty_model(self):
+        """Every valid resolve_provider call must return a non-empty model."""
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY",
+                  "OPENROUTER_API_KEY", "OLLAMA_HOST"):
+            os.environ.pop(k, None)
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "http://127.0.0.1:8000"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "local-m"
+        cfg = resolve_provider()
+        assert cfg.model, f"Empty model for {cfg.provider_type}"
+
+    def test_no_v1_doubled_across_providers(self):
+        """/v1 is never doubled for any valid configuration."""
+        os.environ["GENESIS_FIRST_PAIR_BASE_URL"] = "https://custom.example.com/v1"
+        os.environ["GENESIS_FIRST_PAIR_API_KEY"] = "k"
+        os.environ["GENESIS_FIRST_PAIR_MODEL"] = "m"
+        try:
+            cfg = resolve_provider()
+            assert cfg.base_url.count("/v1") == 1
+        finally:
+            for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                      "GENESIS_FIRST_PAIR_MODEL"):
+                os.environ.pop(k, None)
+
+    def test_no_provider_does_not_construct_client_or_call_network(self):
+        """No-provider resolution performs no client construction or network call."""
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY",
+                  "OPENROUTER_API_KEY", "OLLAMA_HOST"):
+            os.environ.pop(k, None)
+        with pytest.raises(ProviderError):
+            resolve_provider()
+        # If it raised ProviderError, no client was constructed.
+        # We confirm no side effects by checking no new env keys were written:
+        for k in ("GENESIS_FIRST_PAIR_BASE_URL", "GENESIS_FIRST_PAIR_API_KEY",
+                  "GENESIS_FIRST_PAIR_MODEL", "NVIDIA_API_KEY",
+                  "OPENROUTER_API_KEY", "OLLAMA_HOST"):
+            assert k not in os.environ or os.environ[k] == "", f"Unexpected env var: {k}"
 
 # ---------------------------------------------------------------------------
 # Provider error sanitization

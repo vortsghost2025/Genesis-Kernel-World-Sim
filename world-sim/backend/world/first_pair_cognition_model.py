@@ -125,46 +125,57 @@ def resolve_provider() -> ProviderConfig:
     or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     ollama_host = os.environ.get("OLLAMA_HOST", "").strip()
 
-    missing: list[str] = []
-
+    # --- Explicit base URL ---
     if base:
-        # Explicit base URL path
         if not model:
-            missing.append("GENESIS_FIRST_PAIR_MODEL")
+            raise ProviderError(
+                "GENESIS_FIRST_PAIR_BASE_URL is set but GENESIS_FIRST_PAIR_MODEL is not set"
+            )
+        # localhost / 127.0.0.1 / [::1] may omit the API key
+        url_lower = base.lower()
+        is_local = any(h in url_lower for h in ("localhost", "127.0.0.1", "[::1]", "::1"))
+        if not is_local and not key:
+            raise ProviderError(
+                "Remote GENESIS_FIRST_PAIR_BASE_URL requires GENESIS_FIRST_PAIR_API_KEY"
+            )
         url = _check_url(base)
         return ProviderConfig("explicit_url", url, model, key or None)
 
+    # --- NVIDIA ---
     if nv_key:
-        model = model or ""
         if not model:
-            missing.append("GENESIS_FIRST_PAIR_MODEL")
+            raise ProviderError(
+                "NVIDIA_API_KEY is set but GENESIS_FIRST_PAIR_MODEL is not set"
+            )
         url = "https://integrate.api.nvidia.com/v1"
         return ProviderConfig("nvidia", url, model, nv_key)
 
+    # --- OpenRouter ---
     if or_key:
-        url = "https://openrouter.ai/api/v1"
-        return ProviderConfig("openrouter", url, "openrouter/auto", or_key)
-
-    if ollama_host:
-        url = _check_url(ollama_host)
         if not model:
             raise ProviderError(
-                "Ollama configured via OLLAMA_HOST but GENESIS_FIRST_PAIR_MODEL is not set"
+                "OPENROUTER_API_KEY is set but GENESIS_FIRST_PAIR_MODEL is not set"
             )
+        url = "https://openrouter.ai/api/v1"
+        return ProviderConfig("openrouter", url, model, or_key)
+
+    # --- Ollama ---
+    if ollama_host:
+        if not model:
+            raise ProviderError(
+                "OLLAMA_HOST is set but GENESIS_FIRST_PAIR_MODEL is not set"
+            )
+        url = _check_url(ollama_host)
         return ProviderConfig("ollama", url, model, None)
 
-    # Build list of what's missing
-    if not base and not nv_key and not or_key and not ollama_host:
-        missing = [
-            "GENESIS_FIRST_PAIR_BASE_URL (+ GENESIS_FIRST_PAIR_API_KEY / GENESIS_FIRST_PAIR_MODEL)",
-            "NVIDIA_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OLLAMA_HOST (+ GENESIS_FIRST_PAIR_MODEL)",
-        ]
-
+    # --- No provider ---
     raise ProviderError(
         "No usable provider configuration. Set one of: "
-        + ", ".join(missing)
+        "GENESIS_FIRST_PAIR_BASE_URL (+ GENESIS_FIRST_PAIR_MODEL, "
+        "+ GENESIS_FIRST_PAIR_API_KEY for remote), "
+        "NVIDIA_API_KEY (+ GENESIS_FIRST_PAIR_MODEL), "
+        "OPENROUTER_API_KEY (+ GENESIS_FIRST_PAIR_MODEL), "
+        "OLLAMA_HOST (+ GENESIS_FIRST_PAIR_MODEL)"
     )
 
 
