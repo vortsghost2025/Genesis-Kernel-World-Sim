@@ -40,6 +40,12 @@ class AgentContext:
     other_agent_ref: str = ""
     # Answered question history for this agent
     answered_questions: list = field(default_factory=list)
+    # Dynamic context fields for movement grant era
+    available_moves: list = field(default_factory=list)
+    current_runtime_capabilities: list = field(default_factory=list)
+    current_tile_occupants: list = field(default_factory=list)
+    visible_public_messages: list = field(default_factory=list)
+    relevant_human_answers: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,9 @@ class CognitionOutput:
     questions_raised: list | None
     internal_reasoning: str
     confidence: float
+    observation_summary: str = ""
+    decision_summary: str = ""
+    uncertainty: str = ""
 
 
 class CognitionBackend(ABC):

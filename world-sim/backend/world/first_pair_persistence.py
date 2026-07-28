@@ -25,6 +25,8 @@ from backend.world.local_first_pair_memory_boundary import (
     create_first_pair_memory_boundary,
 )
 
+_RUNTIME_POLICY_SCHEMA_VERSION = "10FN.1"
+_CAPABILITY_GRANT_SCHEMA_VERSION = "10FN.1"
 _PERSISTENCE_SCHEMA_VERSION = "10FM.1"
 _DEFAULT_ROOT = Path(__file__).resolve().parent.parent.parent / ".runtime" / "first-pair"
 _IDENTITY_FILE = "identity.json"
@@ -34,6 +36,8 @@ _WORLD_STATE_FILE = "world_state.json"
 _GOALS_FILE = "goals.json"
 _QUESTIONS_FILE = "questions.json"
 _HEARTBEAT_FILE = "heartbeat.json"
+_RUNTIME_POLICY_FILE = "runtime_policy.json"
+_CAPABILITY_GRANT_FILE = "capability_grant.json"
 _PROVENANCE_FILE = "provenance.jsonl"
 
 
@@ -264,6 +268,150 @@ class HeartbeatRecord:
             "schema_version": _PERSISTENCE_SCHEMA_VERSION,
             "data": asdict(self),
         }
+
+
+@dataclass
+class RuntimePolicyRecord:
+    """Versioned runtime-policy overlay that supersedes historical habitat boundary."""
+    policy_id: str
+    schema_version: str = _RUNTIME_POLICY_SCHEMA_VERSION
+    pair_id: str = "genesis-first-pair"
+    topology: dict = field(default_factory=dict)
+    movement_grant_ref: str = ""
+    allowed_observation_rules: dict = field(default_factory=dict)
+    co_location_rules: dict = field(default_factory=dict)
+    created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    status: str = "active"
+    integrity_commitment: str = ""
+
+    def seal(self) -> RuntimePolicyRecord:
+        material = asdict(self)
+        material.pop("integrity_commitment", None)
+        self.integrity_commitment = _hash_canonical(material)
+        return self
+
+    def to_envelope(self) -> dict:
+        return {
+            "type": "runtime_policy_record",
+            "schema_version": _RUNTIME_POLICY_SCHEMA_VERSION,
+            "data": asdict(self),
+        }
+
+
+@dataclass
+class CapabilityGrantRecord:
+    """Governed operator capability-grant record."""
+    grant_id: str
+    capability_id: str
+    scope: str
+    reason: str
+    granted_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    operator_provenance: str = ""
+    status: str = "granted"
+    policy_version: str = _RUNTIME_POLICY_SCHEMA_VERSION
+    integrity_commitment: str = ""
+
+    def seal(self) -> CapabilityGrantRecord:
+        material = asdict(self)
+        material.pop("integrity_commitment", None)
+        self.integrity_commitment = _hash_canonical(material)
+        return self
+
+    def to_envelope(self) -> dict:
+        return {
+            "type": "capability_grant_record",
+            "schema_version": _CAPABILITY_GRANT_SCHEMA_VERSION,
+            "data": asdict(self),
+        }
+
+
+def create_default_runtime_policy() -> RuntimePolicyRecord:
+    """Create the default runtime policy overlay with shared habitat topology."""
+    return RuntimePolicyRecord(
+        policy_id="runtime-policy-first-pair-001",
+        topology={
+            "tiles": [
+                {"tile_id": "public-start-adam", "adjacent": ["public-shared-center"]},
+                {"tile_id": "public-shared-center", "adjacent": ["public-start-adam", "public-start-eve"]},
+                {"tile_id": "public-start-eve", "adjacent": ["public-shared-center"]},
+            ],
+            "allowed_tile_ids": ["public-start-adam", "public-shared-center", "public-start-eve"],
+            "movement_allowed": True,
+            "one_edge_per_heartbeat": True,
+        },
+        movement_grant_ref="grant-movement-001",
+        allowed_observation_rules={
+            "current_tile_visible": True,
+            "adjacent_tile_ids_visible": True,
+            "co_location_visible": True,
+        },
+        co_location_rules={
+            "shared_center_allows_both": True,
+            "starting_tile_single_occupancy": True,
+        },
+    ).seal()
+
+
+def load_runtime_policy(store: FirstPairPersistenceStore) -> RuntimePolicyRecord | None:
+    data = store._read_json(store._path(_RUNTIME_POLICY_FILE))
+    if data and data.get("type") == "runtime_policy_record":
+        return RuntimePolicyRecord(**data["data"])
+    return None
+
+
+def save_runtime_policy(store: FirstPairPersistenceStore, policy: RuntimePolicyRecord) -> None:
+    store._atomic_write(store._path(_RUNTIME_POLICY_FILE), policy.to_envelope())
+    store._append_provenance("runtime_policy_update", {"policy_id": policy.policy_id, "status": policy.status})
+
+
+def load_capability_grant(store: FirstPairPersistenceStore) -> CapabilityGrantRecord | None:
+    data = store._read_json(store._path(_CAPABILITY_GRANT_FILE))
+    if data and data.get("type") == "capability_grant_record":
+        return CapabilityGrantRecord(**data["data"])
+    return None
+
+
+def grant_capability(
+    store: FirstPairPersistenceStore,
+    capability_id: str,
+    scope: str,
+    reason: str,
+    operator_provenance: str = "operator_script",
+) -> CapabilityGrantRecord:
+    """Governed operator capability-grant operation. Runs zero heartbeats.
+
+    Also creates a default runtime policy if none exists, so the grant
+    takes immediate effect.
+    """
+    if load_runtime_policy(store) is None:
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        store._append_provenance("runtime_policy_created", {
+            "policy_id": policy.policy_id,
+            "capability_id": capability_id,
+        })
+    grant = CapabilityGrantRecord(
+        grant_id=f"grant-{capability_id}-001",
+        capability_id=capability_id,
+        scope=scope,
+        reason=reason,
+        operator_provenance=operator_provenance,
+    ).seal()
+    store._atomic_write(store._path(_CAPABILITY_GRANT_FILE), grant.to_envelope())
+    store._append_provenance("capability_grant", {
+        "grant_id": grant.grant_id,
+        "capability_id": capability_id,
+        "scope": scope,
+    })
+    return grant
+
+
+def get_adjacent_tiles(policy: RuntimePolicyRecord, tile_id: str) -> list[str]:
+    """Get adjacent tiles for a given tile from runtime policy topology."""
+    for tile in policy.topology.get("tiles", []):
+        if tile["tile_id"] == tile_id:
+            return list(tile.get("adjacent", []))
+    return []
 
 
 def initialize_first_pair_state(

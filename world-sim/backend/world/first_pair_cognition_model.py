@@ -597,13 +597,13 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
 _AVAILABLE_ACTIONS_DESC = """
 Available actions:
 - no_action: do nothing this cycle
-- create_public_object: create a new object in the world (requires: object_id, object_type, description, tile_id)
+- create_public_object: create a new object in the world (requires: object_id, object_type, description, tile_id; object must be placed on your current tile)
 - inspect_public_object: examine an existing object (requires: target_object_id)
 - modify_owned_public_object: modify one of your own objects (requires: target_object_id, modifications dict)
 - leave_public_message: leave a public message (requires: message, recipient)
 - ask_human: ask a question to the human operator (requires: question_id, question, reason_for_asking, requested_human_capability, urgency)
 - request_capability: request a new capability from the human (requires: capability_id, capability_reason)
-- move: move to a different tile (requires: target_tile, reason) — currently blocked by habitat configuration
+- move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves
 """
 
 
@@ -626,6 +626,31 @@ def build_system_prompt(context: AgentContext) -> str:
     answered_str = (
         json.dumps(context.answered_questions, indent=2)
         if context.answered_questions
+        else "[]"
+    )
+    moves_str = (
+        json.dumps(context.available_moves, indent=2)
+        if context.available_moves
+        else "[]"
+    )
+    caps_str = (
+        json.dumps(context.current_runtime_capabilities, indent=2)
+        if context.current_runtime_capabilities
+        else "[]"
+    )
+    occupants_str = (
+        json.dumps(context.current_tile_occupants, indent=2)
+        if context.current_tile_occupants
+        else "[]"
+    )
+    vis_msgs_str = (
+        json.dumps(context.visible_public_messages, indent=2)
+        if context.visible_public_messages
+        else "[]"
+    )
+    ans_questions_str = (
+        json.dumps(context.relevant_human_answers, indent=2)
+        if context.relevant_human_answers
         else "[]"
     )
 
@@ -654,7 +679,16 @@ Public world objects at your position:
 {objects_str}
 
 Habitat allowed tiles: {context.habitat_allowed_tiles}
-Movement allowed: {context.habitat_movement_allowed}
+Movement allowed (original habitat): {context.habitat_movement_allowed}
+
+--- RUNTIME CONTEXT ---
+Tiles you can move to (one edge per heartbeat): {moves_str}
+Your active capabilities: {caps_str}
+Other agents at your current tile: {occupants_str}
+Visible public messages: {vis_msgs_str}
+Human answers you have received: {ans_questions_str}
+
+Note: The original habitat restriction has been superseded by a bounded runtime movement grant within a shared public habitat. You may move to any tile listed in available_moves.
 
 Unresolved questions you have asked:
 {unanswered_str}
@@ -699,7 +733,7 @@ class ModelCognitionBackend(CognitionBackend):
         self._client = client or OpenAI(
             base_url=self._config.base_url,
             api_key=self._config.api_key,
-            timeout=30.0,
+            timeout=300.0,
         )
         self._model = self._config.model
 
@@ -715,7 +749,7 @@ class ModelCognitionBackend(CognitionBackend):
         self._client = OpenAI(
             base_url=config.base_url,
             api_key=config.api_key,
-            timeout=30.0,
+            timeout=300.0,
         )
         self._model = config.model
         return self
@@ -750,6 +784,7 @@ class ModelCognitionBackend(CognitionBackend):
                 questions_raised=None,
                 internal_reasoning=f"Model call failed. {safe_err}",
                 confidence=0.0,
+                uncertainty=f"Provider timeout or error: {safe_err}",
             )
 
         validated = validate_model_output(raw_output, context.agent_id)
@@ -765,6 +800,7 @@ class ModelCognitionBackend(CognitionBackend):
                 questions_raised=None,
                 internal_reasoning=f"Output validation failed: {'; '.join(validated.validation_errors)}",
                 confidence=0.0,
+                uncertainty=f"Output validation failed: {'; '.join(validated.validation_errors)}",
             )
 
         # Build action dict from validated proposal
@@ -817,6 +853,9 @@ class ModelCognitionBackend(CognitionBackend):
             questions_raised=questions,
             internal_reasoning="; ".join(reasoning_parts) if reasoning_parts else "No cognition details.",
             confidence=validated.confidence,
+            observation_summary=validated.observation_summary,
+            decision_summary=validated.decision_summary,
+            uncertainty=validated.uncertainty,
         )
 
     def _call_model_with_repair(

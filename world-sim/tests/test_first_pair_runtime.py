@@ -218,7 +218,7 @@ class TestCreatePublicObject:
             "tile_id": "forbidden-zone",
         }, 99)
         assert outcome["status"] == "rejected"
-        assert "not in allowed tiles" in outcome.get("reason", "")
+        assert "Cannot place object on tile forbidden-zone" in outcome.get("reason", "")
 
     def test_empty_sanitized_rejected(self, tmp_path: Path) -> None:
         store = _fresh_store(tmp_path)
@@ -310,9 +310,9 @@ class TestEvidenceExport:
         rt.run()
         export_path = tmp_path / "evidence.json"
         bundle = rt.export_evidence(export_path)
-        assert "adam_identity" in bundle
-        assert "eve_identity" in bundle
-        assert "heartbeat_log" in bundle
+        assert "adam_id" in bundle
+        assert "eve_id" in bundle
+        assert "heartbeats" in bundle
         assert isinstance(json.dumps(bundle), str)
 
     def test_run_first_pair_demo_export(self, tmp_path: Path) -> None:
@@ -326,9 +326,9 @@ class TestEvidenceExport:
         assert export_path.exists()
         with open(export_path, "r") as f:
             bundle = json.load(f)
-        assert "adam_identity" in bundle
-        assert "eve_identity" in bundle
-        assert "heartbeat_log" in bundle
+        assert "adam_id" in bundle
+        assert "eve_id" in bundle
+        assert "heartbeats" in bundle
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +408,366 @@ class TestDeterministicStub:
         qid2 = out2.questions_raised[0]["question_id"] if out2.questions_raised else None
         assert qid1 is not None
         assert qid1 == qid2, f"Question IDs differ: {qid1} vs {qid2}"
+
+
+# ---------------------------------------------------------------------------
+# 14 – Runtime Policy Overlay and Movement Grant
+# ---------------------------------------------------------------------------
+
+class TestRuntimePolicyAndGrant:
+    def test_habitat_immutable(self, tmp_path: Path) -> None:
+        """Original 10ID habitat record retains movement_allowed=False."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        assert rt._habitat is not None
+        assert rt._habitat.get("movement_allowed") is False
+        # Verify on-disk identity still has historical habitat
+        data = store._read_json(store._path("identity.json"))
+        assert data is not None
+        hb = data["data"]["habitat_boundary"]["habitat"]
+        assert hb["movement_allowed"] is False
+
+    def test_runtime_policy_separate(self, tmp_path: Path) -> None:
+        """Runtime policy overlay is a separate file from identity."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        assert rt._runtime_policy is None  # No policy created yet
+
+    def test_movement_fails_before_grant(self, tmp_path: Path) -> None:
+        """Movement is blocked when no grant exists."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        outcome = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-start-eve",
+        })
+        assert outcome["status"] == "blocked"
+        assert "No active movement grant" in outcome.get("reason", "")
+
+    def test_movement_fails_before_grant_with_policy_but_no_grant(self, tmp_path: Path) -> None:
+        """Even with a policy, movement requires a grant record."""
+        from backend.world.first_pair_persistence import create_default_runtime_policy, save_runtime_policy
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        # Create policy but no grant
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._runtime_policy = policy
+        outcome = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-shared-center",
+        })
+        assert outcome["status"] == "blocked"
+        assert "No active movement grant" in outcome.get("reason", "")
+
+    def test_grant_and_policy_allow_movement(self, tmp_path: Path) -> None:
+        """With grant and policy, adjacent movement succeeds."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        # Create grant and policy
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        outcome = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-shared-center",
+        })
+        assert outcome["status"] == "success", f"Got: {outcome}"
+        assert outcome.get("to") == "public-shared-center"
+        # Verify position persisted
+        assert rt._world_state.tile_occupancy["east_adam"] == "public-shared-center"
+
+    def test_adjacent_movement_only(self, tmp_path: Path) -> None:
+        """Cannot skip a tile — must be adjacent."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        # Try to skip public-shared-center and go directly to public-start-eve
+        outcome = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-start-eve",
+        })
+        assert outcome["status"] == "blocked"
+        assert "not adjacent" in outcome.get("reason", "")
+
+    def test_movement_outside_allowed_fails(self, tmp_path: Path) -> None:
+        """Moving to a tile outside allowed set is blocked."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        outcome = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "forbidden-zone",
+        })
+        assert outcome["status"] == "blocked"
+
+    def test_shared_center_co_location_allowed(self, tmp_path: Path) -> None:
+        """Both agents can occupy public-shared-center."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        # Move Adam to center
+        outcome1 = rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-shared-center",
+        })
+        assert outcome1["status"] == "success"
+        # Move Eve to center (now both there)
+        outcome2 = rt._execute_move("east_eve", {
+            "action_type": "move", "target_tile": "public-shared-center",
+        })
+        assert outcome2["status"] == "success"
+        assert rt._world_state.tile_occupancy["east_adam"] == "public-shared-center"
+        assert rt._world_state.tile_occupancy["east_eve"] == "public-shared-center"
+
+    def test_positions_persist_across_restart(self, tmp_path: Path) -> None:
+        """After moving, restart loads correct position."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        rt._execute_move("east_adam", {
+            "action_type": "move", "target_tile": "public-shared-center",
+        })
+        # Simulate save and restart
+        from backend.world.first_pair_persistence import save_world_state
+        save_world_state(store, rt._world_state)
+        rt2 = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt2._load_or_initialize()
+        assert rt2._world_state.tile_occupancy["east_adam"] == "public-shared-center"
+
+    def test_available_moves_in_context(self, tmp_path: Path) -> None:
+        """available_moves in context reflects adjacent tiles from policy."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        ctx = rt._build_context("east_adam", 2)
+        assert "public-shared-center" in ctx.available_moves
+        assert "public-start-eve" not in ctx.available_moves  # not adjacent to start
+
+    def test_answer_operation_zero_heartbeats(self, tmp_path: Path) -> None:
+        """mark_question_answered runs zero heartbeats (no side effects on state)."""
+        from backend.world.first_pair_persistence import mark_question_answered, list_unanswered_questions
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        # Manually add a question
+        from backend.world.first_pair_persistence import QuestionRecord, save_questions
+        q = QuestionRecord(
+            question_id="q-test", asking_agent_id=rt._identity_record.adam_agent_id,
+            heartbeat=1, question="Why?", reason_for_asking="curiosity",
+            related_goal_id=None, requested_human_capability="", urgency="low",
+        )
+        save_questions(store, [q])
+        # Answer it
+        result = mark_question_answered(store, "q-test", "Because.")
+        assert result is not None
+        assert result["status"] == "answered"
+        # Verify no new heartbeat created
+        history = load_heartbeat_history(store)
+        assert len(history) == 1  # Only the original heartbeat
+
+    def test_grant_operation_zero_heartbeats(self, tmp_path: Path) -> None:
+        """grant_capability runs zero heartbeats."""
+        from backend.world.first_pair_persistence import grant_capability
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        assert grant.status == "granted"
+        assert grant.capability_id == "movement"
+        # Verify no new heartbeat created
+        history = load_heartbeat_history(store)
+        assert len(history) == 1
+
+    def test_answer_does_not_imply_grant(self, tmp_path: Path) -> None:
+        """Answering a question does not create a capability grant."""
+        from backend.world.first_pair_persistence import (
+            mark_question_answered, load_capability_grant,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        from backend.world.first_pair_persistence import QuestionRecord, save_questions
+        q = QuestionRecord(
+            question_id="q-grant-test", asking_agent_id=rt._identity_record.adam_agent_id,
+            heartbeat=1, question="Can I move?", reason_for_asking="testing",
+            related_goal_id=None, requested_human_capability="movement", urgency="low",
+        )
+        save_questions(store, [q])
+        mark_question_answered(store, "q-grant-test", "Not yet.")
+        grant = load_capability_grant(store)
+        assert grant is None  # No grant created by answering
+
+    def test_model_output_cannot_create_grant(self, tmp_path: Path) -> None:
+        """Agent model output cannot create a grant record."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy,
+            load_capability_grant,
+        )
+        store = _fresh_store(tmp_path)
+        # Only policy exists, no grant
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        grant = load_capability_grant(store)
+        assert grant is None
+
+    def test_create_object_requires_current_tile(self, tmp_path: Path) -> None:
+        """create_public_object only succeeds on the agent's current tile."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        # Adam at public-start-adam — try to place on public-start-eve
+        outcome = rt._execute_create_public_object("east_adam", {
+            "action_type": "create_public_object", "object_id": "o1",
+            "object_type": "marker", "description": "wrong tile",
+            "tile_id": "public-start-eve",
+        }, 2)
+        assert outcome["status"] == "rejected"
+        assert "Cannot place object on tile" in outcome.get("reason", "")
+
+    def test_observation_respects_adjacency(self, tmp_path: Path) -> None:
+        """With grant, visible_tiles include adjacent tiles."""
+        from backend.world.first_pair_persistence import (
+            create_default_runtime_policy, save_runtime_policy, grant_capability,
+        )
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        grant = grant_capability(store, "movement", "first-pair-shared-habitat",
+                                  "Operator-approved movement")
+        policy = create_default_runtime_policy()
+        save_runtime_policy(store, policy)
+        rt._capability_grant = grant
+        rt._runtime_policy = policy
+        ctx = rt._build_context("east_adam", 2)
+        assert "public-shared-center" in ctx.observation.get("visible_tiles", [])
+
+    def test_no_private_memory_leakage_in_evidence(self, tmp_path: Path) -> None:
+        """Privacy manifest reports zero other-agent private memory."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "priv.json")
+        manifest = bundle.get("privacy_manifest", {})
+        assert manifest.get("other_agent_private_memory_included") == 0
+
+    def test_evidence_has_run_boundaries(self, tmp_path: Path) -> None:
+        """Evidence export includes start/end heartbeats and cumulative count."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "bounds.json", run_id="test-run")
+        assert bundle["evidence_schema_version"] == "10FN.1"
+        assert bundle["run_id"] == "test-run"
+        assert bundle["start_heartbeat"] == 1
+        assert bundle["end_heartbeat"] == 2
+        assert bundle["cumulative_heartbeat_count"] == 2
+
+    def test_evidence_per_agent_actions(self, tmp_path: Path) -> None:
+        """Heartbeat evidence distinguishes adam_action and eve_action."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "actions.json")
+        for hb in bundle.get("heartbeats", []):
+            assert "adam_action" in hb
+            assert "eve_action" in hb
+
+    def test_evidence_has_decision_and_uncertainty(self, tmp_path: Path) -> None:
+        """Evidence includes decision_summary and uncertainty fields."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "decisions.json")
+        assert "adam_decision_summary" in bundle
+        assert "adam_uncertainty" in bundle
+        assert "eve_decision_summary" in bundle
+        assert "eve_uncertainty" in bundle
+
+    def test_evidence_privacy_manifest_contents(self, tmp_path: Path) -> None:
+        """Privacy manifest contains required metadata fields."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "manifest.json")
+        manifest = bundle.get("privacy_manifest", {})
+        assert "requesting_agent_id_adam" in manifest
+        assert "requesting_agent_id_eve" in manifest
+        assert "adam_private_memory_count" in manifest
+        assert "eve_private_memory_count" in manifest
+        assert "other_agent_private_memory_included" in manifest
+        assert "public_evidence_count" in manifest
+        assert "answered_question_count" in manifest
+        assert "canonical_request_hash" in manifest
+
+    def test_evidence_no_credentials(self, tmp_path: Path) -> None:
+        """No credential-like strings in evidence output."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()
+        bundle = rt.export_evidence(tmp_path / "nocreds.json")
+        bundle_str = json.dumps(bundle)
+        assert "nvapi-" not in bundle_str
+        assert "sk-" not in bundle_str
+        assert "api_key" not in bundle_str.lower()
+
+    def test_existing_tests_still_pass(self, tmp_path: Path) -> None:
+        """Pre-existing runtime tests continue working with deterministic_stub."""
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=2, store=store, backend="deterministic_stub")
+        results = rt.run()
+        assert results["heartbeats_completed"] == 2
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ the outside — no module-global paths.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,25 +26,32 @@ from backend.world.first_pair_cognition_stub import (
     DeterministicStubBackend,
 )
 from backend.world.first_pair_persistence import (
+    CapabilityGrantRecord,
     FirstPairPersistenceStore,
     GoalRecord,
     HeartbeatRecord,
     IdentityRecord,
     PublicObjectRecord,
     QuestionRecord,
+    RuntimePolicyRecord,
     WorldStateRecord,
     append_heartbeat,
+    create_default_runtime_policy,
+    get_adjacent_tiles,
     get_persistence_root,
     initialize_first_pair_state,
     list_answered_questions_for_agent,
     list_unanswered_questions,
+    load_capability_grant,
     load_goals,
     load_heartbeat_history,
     load_memory,
     load_questions,
+    load_runtime_policy,
     save_goals,
     save_memory,
     save_questions,
+    save_runtime_policy,
     save_world_state,
     validate_persistence_integrity,
 )
@@ -94,6 +102,8 @@ class FirstPairRuntime:
 
         self._adam_memory: list[dict] = []
         self._eve_memory: list[dict] = []
+        self._runtime_policy: RuntimePolicyRecord | None = None
+        self._capability_grant: CapabilityGrantRecord | None = None
 
     # ------------------------------------------------------------------
     # Identity helpers
@@ -139,6 +149,9 @@ class FirstPairRuntime:
 
         self._goals = load_goals(self._store)
         self._questions = load_questions(self._store)
+
+        self._runtime_policy = load_runtime_policy(self._store)
+        self._capability_grant = load_capability_grant(self._store)
 
         is_fresh = (
             world_state.tick == 0
@@ -197,11 +210,51 @@ class FirstPairRuntime:
             if isinstance(obj, dict) and obj.get("tile_id") == position
         ]
 
+        # Visible tiles: use runtime policy topology if grant active, else habitat
+        if self._capability_grant and self._runtime_policy:
+            available_moves = get_adjacent_tiles(self._runtime_policy, position)
+            visible_tiles = [position] + available_moves
+            policy_allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
+            movement_allowed_flag = True
+        else:
+            available_moves = []
+            visible_tiles = self._habitat.get("observation_boundaries", {}).get(
+                agent_ref, [position]
+            )
+            policy_allowed = self._habitat.get("allowed_tile_ids", [])
+            movement_allowed_flag = self._habitat.get("movement_allowed", False)
+
+        # Visible public messages (addressed to this agent or public "all")
+        visible_msgs = [
+            m for m in self._world_state.public_messages
+            if isinstance(m, dict) and (
+                m.get("recipient") in (agent_ref, "all", "public")
+                or m.get("recipient") == view["canonical_agent_ref"]
+            )
+        ]
+
+        # Co-location: other agents at same tile
+        other_agents_here = []
+        if self._world_state.tile_occupancy:
+            for ref, tid in self._world_state.tile_occupancy.items():
+                if ref != agent_ref and tid == position:
+                    other_view = self._agent_view(ref) if self._identity_record else {}
+                    other_agents_here.append({
+                        "agent_ref": ref,
+                        "agent_name": other_view.get("canonical_name", ref),
+                    })
+
+        # Current runtime capabilities
+        caps = []
+        if self._capability_grant:
+            caps.append(self._capability_grant.capability_id)
+
+        # Relevant human answers (already in agent_answered_questions)
+        relevant_answers = agent_answered_questions
+
         observation = {
             "tile_id": position,
-            "visible_tiles": self._habitat.get("observation_boundaries", {}).get(
-                agent_ref, []
-            ),
+            "visible_tiles": visible_tiles,
             "objects_here": current_tile_objects,
         }
 
@@ -216,8 +269,8 @@ class FirstPairRuntime:
             goals=[g.__dict__ for g in agent_goals],
             unanswered_questions=[q.__dict__ for q in agent_pending_questions],
             world_public_objects=self._world_state.public_objects,
-            habitat_allowed_tiles=self._habitat.get("allowed_tile_ids", []),
-            habitat_movement_allowed=self._habitat.get("movement_allowed", False),
+            habitat_allowed_tiles=policy_allowed,
+            habitat_movement_allowed=movement_allowed_flag,
             previous_action=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
             # Dynamic pair identity
@@ -226,6 +279,12 @@ class FirstPairRuntime:
             other_agent_ref=view["other_agent_ref"],
             # Answered questions for this agent
             answered_questions=agent_answered_questions,
+            # Dynamic context for movement grant era
+            available_moves=available_moves,
+            current_runtime_capabilities=caps,
+            current_tile_occupants=other_agents_here,
+            visible_public_messages=visible_msgs,
+            relevant_human_answers=relevant_answers,
         )
 
     # ------------------------------------------------------------------
@@ -255,22 +314,30 @@ class FirstPairRuntime:
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
         if not self._habitat or not self._world_state:
             return {"status": "error", "reason": "Runtime not initialized"}
-        if not self._habitat.get("movement_allowed"):
-            return {"status": "blocked", "reason": "Movement not allowed by habitat boundary"}
+        if not self._capability_grant or not self._runtime_policy:
+            return {"status": "blocked", "reason": "No active movement grant. Request capability from human operator."}
+        if self._capability_grant.status != "granted":
+            return {"status": "blocked", "reason": f"Grant status is {self._capability_grant.status}"}
+
         target = action.get("target_tile")
-        allowed = self._habitat.get("allowed_tile_ids", [])
+        allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
         if target not in allowed:
-            return {"status": "blocked", "reason": f"Tile {target} not in allowed tiles"}
+            return {"status": "blocked", "reason": f"Tile {target} not in runtime policy allowed tiles"}
 
         current_pos = self._world_state.tile_occupancy.get(agent_ref)
         if current_pos is None:
             current_pos = self._habitat["starting_tile_ids"].get(agent_ref)
 
-        if target in self._world_state.tile_occupancy.values():
-            return {
-                "status": "blocked",
-                "reason": f"Tile {target} already occupied",
-            }
+        # Adjacent-only movement
+        adjacent = get_adjacent_tiles(self._runtime_policy, current_pos)
+        if target not in adjacent:
+            return {"status": "blocked", "reason": f"Cannot move from {current_pos} to {target}: not adjacent (adjacent: {adjacent})"}
+
+        # Co-location allowed only in shared-center
+        other_ref = "east_eve" if agent_ref == "east_adam" else "east_adam"
+        other_pos = self._world_state.tile_occupancy.get(other_ref)
+        if target == other_pos and target != "public-shared-center":
+            return {"status": "blocked", "reason": f"Tile {target} already occupied by the other agent (co-location only allowed in public-shared-center)"}
 
         self._world_state.tile_occupancy[agent_ref] = target
         return {"status": "success", "from": current_pos, "to": target}
@@ -286,7 +353,16 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Invalid object_id"}
         if object_id in self._world_state.public_objects:
             return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
-        if tile_id not in self._habitat.get("allowed_tile_ids", []):
+        # Must place on current tile
+        current_pos = self._world_state.tile_occupancy.get(
+            agent_ref, self._habitat["starting_tile_ids"][agent_ref]
+        )
+        if tile_id != current_pos:
+            return {"status": "rejected", "reason": f"Cannot place object on tile {tile_id}: you are at {current_pos}"}
+        allowed = self._habitat.get("allowed_tile_ids", [])
+        if self._runtime_policy:
+            allowed = self._runtime_policy.topology.get("allowed_tile_ids", allowed)
+        if tile_id not in allowed:
             return {"status": "rejected", "reason": f"Tile {tile_id} not in allowed tiles"}
 
         sanitized = sanitize_public_text(raw_description)
@@ -503,6 +579,10 @@ class FirstPairRuntime:
 
     def run(self, start_heartbeat: int | None = None) -> dict:
         self._load_or_initialize()
+        self._current_run_cognition: dict[str, dict] = {
+            "east_adam": {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
+            "east_eve": {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
+        }
 
         history = load_heartbeat_history(self._store)
         if start_heartbeat is not None:
@@ -531,9 +611,15 @@ class FirstPairRuntime:
                 if agent_ref == "east_adam":
                     adam_action = output.action
                     adam_outcome = outcome
+                    self._current_run_cognition["east_adam"]["observation_summary"] = output.observation_summary
+                    self._current_run_cognition["east_adam"]["decision_summary"] = output.decision_summary
+                    self._current_run_cognition["east_adam"]["uncertainty"] = output.uncertainty
                 else:
                     eve_action = output.action
                     eve_outcome = outcome
+                    self._current_run_cognition["east_eve"]["observation_summary"] = output.observation_summary
+                    self._current_run_cognition["east_eve"]["decision_summary"] = output.decision_summary
+                    self._current_run_cognition["east_eve"]["uncertainty"] = output.uncertainty
 
                 reflection = cycle.reflect(ctx, output.action, outcome)
                 self._apply_cognition_output(agent_ref, output, hb)
@@ -625,30 +711,106 @@ class FirstPairRuntime:
     # Evidence / inspection
     # ------------------------------------------------------------------
 
-    def export_evidence(self, output_path: Path) -> dict[str, Any]:
+    def export_evidence(self, output_path: Path, run_id: str = "") -> dict[str, Any]:
+        history = load_heartbeat_history(self._store)
+        process_start = datetime.now(timezone.utc)
+
+        adam_view = self._agent_view("east_adam") if self._identity_record else {}
+        eve_view = self._agent_view("east_eve") if self._identity_record else {}
+
+        # Per-agent heartbeat action evidence with decision/uncertainty
+        heartbeats_export: list[dict] = []
+        for h in history:
+            entry: dict = {
+                "heartbeat_number": h.heartbeat_number,
+            }
+            # Distinguish Adam and Eve actions
+            actions = h.action_taken or {}
+            entry["adam_action"] = actions.get("east_adam")
+            entry["eve_action"] = actions.get("east_eve")
+            entry["questions_raised"] = h.questions_raised
+            entry["goals_updated"] = h.goals_updated
+            # Only true mutations
+            entry["world_mutations"] = [
+                m for m in (h.world_mutations or [])
+                if m.get("action_type") in (
+                    "create_public_object", "modify_owned_public_object",
+                    "leave_public_message", "request_capability", "move",
+                ) and m.get("outcome", {}).get("status") == "success"
+            ]
+            heartbeats_export.append(entry)
+
+        # Privacy manifest
+        privacy_manifest = {
+            "requesting_agent_id_adam": adam_view.get("agent_id", ""),
+            "requesting_agent_id_eve": eve_view.get("agent_id", ""),
+            "adam_private_memory_count": len(self._adam_memory),
+            "eve_private_memory_count": len(self._eve_memory),
+            "other_agent_private_memory_included": 0,
+            "public_evidence_count": len(self._world_state.public_objects) + len(self._world_state.public_messages) if self._world_state else 0,
+            "answered_question_count": len([q for q in self._questions if q.status == "answered"]) if self._questions else 0,
+            "canonical_request_hash": hashlib.sha256(
+                json.dumps({
+                    "adam_mem_count": len(self._adam_memory),
+                    "eve_mem_count": len(self._eve_memory),
+                    "public_obj_count": len(self._world_state.public_objects) if self._world_state else 0,
+                    "goal_count": len(self._goals),
+                }, sort_keys=True).encode()
+            ).hexdigest()[:16],
+        }
+
+        # Get provider info from first available backend
+        provider_type = ""
+        model_name = ""
+        try:
+            backend = self._get_cognition_backend("east_adam")
+            if hasattr(backend, "provider_type"):
+                provider_type = backend.provider_type
+            if hasattr(backend, "model_name"):
+                model_name = backend.model_name
+        except Exception:
+            pass
+
         bundle: dict[str, Any] = {
-            "adam_identity": (
-                self._agent_view("east_adam") if self._identity_record else None
-            ),
-            "eve_identity": (
-                self._agent_view("east_eve") if self._identity_record else None
-            ),
-            "habitat": self._habitat,
-            "world_state": self._world_state.__dict__ if self._world_state else None,
+            "evidence_schema_version": "10FN.1",
+            "run_id": run_id,
+            "provider_type": provider_type,
+            "model_name": model_name,
+            "root": str(self._store.root) if self._store else "",
+            "process_started_at_utc": self._world_state.updated_at_utc if self._world_state else "",
+            "process_finished_at_utc": process_start.isoformat(),
+            "start_heartbeat": history[0].heartbeat_number if history else 0,
+            "end_heartbeat": history[-1].heartbeat_number if history else 0,
+            "new_heartbeat_count": 0,
+            "cumulative_heartbeat_count": len(history),
+            "initialized_or_resumed": "resumed" if len(history) > 1 else "initialized",
+            "adam_id": adam_view.get("agent_id", ""),
+            "eve_id": eve_view.get("agent_id", ""),
+            "adam_memory_count_before": 0,
+            "adam_memory_count_after": len(self._adam_memory),
+            "eve_memory_count_before": 0,
+            "eve_memory_count_after": len(self._eve_memory),
+            "goals_before": [],
+            "goals_after": [g.__dict__ for g in self._goals],
+            "questions_answered_during_run": [
+                q.__dict__ for q in self._questions if q.status == "answered"
+            ],
+            "active_capability_grants": [
+                self._capability_grant.__dict__
+            ] if self._capability_grant else [],
+            "adam_observation_summary": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("observation_summary", ""),
+            "adam_decision_summary": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("decision_summary", ""),
+            "adam_uncertainty": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("uncertainty", ""),
+            "eve_observation_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("observation_summary", ""),
+            "eve_decision_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("decision_summary", ""),
+            "eve_uncertainty": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("uncertainty", ""),
+            "heartbeats": heartbeats_export,
+            "privacy_manifest": privacy_manifest,
             "adam_memory": self._adam_memory,
             "eve_memory": self._eve_memory,
             "goals": [g.__dict__ for g in self._goals],
             "questions": [q.__dict__ for q in self._questions],
-            "heartbeat_log": [
-                {
-                    "heartbeat_number": h.heartbeat_number,
-                    "agent_id": h.agent_id,
-                    "action_taken": h.action_taken,
-                    "world_mutations": h.world_mutations[:3],
-                }
-                for h in load_heartbeat_history(self._store)
-            ],
-            "exported_at_utc": datetime.now(timezone.utc).isoformat(),
+            "exported_at_utc": process_start.isoformat(),
         }
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(bundle, f, indent=2, default=str, sort_keys=True)
