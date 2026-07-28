@@ -38,8 +38,10 @@ from backend.world.first_pair_persistence import (
     WorldStateRecord,
     append_heartbeat,
     append_memory_selection_manifest,
+    append_summary,
     create_default_runtime_policy,
     derive_relationship_event_ids,
+    derive_summaries_for_omitted,
     get_adjacent_tiles,
     get_persistence_root,
     initialize_first_pair_state,
@@ -60,6 +62,7 @@ from backend.world.first_pair_persistence import (
     save_questions,
     save_runtime_policy,
     save_world_state,
+    select_human_context,
     select_private_memories,
     validate_persistence_integrity,
 )
@@ -257,9 +260,6 @@ class FirstPairRuntime:
         if self._capability_grant:
             caps.append(self._capability_grant.capability_id)
 
-        # Relevant human answers (already in agent_answered_questions)
-        relevant_answers = agent_answered_questions
-
         observation = {
             "tile_id": position,
             "visible_tiles": visible_tiles,
@@ -267,22 +267,20 @@ class FirstPairRuntime:
         }
 
         # --- Bounded memory selection ---
-        # Compute recent cutoff (last 4 heartbeats)
         history = load_heartbeat_history(self._store)
         recent_cutoff = max(0, heartbeat_number - 4) if history else 0
 
-        # Get visible object IDs and message IDs
         visible_object_ids = {o.get("object_id", "") for o in current_tile_objects}
         visible_message_ids = {m.get("message_id", "") for m in visible_msgs}
 
-        # Get relationship event memory IDs for relevance boosting
         rel_events = load_relationship_events(self._store)
         rel_memory_ids = derive_relationship_event_ids(rel_events)
 
-        # Select bounded memories
+        # Select bounded memories with owner-bound IDs and dynamic identities
         selected_mems, sel_manifest = select_private_memories(
             memories=memory_list,
             agent_id=view["agent_id"],
+            owner_agent_id=view["agent_id"],
             goals=[g.__dict__ for g in agent_goals],
             position=position,
             visible_tiles=set(visible_tiles),
@@ -290,22 +288,52 @@ class FirstPairRuntime:
             visible_message_ids=visible_message_ids,
             relationship_event_memory_ids=rel_memory_ids,
             recent_cutoff_hb=recent_cutoff,
+            other_agent_ref=view["other_agent_ref"],
+            other_agent_name=view["other_agent_name"],
         )
 
-        # Attach agent_id to manifest for per-agent tracking
         sel_manifest["requesting_agent_id"] = view["agent_id"]
         sel_manifest["heartbeat"] = heartbeat_number
 
-        # Persist the manifest (append-only log)
+        # --- Bounded human context (max 4 combined) ---
+        active_goal_ids = {g.goal_id for g in agent_goals if g.status == "active"}
+        human_selected, human_answered_ids, human_unresolved_ids, human_omitted_count = select_human_context(
+            answered_questions=agent_answered_questions,
+            unresolved_questions=[q.__dict__ for q in agent_pending_questions],
+            active_goal_ids=active_goal_ids,
+        )
+        human_answered = [r for r in human_selected if r.get("status") == "answered"]
+        human_unresolved = [r for r in human_selected if r.get("status") == "pending"]
+        # Update manifest
+        sel_manifest["human_context_count"] = len(human_selected)
+        sel_manifest["human_context_answered_ids"] = human_answered_ids
+        sel_manifest["human_context_unresolved_ids"] = human_unresolved_ids
+        sel_manifest["human_context_omitted_count"] = human_omitted_count
+
+        # Persist the manifest
         if self._store:
             append_memory_selection_manifest(self._store, sel_manifest)
 
-        # Load summaries and relationship events for context
-        summaries = load_summaries(self._store)
+        # --- Derived summaries for older omitted memories ---
+        selected_ids = {m.get("memory_id", "") for m in selected_mems}
+        derived_sums, included_summary_ids = derive_summaries_for_omitted(
+            memory_list=memory_list,
+            selected_ids=selected_ids,
+            owner_agent_id=view["agent_id"],
+        )
+        # Persist validated derived summaries (skip existing via validate+append)
+        for ds in derived_sums:
+            append_summary(self._store, ds, memory_list=memory_list)
+        # Update manifest with actual included summary IDs
+        sel_manifest["summary_ids"] = included_summary_ids
+
+        # Load owned summaries for context (capped to included IDs)
+        all_summaries = load_summaries(self._store)
         agent_summaries = [
-            asdict(s) for s in summaries
-            if s.owner_agent_id == view["agent_id"]
+            asdict(s) for s in all_summaries
+            if s.owner_agent_id == view["agent_id"] and s.summary_id in included_summary_ids
         ]
+
         rel_events_export = [
             asdict(e) for e in rel_events
             if e.actor_agent_id == view["agent_id"] or e.other_agent_id == view["agent_id"]
@@ -320,25 +348,21 @@ class FirstPairRuntime:
             observation=observation,
             memory=list(memory_list),
             goals=[g.__dict__ for g in agent_goals],
-            unanswered_questions=[q.__dict__ for q in agent_pending_questions],
+            unanswered_questions=human_unresolved,
             world_public_objects=self._world_state.public_objects,
             habitat_allowed_tiles=policy_allowed,
             habitat_movement_allowed=movement_allowed_flag,
             previous_action=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
-            # Dynamic pair identity
             other_agent_id=view["other_agent_id"],
             other_agent_name=view["other_agent_name"],
             other_agent_ref=view["other_agent_ref"],
-            # Answered questions for this agent
-            answered_questions=agent_answered_questions,
-            # Dynamic context for movement grant era
+            answered_questions=human_answered,
             available_moves=available_moves,
             current_runtime_capabilities=caps,
             current_tile_occupants=other_agents_here,
             visible_public_messages=visible_msgs,
-            relevant_human_answers=relevant_answers,
-            # Bounded memory selection fields
+            relevant_human_answers=human_answered,
             selected_private_memories=selected_mems,
             derived_memory_summaries=agent_summaries,
             public_relationship_events=rel_events_export,

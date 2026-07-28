@@ -432,30 +432,33 @@ def get_adjacent_tiles(policy: RuntimePolicyRecord, tile_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _assign_memory_id(memory_entry: dict, index: int) -> str:
-    """Derive a deterministic, stable memory ID from an entry and its position.
+_MEMORY_ID_DERIVATION_VERSION = "v2-owner-bound"
 
-    Legacy entries that lack a ``memory_id`` key receive one through this
-    function.  The ID is a function of the entry content and the storage index,
-    so it remains stable across repeated derivation runs as long as the raw
-    memory list is not re-ordered.
+def _derive_memory_id(owner_agent_id: str, memory_entry: dict) -> str:
+    """Versioned owner-bound memory-ID derivation.
+
+    Uses the full raw-memory canonical material plus the owner identity so
+    identical content belonging to different agents produces different IDs.
+    No list index or content truncation is used.
     """
-    content = memory_entry.get("content", "")
-    hb = memory_entry.get("heartbeat", 0)
-    raw = f"{hb}:{index}:{content[:80]}"
-    return f"mem-{_hash_canonical(raw)[:16]}"
+    material = dict(memory_entry)
+    material.pop("memory_id", None)
+    material["_owner_agent_id"] = owner_agent_id
+    return f"mem-{_hash_canonical(material)[:16]}"
 
 
-def _ensure_memory_ids(memory_list: list[dict]) -> list[dict]:
-    """Assign deterministic memory IDs to any entry that lacks one.
+def _ensure_memory_ids(memory_list: list[dict], owner_agent_id: str = "") -> list[dict]:
+    """Assign versioned owner-bound memory IDs to any entry that lacks one.
 
     The returned list is a shallow copy; the original entries are not mutated.
+    When owner_agent_id is empty (legacy path), derivations use only the
+    material content but the ID is still a function of all canonical data.
     """
     result = []
-    for i, entry in enumerate(memory_list):
+    for entry in memory_list:
         if "memory_id" not in entry:
             entry = dict(entry)
-            entry["memory_id"] = _assign_memory_id(entry, i)
+            entry["memory_id"] = _derive_memory_id(owner_agent_id, entry)
         result.append(entry)
     return result
 
@@ -468,6 +471,8 @@ def _score_relevance(
     visible_object_ids: set[str],
     visible_message_ids: set[str],
     relationship_event_memory_ids: set[str],
+    other_agent_ref: str = "",
+    other_agent_name: str = "",
 ) -> int:
     """Score a memory entry for relevance (higher = more important).
 
@@ -478,11 +483,13 @@ def _score_relevance(
       4. human answers / capability outcomes   -> +20
       5. recent (within last 4 heartbeats)     -> +10
       6. default base                          -> +1
+
+    No agent name or reference is hard-coded. The other-agent relevance
+    boost uses the dynamic other_agent_ref and other_agent_name.
     """
     score = 0
     content = str(memory.get("content", ""))
     mem_type = memory.get("type", "")
-    mem_hb = memory.get("heartbeat", 0)
     mem_id = memory.get("memory_id", "")
 
     # Tier 1: active goals
@@ -490,7 +497,6 @@ def _score_relevance(
         if gid in content or gid in mem_id:
             score += 100
             break
-    # Tier 1 also: goal-related type
     if mem_type == "goal_update":
         score += 100
 
@@ -506,20 +512,19 @@ def _score_relevance(
             score += 50
             break
 
-    # Tier 3: visible messages or other agent
+    # Tier 3: visible messages or other agent (dynamic identities)
     for mid in visible_message_ids:
         if mid in content:
             score += 30
             break
-    if "eve" in content.lower() or "east_eve" in content or "contact-adam" in content:
+    if other_agent_ref and other_agent_ref in content:
+        score += 30
+    elif other_agent_name and other_agent_name.lower() in content.lower():
         score += 30
 
     # Tier 4: human answers
     if mem_type == "human_answer":
         score += 20
-
-    # Tier 5: recent (last 4 heartbeats from max)
-    # (handled externally via _recent_cutoff)
 
     # Relationship event referenced
     if mem_id and mem_id in relationship_event_memory_ids:
@@ -535,30 +540,36 @@ def _score_relevance(
 def select_private_memories(
     memories: list[dict],
     agent_id: str,
-    goals: list[dict],
-    position: str,
-    visible_tiles: set[str],
-    visible_object_ids: set[str],
-    visible_message_ids: set[str],
-    relationship_event_memory_ids: set[str],
+    owner_agent_id: str = "",
+    goals: list[dict] | None = None,
+    position: str = "",
+    visible_tiles: set[str] | None = None,
+    visible_object_ids: set[str] | None = None,
+    visible_message_ids: set[str] | None = None,
+    relationship_event_memory_ids: set[str] | None = None,
     recent_cutoff_hb: int = 0,
+    other_agent_ref: str = "",
+    other_agent_name: str = "",
 ) -> tuple[list[dict], dict]:
     """Select a bounded subset of private memories for a model request.
 
     Returns (selected_memories, manifest) where manifest is a dict of metadata.
     Selection is deterministic for identical state and context.
+    Uses dynamically provided other-agent identities — no hard-coded names.
     """
-    ensured = _ensure_memory_ids(memories)
-    active_goal_ids = {g["goal_id"] for g in goals if g.get("status") == "active"}
-    scored: list[tuple[int, int, dict]] = []
+    ensured = _ensure_memory_ids(memories, owner_agent_id=owner_agent_id)
+    active_goal_ids = {g["goal_id"] for g in (goals or []) if g.get("status") == "active"}
+    scored: list[tuple[int, int, int, dict]] = []
 
     for i, mem in enumerate(ensured):
         score = _score_relevance(
-            mem, active_goal_ids, position, visible_tiles,
-            visible_object_ids, visible_message_ids,
-            relationship_event_memory_ids,
+            mem, active_goal_ids, position,
+            visible_tiles or set(), visible_object_ids or set(),
+            visible_message_ids or set(),
+            relationship_event_memory_ids or set(),
+            other_agent_ref=other_agent_ref,
+            other_agent_name=other_agent_name,
         )
-        # Recent bonus
         hb = mem.get("heartbeat", 0)
         if recent_cutoff_hb > 0 and hb >= recent_cutoff_hb:
             score += 10
@@ -617,6 +628,7 @@ def select_private_memories(
 
     manifest = {
         "requesting_agent_id": agent_id,
+        "memory_id_derivation_version": _MEMORY_ID_DERIVATION_VERSION,
         "raw_private_memory_count": len(ensured),
         "selected_private_memory_ids": [m.get("memory_id", "") for m in selected],
         "selected_private_memory_count": len(selected),
@@ -624,6 +636,10 @@ def select_private_memories(
         "summary_ids": [],
         "omitted_private_memory_count": len(ensured) - len(selected),
         "other_agent_private_memory_count_included": 0,
+        "human_context_count": 0,
+        "human_context_answered_ids": [],
+        "human_context_unresolved_ids": [],
+        "human_context_omitted_count": 0,
         "selection_reason_categories": {
             "active_goal_count": len(active_goal_ids),
             "position_relevant": position,
@@ -631,11 +647,73 @@ def select_private_memories(
         },
         "canonical_selection_hash": _hash_canonical({
             "agent_id": agent_id,
+            "derivation_version": _MEMORY_ID_DERIVATION_VERSION,
             "ids": [m.get("memory_id", "") for m in selected],
         }),
     }
 
     return selected, manifest
+
+
+# ---------------------------------------------------------------------------
+# Bounded Human Context Selection
+# ---------------------------------------------------------------------------
+
+_MAX_COMBINED_HUMAN_RECORDS = 4
+
+
+def _score_human_context(
+    question: dict,
+    active_goal_ids: set[str],
+) -> int:
+    """Score a human-context record for deterministic selection."""
+    score = 0
+    qid = question.get("question_id", "")
+    text = str(question.get("question", "")) + str(question.get("reason_for_asking", ""))
+    for gid in active_goal_ids:
+        if gid in text or gid in qid:
+            score += 100
+            break
+    if question.get("status") == "pending":
+        score += 10  # unresolved before answered
+    return score
+
+
+def select_human_context(
+    answered_questions: list[dict],
+    unresolved_questions: list[dict],
+    active_goal_ids: set[str],
+) -> tuple[list[dict], list[str], list[str], int]:
+    """Select at most four combined answered and unresolved human-context records.
+
+    Returns (selected_records, answered_ids, unresolved_ids, omitted_count).
+    Selection is deterministic:
+      1. connection to an active goal or capability;
+      2. addressed agent ownership (pre-filtered by caller);
+      3. unresolved before answered when both are equally relevant;
+      4. recency (heartbeat);
+      5. stable question ID tie-break.
+    """
+    scored: list[tuple[int, int, str, dict]] = []
+    for q in answered_questions:
+        s = _score_human_context(q, active_goal_ids)
+        hb = q.get("heartbeat", 0)
+        scored.append((-s, -hb, q.get("question_id", ""), q))
+    for q in unresolved_questions:
+        s = _score_human_context(q, active_goal_ids)
+        hb = q.get("heartbeat", 0)
+        scored.append((-s, -hb, q.get("question_id", ""), q))
+
+    scored.sort(key=lambda x: (x[0], x[1], x[2]))
+
+    selected = scored[:_MAX_COMBINED_HUMAN_RECORDS]
+    omitted = scored[_MAX_COMBINED_HUMAN_RECORDS:]
+
+    selected_records = [s[3] for s in selected]
+    all_answered_ids = [s[3].get("question_id", "") for s in selected if s[3].get("status") == "answered"]
+    all_unresolved_ids = [s[3].get("question_id", "") for s in selected if s[3].get("status") == "pending"]
+
+    return selected_records, all_answered_ids, all_unresolved_ids, len(omitted)
 
 
 # ---------------------------------------------------------------------------
@@ -695,10 +773,151 @@ def save_summaries(store: FirstPairPersistenceStore, summaries: list[MemorySumma
     )
 
 
-def append_summary(store: FirstPairPersistenceStore, summary: MemorySummaryRecord) -> None:
-    summaries = load_summaries(store)
-    summaries.append(summary)
-    save_summaries(store, summaries)
+def validate_summary(
+    summary: MemorySummaryRecord,
+    memory_list: list[dict],
+    existing_summaries: list[MemorySummaryRecord],
+) -> list[str]:
+    """Fail-closed validation for a summary before append.
+
+    Returns a list of error strings (empty = valid).
+    """
+    errors: list[str] = []
+    if not summary.summary_id:
+        errors.append("summary_id is required")
+    if not summary.owner_agent_id:
+        errors.append("owner_agent_id is required")
+    if not summary.summary or not summary.summary.strip():
+        errors.append("summary text must be non-empty")
+    if len(summary.summary) > 2000:
+        errors.append("summary text exceeds 2000 characters")
+    if not summary.covered_memory_ids:
+        errors.append("covered_memory_ids is required")
+    else:
+        if len(summary.covered_memory_ids) != len(set(summary.covered_memory_ids)):
+            errors.append("covered_memory_ids contains duplicates")
+        if summary.covered_heartbeat_range and len(summary.covered_heartbeat_range) != 2:
+            errors.append("covered_heartbeat_range must have exactly 2 values")
+        # Resolve against raw memories only when available
+        if memory_list:
+            ensured = _ensure_memory_ids(memory_list, owner_agent_id=summary.owner_agent_id)
+            id_map = {m["memory_id"]: m for m in ensured}
+            for mid in summary.covered_memory_ids:
+                if mid not in id_map:
+                    errors.append(f"covered_memory_id {mid} not found in raw memories")
+            # Source commitment: recompute from covered memory material
+            covered_mems = [id_map[mid] for mid in summary.covered_memory_ids if mid in id_map]
+            covered_canonical = _canonical_json({"memories": covered_mems, "owner": summary.owner_agent_id})
+            recomputed_source = _hash_canonical(covered_canonical)
+            if summary.source_commitment and summary.source_commitment != recomputed_source:
+                errors.append(f"source_commitment mismatch: got {summary.source_commitment}, expected {recomputed_source}")
+    # Integrity commitment check
+    if summary.integrity_commitment:
+        check = MemorySummaryRecord(
+            summary_id=summary.summary_id,
+            owner_agent_id=summary.owner_agent_id,
+            covered_memory_ids=list(summary.covered_memory_ids),
+            covered_heartbeat_range=list(summary.covered_heartbeat_range),
+            summary=summary.summary,
+            salient_entities=list(summary.salient_entities),
+            related_goal_ids=list(summary.related_goal_ids),
+            related_public_object_ids=list(summary.related_public_object_ids),
+            related_message_ids=list(summary.related_message_ids),
+            created_at_utc=summary.created_at_utc,
+            derivation_method=summary.derivation_method,
+            source_commitment=summary.source_commitment,
+        ).seal()
+        if check.integrity_commitment != summary.integrity_commitment:
+            errors.append("integrity_commitment validation failed")
+    # Duplicate check
+    for existing in existing_summaries:
+        if existing.summary_id == summary.summary_id:
+            errors.append(f"duplicate summary_id: {summary.summary_id}")
+            break
+    return errors
+
+
+def append_summary(
+    store: FirstPairPersistenceStore,
+    summary: MemorySummaryRecord,
+    memory_list: list[dict] | None = None,
+) -> list[str]:
+    """Append a validated summary. Fail-closed: leaves store unchanged on error.
+
+    Returns a list of error strings (empty = success).
+    """
+    existing = load_summaries(store)
+    errors = validate_summary(summary, memory_list or [], existing)
+    if errors:
+        return errors
+    existing.append(summary)
+    save_summaries(store, existing)
+    return []
+
+
+def derive_summaries_for_omitted(
+    memory_list: list[dict],
+    selected_ids: set[str],
+    owner_agent_id: str,
+    max_summaries: int = 4,
+    max_chars: int = 4000,
+) -> tuple[list[MemorySummaryRecord], list[str]]:
+    """Deterministically derive extractive summaries for older omitted memories.
+
+    Groups omitted memories by heartbeat ranges and produces concise factual
+    excerpts. Returns (summaries, included_summary_ids). No emotions, beliefs
+    or intentions are ascribed.
+    """
+    ensured = _ensure_memory_ids(memory_list, owner_agent_id=owner_agent_id)
+    omitted = [m for m in ensured if m.get("memory_id", "") not in selected_ids]
+    if not omitted:
+        return [], []
+
+    # Sort by heartbeat
+    omitted.sort(key=lambda m: m.get("heartbeat", 0))
+
+    summaries: list[MemorySummaryRecord] = []
+    included_ids: list[str] = []
+    total_chars = 0
+    used_memory_ids: set[str] = set()
+
+    for mem in omitted:
+        if len(summaries) >= max_summaries:
+            break
+        mid = mem.get("memory_id", "")
+        if mid in used_memory_ids:
+            continue
+        content = str(mem.get("content", ""))
+        hb = mem.get("heartbeat", 0)
+        mem_type = mem.get("type", "unknown")
+        excerpt = content[:300]
+        summary_text = f"[derived from heartbeat {hb} ({mem_type})] {excerpt}"
+        if total_chars + len(summary_text) > max_chars:
+            break
+        covered_ids = [mid]
+        covered_range = [hb, hb]
+        summ = MemorySummaryRecord(
+            summary_id=f"sum-derived-{_hash_canonical({'owner': owner_agent_id, 'hb': hb, 'content': content[:100]})[:12]}",
+            owner_agent_id=owner_agent_id,
+            covered_memory_ids=covered_ids,
+            covered_heartbeat_range=covered_range,
+            summary=summary_text,
+            salient_entities=[],
+            related_goal_ids=[],
+            related_public_object_ids=[],
+            related_message_ids=[],
+            derivation_method="deterministic_extractive",
+            source_commitment=_hash_canonical({
+                "memories": [mem],
+                "owner": owner_agent_id,
+            }),
+        ).seal()
+        summaries.append(summ)
+        included_ids.append(summ.summary_id)
+        used_memory_ids.add(mid)
+        total_chars += len(summary_text)
+
+    return summaries, included_ids
 
 
 # ---------------------------------------------------------------------------
@@ -756,10 +975,19 @@ def save_relationship_events(
 
 def append_relationship_event(
     store: FirstPairPersistenceStore, event: RelationshipEventRecord
-) -> None:
+) -> bool:
+    """Idempotent append: when event_id already exists, do nothing.
+
+    Returns True when the event was actually appended, False when skipped
+    (duplicate).
+    """
     events = load_relationship_events(store)
+    for existing in events:
+        if existing.event_id == event.event_id:
+            return False
     events.append(event)
     save_relationship_events(store, events)
+    return True
 
 
 def derive_relationship_event_ids(events: list[RelationshipEventRecord]) -> set[str]:
@@ -785,11 +1013,28 @@ def maybe_record_relationship_event(
 ) -> RelationshipEventRecord | None:
     """Record an observed social interaction event.
 
-    Only validated persisted outcomes create ledger entries.  Rejected actions
-    never enter the ledger.  No emotional/trust/social scores are assigned.
+    Only validated persisted outcomes create ledger entries.
+    Event includes the target message, object or movement commitment in the
+    deterministic event-ID material so distinct same-heartbeat interactions
+    do not collide.
+
+    Recording conditions:
+      - message_sent: successful persisted message to other agent or public.
+      - co_location: successful move; actor and other actually co-located
+        after persistence.
+      - public_object_creation: successful creation; both agents co-located
+        at that tile during that heartbeat.
+      - inspect_other_object: successful inspection of an object whose
+        creator_agent_id equals the other agent's persistent ID.
+
+    Does NOT record:
+      - creation while alone
+      - inspection of the actor's own object
+      - no_action, rejected actions, proposed actions
     """
     if outcome.get("status") != "success":
         return None
+
     valid_event_types = {
         "leave_public_message": "message_sent",
         "move": "co_location",
@@ -799,37 +1044,73 @@ def maybe_record_relationship_event(
     if action_type not in valid_event_types:
         return None
 
-    # Co-location events: only record when moving to the other agent's tile
-    if action_type == "move" and outcome.get("to"):
-        other_pos = world_state.tile_occupancy.get(
-            "east_eve" if actor_ref == "east_adam" else "east_adam"
-        )
-        if outcome["to"] != other_pos:
+    event_type = valid_event_types[action_type]
+
+    # --- Per-type semantic checks ---
+    other_ref = "east_eve" if actor_ref == "east_adam" else "east_adam"
+
+    if action_type == "create_public_object":
+        # Only record when both agents are co-located at that tile
+        actor_pos = outcome.get("tile_id") or world_state.tile_occupancy.get(actor_ref)
+        other_pos = world_state.tile_occupancy.get(other_ref)
+        if not actor_pos or not other_pos or actor_pos != other_pos:
             return None
 
-    evidence_refs = []
+    if action_type == "move":
+        target = outcome.get("to")
+        if not target:
+            return None
+        other_pos = world_state.tile_occupancy.get(other_ref)
+        if target != other_pos:
+            return None
+
+    if action_type == "inspect_public_object":
+        obj_id = outcome.get("target_object_id") or (outcome.get("object") or {}).get("object_id", "")
+        if not obj_id:
+            return None
+        obj = world_state.public_objects.get(obj_id)
+        if not obj or not isinstance(obj, dict):
+            return None
+        if obj.get("creator_agent_id") != other_agent_id:
+            return None
+
+    if action_type == "leave_public_message":
+        recipient = outcome.get("recipient", "")
+        if recipient not in (other_ref, other_agent_id, "all", "public"):
+            return None
+
+    # --- Build evidence references ---
+    evidence_refs: list[str] = []
     if outcome.get("object_id"):
-        oid = outcome["object_id"]
-        # Find the memory_id of the creation memory for this object
-        evidence_refs.append(f"obj-{oid}")
+        evidence_refs.append(f"obj-{outcome['object_id']}")
     if outcome.get("message_id"):
         evidence_refs.append(f"msg-{outcome['message_id']}")
     if outcome.get("from") and outcome.get("to"):
         evidence_refs.append(f"move-{outcome['from']}-{outcome['to']}")
+    if outcome.get("target_object_id"):
+        evidence_refs.append(f"inspect-{outcome['target_object_id']}")
+
+    # Include target commitment in event-ID material
+    target_commitment = _hash_canonical({
+        "action": action_type,
+        "outcome": outcome,
+    })[:16]
 
     event = RelationshipEventRecord(
         event_id=_hash_canonical({
-            "actor": actor_agent_id, "hb": heartbeat_number, "type": action_type,
+            "actor": actor_agent_id,
+            "hb": heartbeat_number,
+            "type": action_type,
+            "target": target_commitment,
         })[:16],
         heartbeat=heartbeat_number,
         actor_agent_id=actor_agent_id,
         other_agent_id=other_agent_id,
-        event_type=valid_event_types[action_type],
+        event_type=event_type,
         public_evidence_references=evidence_refs,
         resulting_public_state_commitment=_hash_canonical({
             "action_type": action_type,
             "outcome": outcome,
-            "objects": list(world_state.public_objects.keys()),
         })[:16],
     ).seal()
     append_relationship_event(store, event)
