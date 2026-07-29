@@ -740,13 +740,24 @@ class MemorySummaryRecord:
     def semantic_commitment(self) -> str:
         """Canonical identity of the summary's semantic content.
 
-        Excludes created_at_utc and integrity_commitment so that
-        semantically identical summaries derived at different wall-clock
-        times produce the same commitment and can be reused.
+        Excludes summary_id (itself derived from this commitment),
+        created_at_utc and integrity_commitment so that semantically
+        identical summaries produce the same commitment regardless of
+        when they were created or whether an ID has been assigned.
         """
-        material = asdict(self)
-        material.pop("created_at_utc", None)
-        material.pop("integrity_commitment", None)
+        material = {
+            "semantic_commitment_version": "v1",
+            "owner_agent_id": self.owner_agent_id,
+            "covered_memory_ids": self.covered_memory_ids,
+            "covered_heartbeat_range": self.covered_heartbeat_range,
+            "summary": self.summary,
+            "salient_entities": self.salient_entities,
+            "related_goal_ids": self.related_goal_ids,
+            "related_public_object_ids": self.related_public_object_ids,
+            "related_message_ids": self.related_message_ids,
+            "derivation_method": self.derivation_method,
+            "source_commitment": self.source_commitment,
+        }
         return _hash_canonical(material)
 
     def seal(self) -> MemorySummaryRecord:
@@ -806,19 +817,18 @@ def compute_summary_source_commitment(
     })
 
 
-def validate_summary(
+def validate_summary_record(
     summary: MemorySummaryRecord,
     memory_list: list[dict],
-    existing_summaries: list[MemorySummaryRecord],
 ) -> list[str]:
-    """Fail-closed validation for a summary before append.
+    """Validate one summary record independently of any summary store.
 
+    Checks owner, covered IDs, raw-memory resolution, heartbeat range,
+    source commitment, derivation allow-list, derived label, integrity
+    commitment, and semantic-derived summary ID.
     Returns a list of error strings (empty = valid).
-    All commitment and metadata fields are required.
     """
     errors: list[str] = []
-    if not summary.summary_id:
-        errors.append("summary_id is required")
     if not summary.owner_agent_id:
         errors.append("owner_agent_id is required")
     if not summary.summary or not summary.summary.strip():
@@ -834,7 +844,6 @@ def validate_summary(
             errors.append("covered_memory_ids contains duplicates")
         if len(summary.covered_heartbeat_range) != 2:
             errors.append("covered_heartbeat_range must have exactly 2 values")
-        # memory_list is required when covered IDs are present
         if not memory_list:
             errors.append("memory_list is required for covered_memory_ids validation")
         else:
@@ -847,7 +856,6 @@ def validate_summary(
                 else:
                     resolved.append(id_map[mid])
             if resolved:
-                # Heartbeat range check
                 hbs = [m.get("heartbeat", 0) for m in resolved]
                 expected_range = [min(hbs), max(hbs)]
                 if summary.covered_heartbeat_range != expected_range:
@@ -855,7 +863,6 @@ def validate_summary(
                         f"covered_heartbeat_range {summary.covered_heartbeat_range} "
                         f"does not match raw evidence {expected_range}"
                     )
-                # Source commitment
                 expected_source = compute_summary_source_commitment(
                     summary.owner_agent_id, resolved
                 )
@@ -866,13 +873,10 @@ def validate_summary(
                         f"source_commitment mismatch: got {summary.source_commitment}, "
                         f"expected {expected_source}"
                     )
-    # Derivation method
     if not summary.derivation_method:
         errors.append("derivation_method is required")
     elif summary.derivation_method not in _ALLOWED_DERIVATION_METHODS:
         errors.append(f"derivation_method '{summary.derivation_method}' not in allow-list")
-
-    # Integrity commitment — always required
     if not summary.integrity_commitment:
         errors.append("integrity_commitment is required")
     else:
@@ -892,9 +896,30 @@ def validate_summary(
         ).seal()
         if check.integrity_commitment != summary.integrity_commitment:
             errors.append("integrity_commitment validation failed")
+    # Semantic-derived summary ID check
+    if summary.summary_id:
+        expected_id = "sum-derived-" + summary.semantic_commitment()[:16]
+        if summary.summary_id != expected_id:
+            errors.append(
+                f"summary_id {summary.summary_id} does not match "
+                f"semantic-derived ID {expected_id}"
+            )
+    return errors
 
-    # Duplicate handling: compare semantic commitments (excludes created_at_utc
-    # and integrity_commitment so cross-heartbeat derivations produce stable IDs).
+
+def validate_summary(
+    summary: MemorySummaryRecord,
+    memory_list: list[dict],
+    existing_summaries: list[MemorySummaryRecord],
+) -> list[str]:
+    """Fail-closed validation for a summary before append.
+
+    Composes validate_summary_record with duplicate-store checks.
+    Returns a list of error strings (empty = valid).
+    """
+    errors = validate_summary_record(summary, memory_list)
+
+    # Duplicate handling: compare semantic commitments
     for existing in existing_summaries:
         if existing.summary_id == summary.summary_id:
             if existing.semantic_commitment() == summary.semantic_commitment():
@@ -926,21 +951,24 @@ def append_summary(
     candidate_sem = summary.semantic_commitment()
 
     # Check for idempotent reuse: semantically identical summary already exists.
-    # Before reusing, validate evidence against the supplied memory_list.
     for exist in existing:
         if exist.summary_id == summary.summary_id:
-            if exist.semantic_commitment() == candidate_sem:
-                # Re-validate evidence before returning reuse success
-                re_errors = validate_summary(summary, memory_list, existing)
-                if re_errors:
-                    return {"ok": False, "summary_id": summary.summary_id,
-                            "status": "rejected", "errors": re_errors}
-                return {"ok": True, "summary_id": summary.summary_id,
-                        "status": "reused", "errors": []}
-            else:
+            if exist.semantic_commitment() != candidate_sem:
                 return {"ok": False, "summary_id": summary.summary_id,
                         "status": "rejected",
                         "errors": [f"duplicate summary_id with conflicting material: {summary.summary_id}"]}
+            # Semantic match — validate BOTH sides before allowing reuse
+            exist_errors = validate_summary_record(exist, memory_list)
+            if exist_errors:
+                return {"ok": False, "summary_id": summary.summary_id,
+                        "status": "rejected",
+                        "errors": [f"existing persisted summary failed integrity validation: {exist_errors[0]}"]}
+            cand_errors = validate_summary_record(summary, memory_list)
+            if cand_errors:
+                return {"ok": False, "summary_id": summary.summary_id,
+                        "status": "rejected", "errors": cand_errors}
+            return {"ok": True, "summary_id": summary.summary_id,
+                    "status": "reused", "errors": []}
 
     errors = validate_summary(summary, memory_list, existing)
     if errors:

@@ -32,6 +32,7 @@ from backend.world.first_pair_persistence import (
     save_relationship_events,
     select_human_context,
     validate_summary,
+    validate_summary_record,
     derive_relationship_event_ids,
     load_memory_selection_manifests,
     load_memory,
@@ -1090,14 +1091,16 @@ class TestDerivedSummaryValidation:
         covered_mems = [m for m in ensured if m["memory_id"] in covered_ids]
         hbs = [m.get("heartbeat", 0) for m in covered_mems]
         summ = MemorySummaryRecord(
-            summary_id="sum-cov", owner_agent_id=owner,
+            summary_id="", owner_agent_id=owner,
             covered_memory_ids=covered_ids,
             covered_heartbeat_range=[min(hbs), max(hbs)],
             summary="[derived from heartbeat 1] Coverage test.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
             derivation_method="deterministic_extractive",
             source_commitment=compute_summary_source_commitment(owner, covered_mems),
-        ).seal()
+        )
+        summ.summary_id = "sum-derived-" + summ.semantic_commitment()[:16]
+        summ.seal()
         result = append_summary(store, summ, memory_list=mems)
         assert result["ok"], f"append_summary failed: {result['errors']}"
         loaded = load_summaries(store)
@@ -1114,13 +1117,15 @@ class TestDerivedSummaryValidation:
         ensured = _ensure_memory_ids(raw_mems, owner_agent_id=owner)
         init_mid = ensured[0]["memory_id"]
         s0 = MemorySummaryRecord(
-            summary_id="sum-init", owner_agent_id=owner,
+            summary_id="", owner_agent_id=owner,
             covered_memory_ids=[init_mid], covered_heartbeat_range=[1, 1],
             summary="[derived from heartbeat 1] Initial.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
             derivation_method="deterministic_extractive",
             source_commitment=compute_summary_source_commitment(owner, [ensured[0]]),
-        ).seal()
+        )
+        s0.summary_id = "sum-derived-" + s0.semantic_commitment()[:16]
+        s0.seal()
         result = append_summary(store, s0, memory_list=raw_mems)
         assert result["ok"], f"append_summary failed: {result['errors']}"
         loaded_before = load_summaries(store)
@@ -1137,7 +1142,7 @@ class TestDerivedSummaryValidation:
         loaded_after = load_summaries(store)
         # The initial summary must survive regardless of the failed append
         assert len(loaded_after) >= 1
-        assert loaded_after[0].summary_id == "sum-init"
+        assert loaded_after[0].summary_id == s0.summary_id
 
     def test_summaries_label_as_derived(self, tmp_path: Path) -> None:
         """to_envelope marks type as memory_summary_record."""
@@ -1628,23 +1633,27 @@ class TestMemorySummaryPersistence:
         mid1 = ensured[0]["memory_id"]
         mid2 = ensured[1]["memory_id"]
         s1 = MemorySummaryRecord(
-            summary_id="sum-010", owner_agent_id=owner,
+            summary_id="", owner_agent_id=owner,
             covered_memory_ids=[mid1], covered_heartbeat_range=[1, 1],
             summary="[derived from heartbeat 1] First summary.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
             derivation_method="deterministic_extractive",
             source_commitment=compute_summary_source_commitment(owner, [ensured[0]]),
-        ).seal()
+        )
+        s1.summary_id = "sum-derived-" + s1.semantic_commitment()[:16]
+        s1.seal()
         result = append_summary(store, s1, memory_list=mem_list)
         assert result["ok"], f"append failed: {result['errors']}"
         s2 = MemorySummaryRecord(
-            summary_id="sum-011", owner_agent_id=owner,
+            summary_id="", owner_agent_id=owner,
             covered_memory_ids=[mid2], covered_heartbeat_range=[2, 2],
             summary="[derived from heartbeat 2] Second summary.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
             derivation_method="deterministic_extractive",
             source_commitment=compute_summary_source_commitment(owner, [ensured[1]]),
-        ).seal()
+        )
+        s2.summary_id = "sum-derived-" + s2.semantic_commitment()[:16]
+        s2.seal()
         result = append_summary(store, s2, memory_list=mem_list)
         assert result["ok"], f"append failed: {result['errors']}"
         loaded = load_summaries(store)
@@ -1820,6 +1829,101 @@ class TestDerivedSummaryReuse:
         loaded = load_summaries(store)
         assert len(loaded) == 1
         assert loaded[0].summary == ds1.summary
+
+
+class TestCorruptedPersistedSummary:
+    """Existing persisted summaries with tampered integrity fail reuse."""
+
+    def _append_valid(self, store, mems) -> MemorySummaryRecord:
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        derived, ids = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        ds = derived[0]
+        r = append_summary(store, ds, memory_list=mems)
+        assert r["ok"], f"setup append failed: {r['errors']}"
+        return ds
+
+    def test_corrupted_integrity_rejected(self, tmp_path: Path) -> None:
+        """Corrupting persisted integrity_commitment causes reuse rejection."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "corr-int")
+        mems = [{"heartbeat": 1, "content": "Integrity test", "type": "observation"}]
+        ds = self._append_valid(store, mems)
+
+        # Tamper with the stored integrity commitment
+        loaded = load_summaries(store)
+        loaded[0].integrity_commitment = "tampered"
+        save_summaries(store, loaded)
+
+        # Attempt reuse
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        r = append_summary(store, derived2[0], memory_list=mems)
+        assert not r["ok"], "Tampered integrity should be rejected"
+        assert r["status"] == "rejected"
+        assert "integrity" in str(r["errors"]).lower()
+
+    def test_corrupted_created_at_utc_rejected(self, tmp_path: Path) -> None:
+        """Corrupting created_at_utc without resealing causes rejection."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "corr-ts")
+        mems = [{"heartbeat": 1, "content": "Timestamp test", "type": "observation"}]
+        ds = self._append_valid(store, mems)
+
+        loaded = load_summaries(store)
+        loaded[0].created_at_utc = "2099-01-01T00:00:00+00:00"
+        save_summaries(store, loaded)
+
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        r = append_summary(store, derived2[0], memory_list=mems)
+        assert not r["ok"], "Tampered timestamp should be rejected"
+
+    def test_corrupted_source_commitment_rejected(self, tmp_path: Path) -> None:
+        """Corrupting persisted source_commitment causes rejection."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "corr-sc")
+        mems = [{"heartbeat": 1, "content": "Source test", "type": "observation"}]
+        ds = self._append_valid(store, mems)
+
+        loaded = load_summaries(store)
+        loaded[0].source_commitment = "tampered"
+        save_summaries(store, loaded)
+
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        r = append_summary(store, derived2[0], memory_list=mems)
+        assert not r["ok"]
+        assert r["status"] == "rejected"
+
+    def test_corrupted_covered_ids_rejected(self, tmp_path: Path) -> None:
+        """Corrupting covered_memory_ids causes rejection."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "corr-cid")
+        mems = [{"heartbeat": 1, "content": "Covered ID test", "type": "observation"}]
+        ds = self._append_valid(store, mems)
+
+        loaded = load_summaries(store)
+        loaded[0].covered_memory_ids = ["mem-nonexistent"]
+        save_summaries(store, loaded)
+
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        r = append_summary(store, derived2[0], memory_list=mems)
+        assert not r["ok"]
+        assert r["status"] == "rejected"
+
+    def test_rejected_not_rewritten(self, tmp_path: Path) -> None:
+        """A rejected persisted record is not rewritten or removed."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "corr-rw")
+        mems = [{"heartbeat": 1, "content": "Rewrite test", "type": "observation"}]
+        ds = self._append_valid(store, mems)
+
+        # Snapshot store state
+        before_count = len(load_summaries(store))
+
+        loaded = load_summaries(store)
+        loaded[0].integrity_commitment = "corrupted"
+        save_summaries(store, loaded)
+
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        r = append_summary(store, derived2[0], memory_list=mems)
+        assert not r["ok"]
+
+        after = load_summaries(store)
+        assert len(after) == before_count
+        assert after[0].integrity_commitment == "corrupted"
 
 
 # ---------------------------------------------------------------------------
