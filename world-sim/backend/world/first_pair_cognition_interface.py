@@ -1,12 +1,26 @@
 """Phase 10FN — First Pair Cognition Interface.
 
 Abstract base classes defining the cognitive operations available to First Pair
-agents. This module establishes the pure, testable interface that any model
-backend (or deterministic stub) must implement. It deliberately excludes all
-runtime, persistence, network, and world-state mutation concerns.
+agents. This module establishes the interface that any cognition backend must
+implement.
 
-Implementations must be pure functions of their inputs and must not perform
-I/O, mutation, or external calls.
+Boundaries common to all backends:
+- AgentContext is a read-only input snapshot.
+- Backends cannot mutate world state, persistence, runtime policy, capability
+  grants or private memory directly.
+- Outputs are proposals and candidate writes only.  The runtime remains the
+  sole authority that validates and persists actions, memories, goals and
+  questions.
+- No backend receives the other agent's private memories.
+- The internal_reasoning field contains a concise inspectable reasoning
+  summary assembled from the observation, decision and uncertainty fields;
+  it is not raw private chain-of-thought.
+
+Implementation-specific boundaries:
+- Deterministic stub backends are pure, deterministic and network-free.
+- Model-backed implementations may perform bounded, operator-configured
+  provider transport limited to obtaining cognition output.  Provider failures
+  must still fail closed.
 """
 
 from __future__ import annotations
@@ -71,13 +85,13 @@ class CognitionOutput:
 class CognitionBackend(ABC):
     """Abstract base class for First Pair cognition backends.
 
-    All methods are pure functions of their inputs. No I/O, mutation, network,
-    or external state access is permitted. Implementations must be deterministic
-    for given inputs (or provide a seed for stochastic behavior).
+    AgentContext is a read-only input. Backends cannot mutate runtime state
+    or persistence. Outputs are proposals subject to runtime validation.
 
-    A concrete implementation is provided by the test stub in
-    `first_pair_cognition_stub.py` and by the model-backed implementation in
-    `first_pair_cognition_model.py`.
+    Deterministic stub backends are pure and network-free. Model-backed
+    implementations may perform bounded, operator-configured provider transport
+    limited to obtaining cognition output. No backend receives the other
+    agent's private memories.
     """
 
     @abstractmethod

@@ -748,7 +748,11 @@ Do not include any text outside the JSON object. Do not include chain-of-thought
 class ModelCognitionBackend(CognitionBackend):
     """Cognition backend backed by an OpenAI-compatible model provider.
 
-    Accepts an optional injected client (fake transport) for testing.
+    Performs bounded, operator-configured provider transport to obtain
+    cognition output.  Context is read-only; outputs are proposals that
+    pass through runtime validation.  Accepts an optional injected client
+    (fake transport) for testing—no real provider transport is attempted
+    when a client is injected.
     """
 
     def __init__(
