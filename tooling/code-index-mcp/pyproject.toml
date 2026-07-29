@@ -1,9 +1,13 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
 [project]
 name = "genesis-code-index"
-version = "0.1.0"
+version = "0.2.0"
 description = "AST-based code index MCP server for Genesis Kernel World Sim"
 requires-python = ">=3.11"
-dependencies = ["mcp>=1.0.0"]
+dependencies = ["mcp>=1.0.0,<2.0.0"]
 
 [project.scripts]
 genesis-code-index = "genesis_code_index.__main__:main"
