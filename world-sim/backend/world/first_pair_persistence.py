@@ -737,10 +737,21 @@ class MemorySummaryRecord:
     source_commitment: str = ""
     integrity_commitment: str = ""
 
+    def semantic_commitment(self) -> str:
+        """Canonical identity of the summary's semantic content.
+
+        Excludes created_at_utc and integrity_commitment so that
+        semantically identical summaries derived at different wall-clock
+        times produce the same commitment and can be reused.
+        """
+        material = asdict(self)
+        material.pop("created_at_utc", None)
+        material.pop("integrity_commitment", None)
+        return _hash_canonical(material)
+
     def seal(self) -> MemorySummaryRecord:
         material = asdict(self)
         material.pop("integrity_commitment", None)
-        # source_commitment is now bound into the integrity hash
         self.integrity_commitment = _hash_canonical(material)
         return self
 
@@ -882,13 +893,12 @@ def validate_summary(
         if check.integrity_commitment != summary.integrity_commitment:
             errors.append("integrity_commitment validation failed")
 
-    # Duplicate handling: identical existing summary = idempotent reuse (not an error)
-    # Conflicting same-id = collision error
+    # Duplicate handling: compare semantic commitments (excludes created_at_utc
+    # and integrity_commitment so cross-heartbeat derivations produce stable IDs).
     for existing in existing_summaries:
         if existing.summary_id == summary.summary_id:
-            if (existing.source_commitment == summary.source_commitment
-                    and existing.integrity_commitment == summary.integrity_commitment):
-                pass  # identical — idempotent reuse
+            if existing.semantic_commitment() == summary.semantic_commitment():
+                pass  # semantically identical — idempotent reuse
             else:
                 errors.append(f"duplicate summary_id with conflicting material: {summary.summary_id}")
             break
@@ -904,29 +914,43 @@ def append_summary(
     """Append a validated summary. Fail-closed: leaves store unchanged on error.
 
     Returns structured result:
-      {"ok": bool, "summary_id": str, "errors": list[str]}
+      {"ok": bool, "summary_id": str, "status": "appended"|"reused"|"rejected",
+       "errors": list[str]}
     """
-    existing = load_summaries(store)
-
-    # Idempotent reuse: if identical already exists, return ok
-    for exist in existing:
-        if exist.summary_id == summary.summary_id:
-            if (exist.source_commitment == summary.source_commitment
-                    and exist.integrity_commitment == summary.integrity_commitment):
-                return {"ok": True, "summary_id": summary.summary_id, "errors": []}
-            break
-
     if not memory_list:
         return {"ok": False, "summary_id": summary.summary_id,
+                "status": "rejected",
                 "errors": ["memory_list is required"]}
+
+    existing = load_summaries(store)
+    candidate_sem = summary.semantic_commitment()
+
+    # Check for idempotent reuse: semantically identical summary already exists.
+    # Before reusing, validate evidence against the supplied memory_list.
+    for exist in existing:
+        if exist.summary_id == summary.summary_id:
+            if exist.semantic_commitment() == candidate_sem:
+                # Re-validate evidence before returning reuse success
+                re_errors = validate_summary(summary, memory_list, existing)
+                if re_errors:
+                    return {"ok": False, "summary_id": summary.summary_id,
+                            "status": "rejected", "errors": re_errors}
+                return {"ok": True, "summary_id": summary.summary_id,
+                        "status": "reused", "errors": []}
+            else:
+                return {"ok": False, "summary_id": summary.summary_id,
+                        "status": "rejected",
+                        "errors": [f"duplicate summary_id with conflicting material: {summary.summary_id}"]}
 
     errors = validate_summary(summary, memory_list, existing)
     if errors:
-        return {"ok": False, "summary_id": summary.summary_id, "errors": errors}
+        return {"ok": False, "summary_id": summary.summary_id,
+                "status": "rejected", "errors": errors}
 
     existing.append(summary)
     save_summaries(store, existing)
-    return {"ok": True, "summary_id": summary.summary_id, "errors": []}
+    return {"ok": True, "summary_id": summary.summary_id,
+            "status": "appended", "errors": []}
 
 
 def derive_summaries_for_omitted(
@@ -971,7 +995,7 @@ def derive_summaries_for_omitted(
         covered_ids = [mid]
         covered_range = [hb, hb]
         summ = MemorySummaryRecord(
-            summary_id=f"sum-derived-{_hash_canonical({'owner': owner_agent_id, 'hb': hb, 'content': content[:100]})[:12]}",
+            summary_id="",  # placeholder — set below from semantic commitment
             owner_agent_id=owner_agent_id,
             covered_memory_ids=covered_ids,
             covered_heartbeat_range=covered_range,
@@ -984,7 +1008,11 @@ def derive_summaries_for_omitted(
             source_commitment=compute_summary_source_commitment(
                 owner_agent_id, [mem]
             ),
-        ).seal()
+        )
+        # Derive summary_id from full semantic commitment (no truncated content)
+        sem = summ.semantic_commitment()
+        summ.summary_id = f"sum-derived-{sem[:16]}"
+        summ.seal()
         summaries.append(summ)
         included_ids.append(summ.summary_id)
         used_memory_ids.add(mid)

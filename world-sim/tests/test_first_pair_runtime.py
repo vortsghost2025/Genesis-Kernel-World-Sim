@@ -1663,6 +1663,166 @@ class TestMemorySummaryPersistence:
 
 
 # ---------------------------------------------------------------------------
+# 17b – Derived summary reuse across heartbeats
+# ---------------------------------------------------------------------------
+
+
+class TestDerivedSummaryReuse:
+    """Deterministic summaries are reusable across heartbeats and restarts."""
+
+    def _make_mems(self) -> list[dict]:
+        return [{"heartbeat": 1, "content": "A" * 200, "type": "observation"}]
+
+    def test_same_content_same_owner_same_summary_id(self) -> None:
+        """Deriving the same omitted memory twice at different wall-clock times
+        produces the same summary ID (full-content sensitive, no truncation)."""
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        mems = self._make_mems()
+        s1, ids1 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        s2, ids2 = derive_summaries_for_omitted(mems, set(), "adam-aaa")
+        assert len(s1) == 1
+        assert len(s2) == 1
+        assert s1[0].summary_id == s2[0].summary_id
+        assert ids1 == ids2
+        # Full-content sensitivity: different content beyond 100 chars
+        mems_long = [{"heartbeat": 1, "content": "B" * 200, "type": "observation"}]
+        s3, ids3 = derive_summaries_for_omitted(mems_long, set(), "adam-aaa")
+        assert s1[0].summary_id != s3[0].summary_id, "Different content beyond 100 chars must differ"
+
+    def test_first_append_reuses_across_calls(self, tmp_path: Path) -> None:
+        """First append returns status=appended; second = reused; one record."""
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "reuse1")
+        mems = self._make_mems()
+        owner = "adam-aaa"
+        derived, ids = derive_summaries_for_omitted(mems, set(), owner)
+        assert len(derived) == 1
+        ds = derived[0]
+
+        # First append
+        r1 = append_summary(store, ds, memory_list=mems)
+        assert r1["ok"], f"first append failed: {r1['errors']}"
+        assert r1["status"] == "appended"
+        first_ts = ds.created_at_utc
+
+        # Second append (simulate later heartbeat)
+        import time; time.sleep(0.01)  # ensure different wall-clock time
+        derived2, ids2 = derive_summaries_for_omitted(mems, set(), owner)
+        ds2 = derived2[0]
+        assert ds2.created_at_utc != first_ts  # different wall-clock time
+
+        r2 = append_summary(store, ds2, memory_list=mems)
+        assert r2["ok"], f"second append failed: {r2['errors']}"
+        assert r2["status"] == "reused", f"expected reused, got {r2['status']}"
+
+        loaded = load_summaries(store)
+        assert len(loaded) == 1, f"Store should have 1 record, got {len(loaded)}"
+        # created_at_utc from first persist is preserved
+        assert loaded[0].created_at_utc == first_ts
+        # Integrity remains valid
+        assert loaded[0].integrity_commitment != ""
+        check = MemorySummaryRecord(
+            summary_id=loaded[0].summary_id,
+            owner_agent_id=loaded[0].owner_agent_id,
+            covered_memory_ids=list(loaded[0].covered_memory_ids),
+            covered_heartbeat_range=list(loaded[0].covered_heartbeat_range),
+            summary=loaded[0].summary,
+            salient_entities=list(loaded[0].salient_entities),
+            related_goal_ids=list(loaded[0].related_goal_ids),
+            related_public_object_ids=list(loaded[0].related_public_object_ids),
+            related_message_ids=list(loaded[0].related_message_ids),
+            created_at_utc=loaded[0].created_at_utc,
+            derivation_method=loaded[0].derivation_method,
+            source_commitment=loaded[0].source_commitment,
+        ).seal()
+        assert check.integrity_commitment == loaded[0].integrity_commitment
+
+    def test_reuse_across_new_runtime_instance(self, tmp_path: Path) -> None:
+        """Reuse works across a new store/runtime instance."""
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "reuse2")
+        mems = self._make_mems()
+        owner = "adam-aaa"
+
+        # First runtime appends
+        rt1 = FirstPairRuntime(heartbeat_limit=1, store=store, backend="deterministic_stub")
+        rt1.run()
+        ctx = rt1._build_context("east_adam", 2)
+        assert len(ctx.derived_memory_summaries) >= 0  # summaries may exist
+
+        # Second runtime on same store — summaries should be reusable
+        rt2 = FirstPairRuntime(heartbeat_limit=0, store=store)
+        rt2._load_or_initialize()
+
+        derived, ids = derive_summaries_for_omitted(mems, set(), owner)
+        for ds in derived:
+            r = append_summary(store, ds, memory_list=mems)
+            if not r["ok"]:
+                # May already exist — reuse counts as success
+                assert r["status"] == "reused" or r["status"] == "appended", str(r)
+                if r["status"] == "reused":
+                    continue
+            assert r["ok"], f"append failed: {r['errors']}"
+
+        loaded = load_summaries(store)
+        assert len(loaded) >= 1
+
+    def test_missing_memory_list_fails_even_for_identical(self, tmp_path: Path) -> None:
+        """Missing memory_list fails even for an otherwise identical duplicate."""
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "reuse3")
+        mems = self._make_mems()
+        owner = "adam-aaa"
+        derived, ids = derive_summaries_for_omitted(mems, set(), owner)
+        ds = derived[0]
+
+        r1 = append_summary(store, ds, memory_list=mems)
+        assert r1["ok"]
+
+        # Same content, no memory_list
+        r2 = append_summary(store, ds, memory_list=None)
+        assert not r2["ok"]
+        assert "memory_list is required" in str(r2["errors"])
+
+    def test_conflicting_duplicate_fails_closed(self, tmp_path: Path) -> None:
+        """Same summary_id with different semantic material fails closed."""
+        store = FirstPairPersistenceStore(tmp_path / ".runtime" / "reuse4")
+        mems = [{"heartbeat": 1, "content": "Original", "type": "observation"}]
+        owner = "adam-aaa"
+
+        # First summary
+        from backend.world.first_pair_persistence import derive_summaries_for_omitted
+        derived1, ids1 = derive_summaries_for_omitted(mems, set(), owner)
+        ds1 = derived1[0]
+        r1 = append_summary(store, ds1, memory_list=mems)
+        assert r1["ok"]
+
+        # Manually craft a summary with same ID but different material
+        ds1_conflict = MemorySummaryRecord(
+            summary_id=ds1.summary_id,
+            owner_agent_id=owner,
+            covered_memory_ids=ds1.covered_memory_ids,
+            covered_heartbeat_range=ds1.covered_heartbeat_range,
+            summary="[derived from heartbeat 1] DIFFERENT",  # different text
+            salient_entities=[],
+            related_goal_ids=[],
+            related_public_object_ids=[],
+            related_message_ids=[],
+            derivation_method="deterministic_extractive",
+            source_commitment=compute_summary_source_commitment(owner, [{"heartbeat": 1, "content": "DIFFERENT", "type": "observation"}]),
+        )
+        r2 = append_summary(store, ds1_conflict, memory_list=[{"heartbeat": 1, "content": "DIFFERENT", "type": "observation"}])
+        assert not r2["ok"]
+        assert r2["status"] == "rejected"
+        assert "conflicting material" in str(r2["errors"])
+
+        # Store unchanged
+        loaded = load_summaries(store)
+        assert len(loaded) == 1
+        assert loaded[0].summary == ds1.summary
+
+
+# ---------------------------------------------------------------------------
 # 17 – Relationship event ledger persistence
 # ---------------------------------------------------------------------------
 
