@@ -1,0 +1,45 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "command": {
+    "test-all": {
+      "template": "Run all First Pair tests by executing: cd world-sim && python -m pytest tests/ -q",
+      "description": "Run all First Pair tests"
+    },
+    "test-runtime": {
+      "template": "Run the First Pair runtime tests by executing: cd world-sim && python -m pytest tests/test_first_pair_runtime.py -q",
+      "description": "Run First Pair runtime tests"
+    },
+    "compile": {
+      "template": "Py-compile all First Pair source files by executing: cd world-sim && python -m py_compile backend/world/first_pair_*.py scripts/run_first_pair_demo.py",
+      "description": "Compile-check all First Pair source files"
+    },
+    "diff-check": {
+      "template": "Check for whitespace errors and conflict markers by executing: git diff --check",
+      "description": "Check git diff for whitespace/conflict issues"
+    },
+    "code-definition": {
+      "template": "Find the definition of a symbol in the codebase using the code-index MCP find_definition tool",
+      "description": "Find symbol definition via code index"
+    },
+    "code-references": {
+      "template": "Find all references to a symbol in the codebase using the code-index MCP find_references tool",
+      "description": "Find symbol references via code index"
+    },
+    "code-callers": {
+      "template": "Find all callers of a function in the codebase using the code-index MCP find_callers tool",
+      "description": "Find function callers via code index"
+    },
+    "code-search": {
+      "template": "Search for a string literal in the codebase using the code-index MCP lexical_search or semantic_search tool",
+      "description": "Search codebase via code index"
+    },
+    "code-reindex": {
+      "template": "Rebuild the code index by executing: cd world-sim && python -m genesis_code_index --repo-root \"S:/Genesis Kernel World Sim\" reindex",
+      "description": "Rebuild the code index database"
+    },
+    "code-status": {
+      "template": "Show the code index status by executing: cd world-sim && python -m genesis_code_index --repo-root \"S:/Genesis Kernel World Sim\" status",
+      "description": "Show code index status"
+    }
+  }
+}

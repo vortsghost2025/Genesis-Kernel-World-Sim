@@ -10,3 +10,9 @@ world-sim/.runtime/
 
 __pycache__/
 *.pyc
+# Tooling caches
+.code-index/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.basedpyright/
