@@ -684,10 +684,9 @@ class TestPathContainment:
         from genesis_code_index.indexer import resolve_path_scope
 
         result = resolve_path_scope("world-sim/backend/subpkg", sample_repo)
-        # The subdir need not exist on disk — Path.resolve() resolves the
-        # logical path.  We accept either the subdir-component or the
-        # backend root as the result shape.
-        assert result.startswith("world-sim/backend/")
+        # Path.resolve() normalizes the logical path — the exact descendant
+        # scope is returned.
+        assert result == "world-sim/backend/subpkg"
 
     def test_resolve_path_scope_canonical_posix_returned(self, sample_repo: Path):
         """Returned path is POSIX-normalized regardless of input separator."""
@@ -1383,16 +1382,16 @@ class TestMcpSmokeNegative:
     def test_non_list_payload_rejected(self):
         """A non-list, non-dict payload fails validation."""
         v = self._load_validator()
-        for bad in [None, "string", 42, {}]:
+        for bad in [None, "string", 42]:
             ok, reason = v(bad)
-            if isinstance(bad, dict):
-                # empty dict is treated as wrong-shape — currently dict wraps to [dict]
-                # which then fails on missing kind.  Either rejection is fine.
-                pass
-            else:
-                assert not ok, f"Non-list {type(bad).__name__} should be rejected"
-                assert "list" in reason.lower() or "not found" in reason.lower(), \
-                    f"Reason should mention shape, got: {reason!r}"
+            assert not ok, f"Non-list {type(bad).__name__} should be rejected"
+            assert "list" in reason.lower() or "not found" in reason.lower(), \
+                f"Reason should mention shape, got: {reason!r}"
+
+        # Empty dict: wraps to [{}], then fails on missing kind.
+        ok, reason = v({})
+        assert not ok, "Empty dict should be rejected"
+        assert "kind" in reason.lower(), f"Reason should mention kind, got: {reason!r}"
 
 
 # ── First Pair regression ──────────────────────────────────────────────
