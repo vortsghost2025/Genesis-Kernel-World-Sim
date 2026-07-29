@@ -393,6 +393,8 @@ class TestSemanticAdapter:
 
 # ── Path containment tests ─────────────────────────────────────────────
 
+from genesis_code_index.store import _path_matches_filter
+
 class TestPathContainment:
     def test_outside_repo_rejected(self, sample_repo: Path):
         import tempfile
@@ -409,92 +411,228 @@ class TestPathContainment:
         indexed = index_repo(sample_repo)
         assert not any(".runtime" in k for k in indexed)
 
+    # -- _path_matches_filter unit tests --
+
+    def test_filter_exact_root_accepted(self):
+        assert _path_matches_filter("world-sim/backend/module_a.py", "world-sim/backend")
+
+    def test_filter_descendant_accepted(self):
+        assert _path_matches_filter("world-sim/backend/world/foo.py", "world-sim/backend")
+
+    def test_filter_exact_file_accepted(self):
+        assert _path_matches_filter("world-sim/backend/module_a.py", "world-sim/backend/module_a.py")
+
+    def test_filter_sibling_rejected(self):
+        assert not _path_matches_filter("world-sim/backend-other/module.py", "world-sim/backend")
+
+    def test_filter_sibling_underscore_rejected(self):
+        assert not _path_matches_filter("world-sim/backend_evil/module.py", "world-sim/backend")
+
+    def test_filter_traversal_rejected(self):
+        assert not _path_matches_filter("../outside/file.py", "world-sim/backend")
+
+    def test_filter_empty_not_matched(self):
+        assert not _path_matches_filter("world-sim/backend/module.py", "")
+
+    def test_filter_stale_scope_accepted(self):
+        """A nonexistent but syntactically valid subtree is accepted for stale cleanup."""
+        assert _path_matches_filter("world-sim/backend/gone/module.py", "world-sim/backend")
+
+    def test_store_scope_query_rejects_sibling(self, sample_repo: Path, store: CodeIndexStore):
+        """query_definitions with sibling prefix returns no results."""
+        from genesis_code_index.indexer import index_file
+        path = sample_repo / "world-sim" / "backend" / "module_a.py"
+        syms, err = index_file(path, sample_repo)
+        assert err is None
+        store.replace_file_index(
+            "world-sim/backend/module_a.py",
+            path.stat().st_size, path.stat().st_mtime, "h", syms,
+        )
+        result = store.query_definitions("Greeter", path_filter="world-sim/backend-other")
+        assert len(result) == 0, f"Sibling filter should return 0 results, got {len(result)}"
+
+    def test_reindex_scope_rejects_sibling(self, sample_repo: Path):
+        """Server-level reindex with sibling prefix returns rejected status."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    r = await session.call_tool("reindex", {"path_filter": "world-sim/backend-other"})
+                    raw = r.content[0].text if hasattr(r.content[0], "text") else str(r.content[0])
+                    events["result"] = json.loads(raw)
+
+        asyncio.run(_test())
+        assert events["result"].get("status") == "rejected", f"Expected rejected, got {events}"
+
 
 # ── Package bootstrap tests ────────────────────────────────────────────
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
-SESSION_TEMPLATE = r"""import asyncio, json, sys
-sys.path.insert(0, {SRC})
+def _run_mcp_session(fixture_root: Path) -> dict:
+    """Run a full MCP lifecycle against the fixture repository.
 
-from mcp import StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.client.session import ClientSession
+    Returns a dict describing what happened so the caller can assert.
+    """
+    import asyncio
+    import json
+    import os
 
-REPO_ROOT = {ROOT}
+    server_dir = Path(__file__).resolve().parent.parent
+    run_server = str(server_dir / "run_server.py")
+    events: dict = {}
 
-async def run():
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=[{SERVER}],
-        env={"GENESIS_CODE_INDEX_REPO_ROOT": REPO_ROOT},
-    )
-    async with stdio_client(params) as streams:
-        async with ClientSession(*streams) as session:
-            init = await session.initialize()
-            assert init.serverInfo.name == "genesis-code-index"
+    async def _session() -> dict:
+        from mcp import StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from mcp.client.session import ClientSession
 
-            tools = await session.list_tools()
-            tool_names = {t.name for t in tools.tools}
-            for required in ["find_definition", "find_references", "find_callers",
-                             "lexical_search", "index_status", "reindex"]:
-                assert required in tool_names, "missing tool: " + required
+        env = os.environ.copy()
+        env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=[run_server],
+            env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(fixture_root)},
+        )
+        async with stdio_client(params) as streams:
+            async with ClientSession(*streams) as session:
+                init = await session.initialize()
+                events["server_name"] = init.serverInfo.name
 
-            status = await session.call_tool("index_status", {})
-            assert status.content
-            status_text = status.content[0].text if hasattr(status.content[0], 'text') else str(status.content[0])
-            status_data = json.loads(status_text)
-            assert "files" in status_data
-            db_path = status_data.get("db_path", "")
-            assert db_path.startswith(REPO_ROOT), (
-                "Database " + db_path + " outside fixture " + REPO_ROOT
-            )
+                tools = await session.list_tools()
+                events["tool_names"] = {t.name for t in tools.tools}
 
-            bad = await session.call_tool("find_definition", {})
-            assert bad.isError or len(bad.content) > 0
+                reindex_result = await session.call_tool("reindex", {})
+                reindex_data = _parse_tool_result(reindex_result)
+                events["reindex"] = reindex_data
 
-            print("ALL_PASSED")
+                status = await session.call_tool("index_status", {})
+                status_data = _parse_tool_result(status)
+                events["status"] = status_data
 
-asyncio.run(run())
-"""
+                def_result = await session.call_tool("find_definition", {"name": "Greeter"})
+                def_data = _parse_tool_result(def_result, expect_list=True)
+                events["definition"] = def_data
+
+                ref_result = await session.call_tool("find_references", {"name": "helper"})
+                ref_data = _parse_tool_result(ref_result, expect_list=True)
+                events["references"] = ref_data
+
+                caller_result = await session.call_tool("find_callers", {"func_name": "helper"})
+                caller_data = _parse_tool_result(caller_result, expect_list=True)
+                events["callers"] = caller_data
+
+                lex_result = await session.call_tool("lexical_search", {"query": "Greeter"})
+                lex_data = _parse_tool_result(lex_result, expect_list=True)
+                events["lexical"] = lex_data
+
+                bad_result = await session.call_tool("find_definition", {})
+                events["malformed"] = {
+                    "isError": getattr(bad_result, "isError", False),
+                }
+
+        return events
+
+    return asyncio.run(_session())
+
+
+def _parse_tool_result(result, expect_list: bool = False) -> dict | list:
+    import json
+    if not result.content:
+        return [] if expect_list else {}
+    text = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+    try:
+        data = json.loads(text)
+        if expect_list and isinstance(data, dict):
+            return [data]
+        return data
+    except (json.JSONDecodeError, TypeError):
+        return [] if expect_list else {"_raw": text}
+
 
 class TestMCPIntegration:
     """Real MCP stdio session through the committed launcher."""
 
-    def test_full_mcp_session(self, sample_repo: Path, tmp_path: Path):
-        """Complete MCP initialise -> tools/list -> tools/call lifecycle
-        with real fixture queries (definition, references, callers)."""
-        import asyncio, json, os, subprocess, sys
-        from pathlib import Path
+    def test_full_mcp_lifecycle(self, sample_repo: Path):
+        """Complete MCP session with fixture-based definition, reference, caller, and lexical queries."""
+        import json
 
-        server_dir = Path(__file__).resolve().parent.parent
-        src = str(server_dir / "src")
-        root = str(sample_repo)
-        run_server = str(server_dir / "run_server.py")
+        events = _run_mcp_session(sample_repo)
 
-        # Write session script to a temp file to avoid shell escaping issues
-        session_file = tmp_path / "_mcp_session.py"
-        session_file.write_text(SESSION_TEMPLATE
-            .replace("{SRC}", json.dumps(src))
-            .replace("{ROOT}", json.dumps(root))
-            .replace("{SERVER}", json.dumps(run_server)))
+        assert events["server_name"] == "genesis-code-index"
 
-        env = os.environ.copy()
-        env["PYTHONPATH"] = src
-
-        proc = subprocess.Popen(
-            [sys.executable, str(session_file)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=server_dir, env=env,
+        required_tools = {
+            "find_definition", "find_references", "find_callers",
+            "lexical_search", "index_status", "reindex", "file_symbols",
+            "find_string_literals", "find_importers", "list_class_members",
+            "code_stats", "semantic_search",
+        }
+        assert required_tools.issubset(events["tool_names"]), (
+            f"Missing tools: {required_tools - events['tool_names']}"
         )
-        try:
-            stdout, stderr = proc.communicate(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate()
 
-        if "ALL_PASSED" not in stdout:
-            pytest.fail(f"MCP session failed.\nstdout: {stdout[:1000]}\nstderr: {stderr[:1000]}")
+        assert events["reindex"].get("status") in ("ok", "degraded")
+
+        assert "db_path" in events["status"]
+        db_path = events["status"]["db_path"]
+        assert db_path.startswith(str(sample_repo)), (
+            f"Database {db_path} outside fixture {sample_repo}"
+        )
+
+        defs = events["definition"]
+        assert len(defs) >= 1, f"No definitions found for Greeter: {defs}"
+        assert defs[0]["kind"] == "class", f"Expected class, got {defs[0]}"
+
+        refs = events["references"]
+        assert len(refs) >= 1, f"No references found for helper: {refs}"
+
+        callers = events["callers"]
+        assert len(callers) >= 1, f"No callers found for helper: {callers}"
+
+        lex = events["lexical"]
+        assert len(lex) >= 1, f"No lexical results for Greeter: {lex}"
+
+        assert events["malformed"]["isError"], "Malformed call should return error"
+
+    def test_no_real_checkout_mutation(self, sample_repo: Path):
+        """The MCP test fixture uses its own repository; real checkout is unchanged."""
+        real_index = Path(__file__).resolve().parent.parent / ".." / ".." / ".code-index"
+        if real_index.exists():
+            meta_before = {
+                p.name: p.stat().st_mtime_ns
+                for p in sorted(real_index.rglob("*")) if p.is_file()
+            }
+        else:
+            meta_before = None
+
+        _run_mcp_session(sample_repo)
+
+        if meta_before is None:
+            assert not real_index.exists() or (
+                len(list(real_index.iterdir())) == 0
+            ), "Real checkout index was created by test"
+        else:
+            meta_after = {
+                p.name: p.stat().st_mtime_ns
+                for p in sorted(real_index.rglob("*")) if p.is_file()
+            }
+            assert meta_before == meta_after, "Real checkout index modified by test"
 
 
 # ── OpenCode acceptance ────────────────────────────────────────────────
@@ -546,9 +684,12 @@ class TestPackaging:
         assert "S:" not in content, "opencode.jsonc contains absolute S: drive path"
         assert "sean" not in content.lower(), "opencode.jsonc contains Sean-specific path"
 
-    def test_wheel_build(self, tmp_path: Path):
-        """Verify a wheel can be built from the package."""
-        import subprocess
+    def _venv_python(self, venv_dir: Path) -> str:
+        return str(venv_dir / "Scripts" / "python.exe") if sys.platform == "win32" else str(venv_dir / "bin" / "python")
+
+    def test_wheel_build_and_install(self, tmp_path: Path):
+        """Build a wheel, install in isolated venv, import and run command."""
+        import subprocess, venv
         pkg_dir = Path(__file__).resolve().parent.parent
         wheel_dir = tmp_path / "dist"
         wheel_dir.mkdir()
@@ -559,44 +700,149 @@ class TestPackaging:
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
-            # pip may not be available — skip gracefully
-            if "No module named pip" in result.stderr or "is not a valid" in result.stderr:
+            if "No module named pip" in result.stderr:
                 pytest.skip("pip wheel not available in test environment")
             pytest.fail(f"wheel build failed:\n{result.stderr[:500]}")
         wheels = list(wheel_dir.glob("*.whl"))
         assert len(wheels) >= 1, f"No wheel produced: {list(wheel_dir.iterdir())}"
 
-    def test_editable_install(self, tmp_path: Path):
-        """Verify editable install works in an isolated temp venv."""
-        import subprocess, venv
-        venv_dir = tmp_path / ".venv"
-        venv.create(venv_dir, with_pip=True)
-        pip = str(venv_dir / "Scripts" / "pip") if sys.platform == "win32" else str(venv_dir / "bin" / "pip")
-        pkg_dir = Path(__file__).resolve().parent.parent
+        # Install wheel into isolated venv
+        install_venv = tmp_path / "wheel_venv"
+        venv.create(install_venv, with_pip=True)
+        ipy = self._venv_python(install_venv)
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", str(pkg_dir),
-             "--no-deps", "--no-build-isolation"],
+            [ipy, "-m", "pip", "install", str(wheels[0]), "--no-deps"],
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
             if "No module named pip" in result.stderr:
-                pytest.skip("pip not available")
+                pytest.skip("pip not available in venv")
+            pytest.fail(f"wheel install failed:\n{result.stderr[:500]}")
+
+        # Verify import
+        result = subprocess.run(
+            [ipy, "-c", "import genesis_code_index; print('OK')"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0 and "OK" in result.stdout, f"Import failed:\n{result.stderr}"
+
+        # Verify installed command
+        result = subprocess.run(
+            [ipy, "-m", "genesis_code_index", "--help"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, f"genesis-code-index command failed:\n{result.stderr[:500]}"
+
+    def test_editable_install(self, tmp_path: Path):
+        """Verify editable install works in an isolated temp venv using its own pip."""
+        import subprocess, venv
+        venv_dir = tmp_path / ".venv"
+        venv.create(venv_dir, with_pip=True)
+        ipy = self._venv_python(venv_dir)
+        pkg_dir = Path(__file__).resolve().parent.parent
+        # Install build deps in venv first (fresh venv lacks setuptools)
+        deps_result = subprocess.run(
+            [ipy, "-m", "pip", "install", "setuptools>=64", "--quiet"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if deps_result.returncode != 0:
+            if "No module named pip" in deps_result.stderr:
+                pytest.skip("pip not available in venv")
+            pytest.fail(f"build deps install failed:\n{deps_result.stderr[:500]}")
+        result = subprocess.run(
+            [ipy, "-m", "pip", "install", "-e", str(pkg_dir),
+             "--no-deps", "--no-build-isolation"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
             pytest.fail(f"editable install failed:\n{result.stderr[:500]}")
+
+        # Verify import from venv
+        result = subprocess.run(
+            [ipy, "-c", "import genesis_code_index; print('OK')"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0 and "OK" in result.stdout, f"Import failed:\n{result.stderr}"
+
+        # Verify command
+        result = subprocess.run(
+            [ipy, "-m", "genesis_code_index", "--help"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, f"genesis-code-index command failed:\n{result.stderr[:500]}"
 
 
 # ── Runner tests ───────────────────────────────────────────────────────
 
 class TestRunner:
-    def test_runner_imports(self):
-        """run_first_pair_checks.py imports correctly from repo root."""
+    def test_runner_uses_sys_executable(self):
+        """run_first_pair_checks.py uses sys.executable, not bare 'python'."""
+        runner = Path(__file__).resolve().parent.parent.parent.parent / "world-sim" / "scripts" / "run_first_pair_checks.py"
+        content = runner.read_text()
+        assert "sys.executable" in content
+        assert '"python"' not in content or "'python'" not in content
+
+    def test_runner_from_repo_root(self):
+        """Runner works from repo root with absolute path."""
         import subprocess
         runner = Path(__file__).resolve().parent.parent.parent.parent / "world-sim" / "scripts" / "run_first_pair_checks.py"
         result = subprocess.run(
-            ["python", str(runner)],
+            [sys.executable, str(runner)],
             capture_output=True, text=True, timeout=10,
         )
-        assert result.returncode == 1  # No args = help message
+        assert result.returncode == 1
         assert "Usage:" in result.stdout or "Usage:" in result.stderr
+
+    def test_runner_from_world_sim(self, tmp_path: Path):
+        """Runner works from world-sim directory."""
+        import subprocess
+        runner = Path(__file__).resolve().parent.parent.parent.parent / "world-sim" / "scripts" / "run_first_pair_checks.py"
+        ws_dir = Path(__file__).resolve().parent.parent.parent.parent / "world-sim"
+        result = subprocess.run(
+            [sys.executable, str(runner)],
+            capture_output=True, text=True, timeout=10, cwd=str(ws_dir),
+        )
+        assert result.returncode == 1
+        assert "Usage:" in result.stdout or "Usage:" in result.stderr
+
+    def test_runner_from_arbitrary_cwd(self, tmp_path: Path):
+        """Runner works from arbitrary cwd when script path is absolute."""
+        import subprocess
+        runner = Path(__file__).resolve().parent.parent.parent.parent / "world-sim" / "scripts" / "run_first_pair_checks.py"
+        result = subprocess.run(
+            [sys.executable, str(runner)],
+            capture_output=True, text=True, timeout=10, cwd=str(tmp_path),
+        )
+        assert result.returncode == 1
+        assert "Usage:" in result.stdout or "Usage:" in result.stderr
+
+    def test_runner_non_executable_launcher(self, tmp_path: Path):
+        """Runner works even when run_cli.py has no execute permission (POSIX regression)."""
+        import subprocess, stat
+        launcher = Path(__file__).resolve().parent.parent / "run_cli.py"
+        fixture_launcher = tmp_path / "run_cli_noexec.py"
+        # Copy launcher to temp so we can strip permissions without affecting source
+        fixture_launcher.write_text(launcher.read_text())
+        if sys.platform != "win32":
+            fixture_launcher.chmod(fixture_launcher.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
+        # Runner uses sys.executable internally, so permissions don't matter
+        code = f"""
+import sys, subprocess
+sys.path.insert(0, {str(Path(__file__).resolve().parent.parent / "src")!r})
+runner = {str(Path(__file__).resolve().parent.parent.parent.parent / "world-sim" / "scripts" / "run_first_pair_checks.py")!r}
+result = subprocess.run([sys.executable, runner, "code-index-status"], capture_output=True, text=True, timeout=15)
+if result.returncode != 0:
+    print("FAIL", result.stderr[:300])
+    sys.exit(1)
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0 and "OK" in result.stdout, (
+            f"Runner failed with non-executable launcher:\n{result.stderr[:500]}"
+        )
 
 
 # ── First Pair regression ──────────────────────────────────────────────

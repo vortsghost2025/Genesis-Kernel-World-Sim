@@ -86,7 +86,11 @@ def cmd_code_index_tests(repo_root: Path) -> int:
 
 
 def cmd_mcp_smoke(repo_root: Path) -> int:
-    """Real MCP lifecycle through the committed launcher."""
+    """Real MCP lifecycle through the committed launcher.
+
+    Initialise the protocol, list tools, call index_status, run a successful
+    find_definition query against the current index, then close cleanly.
+    """
     tooling = repo_root / "tooling" / "code-index-mcp"
     run_server = str(tooling / "run_server.py")
     src = str(tooling / "src")
@@ -112,8 +116,18 @@ async def run():
             names = {{t.name for t in tools.tools}}
             assert "find_definition" in names
             assert "index_status" in names
+
             status = await session.call_tool("index_status", {{}})
             assert status.content
+
+            defs = await session.call_tool("find_definition", {{"name": "Greeter"}})
+            assert defs.content
+            text = defs.content[0].text if hasattr(defs.content[0], 'text') else str(defs.content[0])
+            data = json.loads(text)
+            assert isinstance(data, list)
+            if len(data) > 0:
+                assert data[0]["kind"] == "class"
+
             print("MCP_SMOKE_PASSED")
 
 asyncio.run(run())
