@@ -7,3 +7,6 @@ kilo.jsonc
 .kilo/package-lock.json
 .kilo/package.json
 world-sim/.runtime/
+
+__pycache__/
+*.pyc
