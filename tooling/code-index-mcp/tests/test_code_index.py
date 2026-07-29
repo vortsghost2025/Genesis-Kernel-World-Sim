@@ -412,7 +412,123 @@ class TestPathContainment:
 
 # ── Package bootstrap tests ────────────────────────────────────────────
 
-class TestPackageBootstrap:
+# ── MCP integration tests ──────────────────────────────────────────────
+
+class TestMCPIntegration:
+    """Real MCP stdio session through the committed launcher."""
+
+    SESSION_SCRIPT = """
+import asyncio, json, os, sys
+
+sys.path.insert(0, SERVER_SRC)
+
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def run():
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[RUN_SERVER],
+        env={"GENESIS_CODE_INDEX_REPO_ROOT": ROOT},
+    )
+    async with stdio_client(params) as streams:
+        from mcp.client.session import ClientSession
+        async with ClientSession(*streams) as session:
+            # Initialize
+            init = await session.initialize()
+            assert init.serverInfo.name == "genesis-code-index"
+
+            # tools/list
+            tools = await session.list_tools()
+            tool_names = {t.name for t in tools.tools}
+            assert "find_definition" in tool_names
+            assert "find_references" in tool_names
+            assert "lexical_search" in tool_names
+            assert "index_status" in tool_names
+
+            # tools/call — index_status
+            status = await session.call_tool("index_status", {})
+            assert status.content
+            status_data = json.loads(status.content[0].text)
+            assert "files" in status_data
+
+            # tools/call — malformed input (missing required 'name')
+            # This should return an error result, not crash
+            bad = await session.call_tool("find_definition", {})
+            assert bad.isError or len(bad.content) > 0
+
+            print("ALL_PASSED")
+
+asyncio.run(run())
+"""
+
+    def test_full_mcp_session(self, sample_repo: Path):
+        """Complete MCP initialise → tools/list → tools/call lifecycle."""
+        import subprocess, os
+        from pathlib import Path
+
+        server_dir = Path(__file__).resolve().parent.parent
+        src = str(server_dir / "src")
+        run_server = str(server_dir / "run_server.py")
+
+        script = (
+            self.SESSION_SCRIPT
+            .replace("SERVER_SRC", json.dumps(src))
+            .replace("RUN_SERVER", json.dumps(run_server))
+            .replace("ROOT", repr(str(sample_repo).replace("\\", "/")))
+        )
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = src
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, cwd=server_dir, env=env,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+
+        if "ALL_PASSED" not in stdout:
+            pytest.fail(f"MCP session failed.\nstdout: {stdout[:1000]}\nstderr: {stderr[:1000]}")
+
+
+# ── OpenCode acceptance ────────────────────────────────────────────────
+
+class TestOpenCodeAcceptance:
+    def test_opencode_discovery(self):
+        """Verify opencode resolves the MCP registration."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["opencode", "debug", "config"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                pytest.skip("opencode not available or not in PATH")
+            # Check that the MCP config is present
+            assert "genesis-code-index" in result.stdout, (
+                f"genesis-code-index not found in opencode config\n{result.stdout}"
+            )
+        except FileNotFoundError:
+            pytest.skip("opencode binary not found in test environment")
+        except subprocess.TimeoutExpired:
+            pytest.skip("opencode timed out")
+
+
+# ── Packaging tests ────────────────────────────────────────────────────
+
+class TestPackaging:
+    def test_build_backend_importable(self):
+        """The declared build backend can be imported."""
+        import importlib
+        mod = importlib.import_module("setuptools.build_meta")
+        assert mod is not None
+
     def test_launcher_imports(self, sample_repo: Path):
         """run_cli.py can import the package without PYTHONPATH."""
         import subprocess
@@ -429,38 +545,6 @@ class TestPackageBootstrap:
         content = opencode_jsonc.read_text()
         assert "S:" not in content, "opencode.jsonc contains absolute S: drive path"
         assert "sean" not in content.lower(), "opencode.jsonc contains Sean-specific path"
-
-
-# ── MCP integration tests ──────────────────────────────────────────────
-
-@pytest.mark.skipif(not sys.stdin.isatty(), reason="Requires interactive terminal for stdio MCP test; run manually for full coverage")
-class TestMCPIntegration:
-    def test_tools_list_via_stdio(self, sample_repo: Path):
-        """Start MCP server, send tools/list, verify response."""
-        import subprocess, json, time
-        server_path = Path(__file__).resolve().parent.parent / "run_server.py"
-        proc = subprocess.Popen(
-            ["python", str(server_path)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=sample_repo,
-        )
-        time.sleep(0.5)
-        request = json.dumps({"jsonrpc": "2.0", "method": "tools/list", "id": 1})
-        stdout, stderr = proc.communicate(input=request, timeout=10)
-        proc.terminate()
-        for line in stdout.strip().split("\n"):
-            try:
-                resp = json.loads(line)
-                if resp.get("id") == 1 and "result" in resp:
-                    tools = resp["result"].get("tools", [])
-                    tool_names = {t["name"] for t in tools}
-                    assert "find_definition" in tool_names
-                    assert "find_references" in tool_names
-                    assert "lexical_search" in tool_names
-                    return
-            except json.JSONDecodeError:
-                continue
-        pytest.fail(f"tools/list did not return expected tools.\nstdout: {stdout[:300]}\nstderr: {stderr[:300]}")
 
 
 # ── Runner tests ───────────────────────────────────────────────────────
