@@ -93,10 +93,19 @@ def test_iso_timestamp_expired(daemon):
 
 
 def test_iso_timestamp_zulu(daemon):
-    """ISO format with Z suffix, fresh → preserved."""
-    state = {"whisper_cooldown": 60, "whisper_cooldown_set_at_utc": "2026-06-23T20:00:00Z"}
+    """ISO format with Z suffix, fresh → preserved.
+
+    Generates a timestamp 60 seconds ago (well inside the 7200-second fresh
+    window) ending in the literal ``Z`` suffix, so the test is date-independent
+    and not flaky.  See ``_sanitize_runtime_counters`` in
+    ``backend/daemon/agent_daemon.py`` for the threshold.
+    """
+    from datetime import datetime, timedelta, timezone
+    ts = datetime.now(timezone.utc) - timedelta(seconds=60)
+    zulu = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert zulu.endswith("Z"), f"test timestamp must end in literal Z: {zulu}"
+    state = {"whisper_cooldown": 60, "whisper_cooldown_set_at_utc": zulu}
     result = daemon._sanitize_runtime_counters(state, "test_agent")
-    # The age will be ~24 minutes from the test timestamp, so preserved
     assert result["whisper_cooldown"] == 60
 
 

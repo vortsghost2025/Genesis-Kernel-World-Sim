@@ -85,22 +85,58 @@ def cmd_code_index_tests(repo_root: Path) -> int:
     return _run(_py(["-m", "pytest", "tests/", "-q"]), cwd=tooling)
 
 
+def _validate_smoke_result(
+    data: object,
+    expected_name: str = "WorldAgent",
+    expected_kind: str = "class",
+    expected_file_path: str = "world-sim/backend/agents/base.py",
+) -> tuple[bool, str]:
+    """Pure validator for the production mcp-smoke result.
+
+    Accepts the parsed JSON payload from a ``find_definition`` MCP call.
+    Returns ``(ok, reason)`` — ``ok`` is True iff the payload is a non-empty
+    list whose first element has the expected ``kind`` and ``file_path``.
+    Designed to be directly unit-tested without invoking an MCP server.
+    """
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return (False, f"Expected list, got {type(data).__name__}")
+    if len(data) == 0:
+        return (False, f"{expected_name} not found — index may be empty or reindex failed")
+    first = data[0]
+    if not isinstance(first, dict):
+        return (False, f"Expected dict element, got {type(first).__name__}")
+    kind = first.get("kind")
+    if kind != expected_kind:
+        return (False, f"Expected kind {expected_kind!r}, got {kind!r}")
+    fp = first.get("file_path") or first.get("file")
+    if fp != expected_file_path:
+        return (False, f"Expected file_path {expected_file_path!r}, got {fp!r}")
+    return (True, "ok")
+
+
 def cmd_mcp_smoke(repo_root: Path) -> int:
     """Real MCP lifecycle through the committed launcher.
 
     Initialise the protocol, list tools, call index_status, run a successful
     find_definition query against the current index, then close cleanly.
+    Result validation is delegated to ``_validate_smoke_result`` (a pure
+    function that is directly unit-tested by the code-index suite).
     """
     tooling = repo_root / "tooling" / "code-index-mcp"
     run_server = str(tooling / "run_server.py")
     src = str(tooling / "src")
+    script_dir = str(Path(__file__).resolve().parent)
 
     session_code = f"""
 import asyncio, json, sys
 sys.path.insert(0, {json.dumps(src)})
+sys.path.insert(0, {json.dumps(script_dir)})
 from mcp import StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.session import ClientSession
+from run_first_pair_checks import _validate_smoke_result
 
 async def run():
     params = StdioServerParameters(
@@ -124,14 +160,10 @@ async def run():
             assert defs.content
             text = defs.content[0].text if hasattr(defs.content[0], 'text') else str(defs.content[0])
             data = json.loads(text)
-            if isinstance(data, dict):
-                data = [data]
-            assert isinstance(data, list), f"Expected list, got {{type(data).__name__}}: {{text[:200]}}"
-            assert len(data) > 0, f"WorldAgent not found in index — reindex may have failed"
-            assert data[0]["kind"] == "class", f"Expected class, got {{data[0]}}"
-            assert data[0].get("file_path") == "world-sim/backend/agents/base.py", (
-                f"Expected agents/base.py, got {{data[0].get('file', data[0].get('file_path', '?'))}}"
-            )
+
+            ok, reason = _validate_smoke_result(data)
+            if not ok:
+                raise AssertionError(f"mcp-smoke validation failed: {{reason}}")
 
             print("MCP_SMOKE_PASSED")
 
