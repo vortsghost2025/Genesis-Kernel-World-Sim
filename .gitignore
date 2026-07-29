@@ -16,3 +16,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .basedpyright/
+# Package build artifacts
+build/
+*.egg-info/
+dist/
