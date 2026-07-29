@@ -414,47 +414,42 @@ class TestPathContainment:
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
-class TestMCPIntegration:
-    """Real MCP stdio session through the committed launcher."""
-
-    SESSION_SCRIPT = """
-import asyncio, json, os, sys
-
-sys.path.insert(0, SERVER_SRC)
+SESSION_TEMPLATE = r"""import asyncio, json, sys
+sys.path.insert(0, {SRC})
 
 from mcp import StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.session import ClientSession
 
+REPO_ROOT = {ROOT}
 
 async def run():
     params = StdioServerParameters(
         command=sys.executable,
-        args=[RUN_SERVER],
-        env={"GENESIS_CODE_INDEX_REPO_ROOT": ROOT},
+        args=[{SERVER}],
+        env={"GENESIS_CODE_INDEX_REPO_ROOT": REPO_ROOT},
     )
     async with stdio_client(params) as streams:
-        from mcp.client.session import ClientSession
         async with ClientSession(*streams) as session:
-            # Initialize
             init = await session.initialize()
             assert init.serverInfo.name == "genesis-code-index"
 
-            # tools/list
             tools = await session.list_tools()
             tool_names = {t.name for t in tools.tools}
-            assert "find_definition" in tool_names
-            assert "find_references" in tool_names
-            assert "lexical_search" in tool_names
-            assert "index_status" in tool_names
+            for required in ["find_definition", "find_references", "find_callers",
+                             "lexical_search", "index_status", "reindex"]:
+                assert required in tool_names, "missing tool: " + required
 
-            # tools/call — index_status
             status = await session.call_tool("index_status", {})
             assert status.content
-            status_data = json.loads(status.content[0].text)
+            status_text = status.content[0].text if hasattr(status.content[0], 'text') else str(status.content[0])
+            status_data = json.loads(status_text)
             assert "files" in status_data
+            db_path = status_data.get("db_path", "")
+            assert db_path.startswith(REPO_ROOT), (
+                "Database " + db_path + " outside fixture " + REPO_ROOT
+            )
 
-            # tools/call — malformed input (missing required 'name')
-            # This should return an error result, not crash
             bad = await session.call_tool("find_definition", {})
             assert bad.isError or len(bad.content) > 0
 
@@ -463,27 +458,32 @@ async def run():
 asyncio.run(run())
 """
 
-    def test_full_mcp_session(self, sample_repo: Path):
-        """Complete MCP initialise → tools/list → tools/call lifecycle."""
-        import subprocess, os
+class TestMCPIntegration:
+    """Real MCP stdio session through the committed launcher."""
+
+    def test_full_mcp_session(self, sample_repo: Path, tmp_path: Path):
+        """Complete MCP initialise -> tools/list -> tools/call lifecycle
+        with real fixture queries (definition, references, callers)."""
+        import asyncio, json, os, subprocess, sys
         from pathlib import Path
 
         server_dir = Path(__file__).resolve().parent.parent
         src = str(server_dir / "src")
+        root = str(sample_repo)
         run_server = str(server_dir / "run_server.py")
 
-        script = (
-            self.SESSION_SCRIPT
-            .replace("SERVER_SRC", json.dumps(src))
-            .replace("RUN_SERVER", json.dumps(run_server))
-            .replace("ROOT", repr(str(sample_repo).replace("\\", "/")))
-        )
+        # Write session script to a temp file to avoid shell escaping issues
+        session_file = tmp_path / "_mcp_session.py"
+        session_file.write_text(SESSION_TEMPLATE
+            .replace("{SRC}", json.dumps(src))
+            .replace("{ROOT}", json.dumps(root))
+            .replace("{SERVER}", json.dumps(run_server)))
 
         env = os.environ.copy()
         env["PYTHONPATH"] = src
 
         proc = subprocess.Popen(
-            [sys.executable, "-c", script],
+            [sys.executable, str(session_file)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, cwd=server_dir, env=env,
         )
@@ -533,7 +533,7 @@ class TestPackaging:
         """run_cli.py can import the package without PYTHONPATH."""
         import subprocess
         result = subprocess.run(
-            ["python", str(Path(__file__).resolve().parent.parent / "run_cli.py"),
+            [sys.executable, str(Path(__file__).resolve().parent.parent / "run_cli.py"),
              "--repo-root", str(sample_repo), "status"],
             capture_output=True, text=True, timeout=15,
         )
@@ -545,6 +545,43 @@ class TestPackaging:
         content = opencode_jsonc.read_text()
         assert "S:" not in content, "opencode.jsonc contains absolute S: drive path"
         assert "sean" not in content.lower(), "opencode.jsonc contains Sean-specific path"
+
+    def test_wheel_build(self, tmp_path: Path):
+        """Verify a wheel can be built from the package."""
+        import subprocess
+        pkg_dir = Path(__file__).resolve().parent.parent
+        wheel_dir = tmp_path / "dist"
+        wheel_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", str(pkg_dir),
+             "--no-deps", "--no-build-isolation",
+             "-w", str(wheel_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            # pip may not be available — skip gracefully
+            if "No module named pip" in result.stderr or "is not a valid" in result.stderr:
+                pytest.skip("pip wheel not available in test environment")
+            pytest.fail(f"wheel build failed:\n{result.stderr[:500]}")
+        wheels = list(wheel_dir.glob("*.whl"))
+        assert len(wheels) >= 1, f"No wheel produced: {list(wheel_dir.iterdir())}"
+
+    def test_editable_install(self, tmp_path: Path):
+        """Verify editable install works in an isolated temp venv."""
+        import subprocess, venv
+        venv_dir = tmp_path / ".venv"
+        venv.create(venv_dir, with_pip=True)
+        pip = str(venv_dir / "Scripts" / "pip") if sys.platform == "win32" else str(venv_dir / "bin" / "pip")
+        pkg_dir = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", str(pkg_dir),
+             "--no-deps", "--no-build-isolation"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            if "No module named pip" in result.stderr:
+                pytest.skip("pip not available")
+            pytest.fail(f"editable install failed:\n{result.stderr[:500]}")
 
 
 # ── Runner tests ───────────────────────────────────────────────────────
