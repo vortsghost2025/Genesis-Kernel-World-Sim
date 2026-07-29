@@ -9,9 +9,15 @@ from typing import Any
 
 def _path_matches_filter(file_path: str, path_filter: str) -> bool:
     """Component-aware scope check: path_filter must equal a path component
-    or be a proper prefix (separator-boundary, not substring)."""
-    nf = path_filter.replace("\\", "/").strip("/")
+    or be a proper prefix (separator-boundary, not substring).
+
+    NOTE: Callers must pre-validate ``path_filter`` against indexed roots
+    (e.g. via :func:`~genesis_code_index.indexer.resolve_path_scope`)
+    before calling this function.  This function does *not* resolve
+    ``..`` traversal or symlinks — it operates on the literal string.
+    """
     fp = file_path.replace("\\", "/")
+    nf = Path(path_filter).as_posix().rstrip("/")
     return fp == nf or fp.startswith(nf + "/")
 
 

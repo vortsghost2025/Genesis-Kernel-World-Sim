@@ -32,6 +32,24 @@ def _is_indexed(path: Path, repo_root: Path) -> bool:
         return False
 
 
+def resolve_path_scope(path_filter: str, repo_root: Path) -> str:
+    """Validate and normalize a path_filter against INDEXED_ROOTS.
+
+    Resolves ``..`` traversal and symlinks, then checks the result stays
+    within an indexed root.  Raises ``ValueError`` on escape; returns the
+    normalized POSIX relative path on success.
+    """
+    resolved = (repo_root / path_filter).resolve()
+    rel = resolved.relative_to(repo_root.resolve())
+    rel_str = rel.as_posix()
+    if not any(rel_str == r or rel_str.startswith(r + "/") for r in INDEXED_ROOTS):
+        raise ValueError(
+            f"path_filter '{path_filter}' resolves to '{rel_str}' "
+            f"which is not under any indexed root"
+        )
+    return rel_str
+
+
 def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 

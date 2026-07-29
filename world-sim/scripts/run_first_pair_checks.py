@@ -120,13 +120,18 @@ async def run():
             status = await session.call_tool("index_status", {{}})
             assert status.content
 
-            defs = await session.call_tool("find_definition", {{"name": "Greeter"}})
+            defs = await session.call_tool("find_definition", {{"name": "WorldAgent"}})
             assert defs.content
             text = defs.content[0].text if hasattr(defs.content[0], 'text') else str(defs.content[0])
             data = json.loads(text)
-            assert isinstance(data, list)
-            if len(data) > 0:
-                assert data[0]["kind"] == "class"
+            if isinstance(data, dict):
+                data = [data]
+            assert isinstance(data, list), f"Expected list, got {{type(data).__name__}}: {{text[:200]}}"
+            assert len(data) > 0, f"WorldAgent not found in index — reindex may have failed"
+            assert data[0]["kind"] == "class", f"Expected class, got {{data[0]}}"
+            assert data[0].get("file_path") == "world-sim/backend/agents/base.py", (
+                f"Expected agents/base.py, got {{data[0].get('file', data[0].get('file_path', '?'))}}"
+            )
 
             print("MCP_SMOKE_PASSED")
 

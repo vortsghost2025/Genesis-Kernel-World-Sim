@@ -480,6 +480,172 @@ class TestPathContainment:
         asyncio.run(_test())
         assert events["result"].get("status") == "rejected", f"Expected rejected, got {events}"
 
+    def test_reindex_traversal_resolved_scope(self, sample_repo: Path):
+        """path_filter with '..' that resolves outside indexed root is rejected."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    r = await session.call_tool("reindex", {"path_filter": "world-sim/backend/../../outside"})
+                    raw = r.content[0].text if hasattr(r.content[0], "text") else str(r.content[0])
+                    events["result"] = json.loads(raw)
+
+        asyncio.run(_test())
+        assert events["result"].get("status") == "rejected", f"Expected rejected, got {events}"
+
+    def test_resolve_path_scope_rejects_traversal(self, sample_repo: Path):
+        """resolve_path_scope raises ValueError for '..' that escapes indexed root."""
+        import os
+        from genesis_code_index.indexer import resolve_path_scope
+
+        with pytest.raises(ValueError, match="not under any indexed root"):
+            resolve_path_scope("world-sim/backend/../../outside", sample_repo)
+
+    def test_resolve_path_scope_rejects_sibling(self, sample_repo: Path):
+        """resolve_path_scope raises ValueError for sibling-named scope."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        with pytest.raises(ValueError, match="not under any indexed root"):
+            resolve_path_scope("world-sim/backend-other", sample_repo)
+
+    def test_resolve_path_scope_accepts_valid(self, sample_repo: Path):
+        """resolve_path_scope returns normalized path for valid scope."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("world-sim/backend", sample_repo)
+        assert result == "world-sim/backend"
+
+    def test_resolve_path_scope_normalizes_traversal(self, sample_repo: Path):
+        """resolve_path_scope resolves '..' that stays within indexed root."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("world-sim/tests/../backend", sample_repo)
+        assert result == "world-sim/backend"
+
+    def test_resolve_path_scope_rejects_outside_repo(self, sample_repo: Path):
+        """resolve_path_scope raises ValueError for path entirely outside repo."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        with pytest.raises(ValueError):
+            resolve_path_scope("../../etc", sample_repo)
+
+    def test_find_definition_rejects_traversal(self, sample_repo: Path):
+        """MCP tool find_definition returns error for path_filter with traversal."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    r = await session.call_tool("find_definition", {
+                        "name": "Greeter",
+                        "path_filter": "world-sim/backend/../../outside",
+                    })
+                    result = _parse_tool_result(r, expect_list=True)
+                    events["result"] = result
+
+        asyncio.run(_test())
+        assert len(events["result"]) == 1
+        assert "error" in events["result"][0]
+        assert "not under any indexed root" in events["result"][0]["error"]
+
+    def test_find_references_rejects_traversal(self, sample_repo: Path):
+        """MCP tool find_references returns error for path_filter with sibling."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    r = await session.call_tool("find_references", {
+                        "name": "helper",
+                        "path_filter": "world-sim/backend-other",
+                    })
+                    result = _parse_tool_result(r, expect_list=True)
+                    events["result"] = result
+
+        asyncio.run(_test())
+        assert len(events["result"]) == 1
+        assert "error" in events["result"][0]
+        assert "not under any indexed root" in events["result"][0]["error"]
+
+    def test_file_symbols_rejects_traversal(self, sample_repo: Path):
+        """MCP tool file_symbols returns error for path with traversal."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    r = await session.call_tool("file_symbols", {
+                        "file_path": "world-sim/backend/../../outside/evil.py",
+                    })
+                    result = _parse_tool_result(r, expect_list=True)
+                    events["result"] = result
+
+        asyncio.run(_test())
+        assert len(events["result"]) == 1
+        assert "error" in events["result"][0]
+        assert "not under any indexed root" in events["result"][0]["error"]
+
 
 # ── Package bootstrap tests ────────────────────────────────────────────
 
@@ -611,28 +777,42 @@ class TestMCPIntegration:
         assert events["malformed"]["isError"], "Malformed call should return error"
 
     def test_no_real_checkout_mutation(self, sample_repo: Path):
-        """The MCP test fixture uses its own repository; real checkout is unchanged."""
+        """The MCP test fixture uses its own repository; real checkout is unchanged.
+
+        Snapshot is a dict keyed by resolved relative paths within .code-index,
+        with each value a (size, sha256) tuple for content-level proof.
+        """
+        import hashlib
         real_index = Path(__file__).resolve().parent.parent / ".." / ".." / ".code-index"
-        if real_index.exists():
-            meta_before = {
-                p.name: p.stat().st_mtime_ns
-                for p in sorted(real_index.rglob("*")) if p.is_file()
-            }
-        else:
-            meta_before = None
+        real_index_root = real_index.resolve()
+
+        def _snapshot(path: Path) -> dict | None:
+            if not path.exists():
+                return None
+            snap = {}
+            for p in sorted(path.rglob("*")):
+                if p.is_file():
+                    rel = str(p.resolve().relative_to(real_index_root).as_posix())
+                    snap[rel] = (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+            return snap
+
+        before = _snapshot(real_index)
 
         _run_mcp_session(sample_repo)
 
-        if meta_before is None:
-            assert not real_index.exists() or (
-                len(list(real_index.iterdir())) == 0
-            ), "Real checkout index was created by test"
+        after = _snapshot(real_index)
+
+        if before is None:
+            assert after is None or len(after) == 0, (
+                f"Real checkout index was created by test: {list(after.keys())}"
+            )
         else:
-            meta_after = {
-                p.name: p.stat().st_mtime_ns
-                for p in sorted(real_index.rglob("*")) if p.is_file()
-            }
-            assert meta_before == meta_after, "Real checkout index modified by test"
+            assert before == after, (
+                f"Real checkout .code-index modified by test.\n"
+                f"Added:   {set(after.keys()) - set(before.keys())}\n"
+                f"Removed: {set(before.keys()) - set(after.keys())}\n"
+                f"Changed: {[k for k in before if k in after and before[k] != after[k]]}"
+            )
 
 
 # ── OpenCode acceptance ────────────────────────────────────────────────

@@ -8,7 +8,7 @@ from typing import Any
 
 from mcp.server import FastMCP
 
-from genesis_code_index.indexer import index_file, SKIP_DIRS, INDEXED_ROOTS
+from genesis_code_index.indexer import index_file, resolve_path_scope, SKIP_DIRS, INDEXED_ROOTS
 from genesis_code_index.store import CodeIndexStore
 from genesis_code_index.semantic_adapter import create_semantic_backend
 
@@ -46,11 +46,21 @@ def _build_mcp() -> FastMCP:
     def find_definition(name: str, kind: str | None = None,
                         path_filter: str | None = None) -> list[dict]:
         """Find exact symbol definitions (class, function, method)."""
+        if path_filter is not None:
+            try:
+                path_filter = resolve_path_scope(path_filter, repo_root)
+            except ValueError as e:
+                return [{"error": str(e)}]
         return store.query_definitions(name, kind, path_filter)
 
     @mcp.tool()
     def find_references(name: str, path_filter: str | None = None) -> list[dict]:
         """Find actual AST reference nodes (name, attribute, call)."""
+        if path_filter is not None:
+            try:
+                path_filter = resolve_path_scope(path_filter, repo_root)
+            except ValueError as e:
+                return [{"error": str(e)}]
         return store.query_references(name, path_filter)
 
     @mcp.tool()
@@ -77,7 +87,11 @@ def _build_mcp() -> FastMCP:
     @mcp.tool()
     def file_symbols(file_path: str) -> list[dict]:
         """List all indexed symbols in a file."""
-        return store.query_file_symbols(file_path)
+        try:
+            validated = resolve_path_scope(file_path, repo_root)
+        except ValueError as e:
+            return [{"error": str(e)}]
+        return store.query_file_symbols(validated)
 
     @mcp.tool()
     def lexical_search(query: str, limit: int = 30) -> list[dict]:
@@ -103,17 +117,13 @@ def _build_mcp() -> FastMCP:
         skipped = 0
         errors = 0
 
-        # Determine scope — component-aware validation
-        # A filter is valid only when it exactly equals an indexed root or
-        # is a descendant (separator-boundary check, not substring).
+        # Determine scope — resolved-path validation with traversal
+        # and symlink rejection.
         if path_filter:
-            norm_filter = path_filter.replace("\\", "/").strip("/")
-            scope_roots = [
-                r for r in INDEXED_ROOTS
-                if norm_filter == r or norm_filter.startswith(r + "/")
-            ]
-            if not scope_roots:
-                return {"error": f"path_filter '{path_filter}' is not under any indexed root",
+            try:
+                norm_filter = resolve_path_scope(path_filter, repo_root)
+            except ValueError as e:
+                return {"error": str(e),
                         "reindexed": 0, "skipped": 0, "errors": 0,
                         "elapsed_seconds": 0.0, "status": "rejected"}
             indexed_scope = {norm_filter}
