@@ -1,8 +1,14 @@
 """CLI entry point for genesis-code-index."""
 
 import argparse
+import hashlib
 import sys
+import time
 from pathlib import Path
+
+
+def _file_hash(pyfile: Path) -> str:
+    return hashlib.sha256(pyfile.read_bytes()).hexdigest()
 
 
 def main() -> None:
@@ -10,14 +16,13 @@ def main() -> None:
     parser.add_argument("--repo-root", default="",
                         help="Repository root path (default: auto-detect)")
     sub = parser.add_subparsers(dest="command")
-
     sub.add_parser("reindex", help="Rebuild the code index")
     sub.add_parser("status", help="Show index status")
 
     args = parser.parse_args()
 
-    from genesis_code_index.server import _resolve_repo_root, _build_mcp, indexer_file_hash
-    from genesis_code_index.indexer import index_file, index_repo, SKIP_DIRS, INDEXED_ROOTS
+    from genesis_code_index.server import _resolve_repo_root
+    from genesis_code_index.indexer import index_file, SKIP_DIRS, INDEXED_ROOTS
     from genesis_code_index.store import CodeIndexStore
 
     if args.repo_root:
@@ -31,12 +36,11 @@ def main() -> None:
     store.initialize()
 
     if args.command == "reindex":
-        import time
         t0 = time.time()
-        active = set()
         reindexed = 0
         skipped = 0
         errors = 0
+        active: set[str] = set()
 
         for root_str in INDEXED_ROOTS:
             root = repo_root / root_str
@@ -51,28 +55,33 @@ def main() -> None:
                     continue
                 active.add(rel)
                 stat = pyfile.stat()
-                fhash = indexer_file_hash(pyfile)
+                fhash = _file_hash(pyfile)
                 if store.file_exists_unchanged(rel, stat.st_mtime, fhash):
                     skipped += 1
                     continue
-                syms, err = index_file(pyfile, repo_root)
-                store.reset_file(rel)
-                if err:
-                    store.update_file(rel, stat.st_size, stat.st_mtime, fhash, err)
+                syms, parse_err = index_file(pyfile, repo_root)
+                if parse_err:
+                    prev = store.get_file(rel)
+                    prev_hash = prev["file_hash"] if prev else ""
+                    store.record_parse_failure(rel, fhash, prev_hash, parse_err)
                     errors += 1
                 else:
-                    store.update_file(rel, stat.st_size, stat.st_mtime, fhash, None)
-                    store.insert_symbols(rel, syms)
+                    store.replace_file_index(rel, stat.st_size, stat.st_mtime,
+                                             fhash, syms)
                     reindexed += 1
 
         store.remove_deleted_files(active)
         elapsed = time.time() - t0
+        stats = store.get_stats()
         print(f"Reindexed {reindexed} files, skipped {skipped}, errors {errors}")
         print(f"Elapsed: {elapsed:.2f}s")
+        print(f"Files: {stats['files']}, Symbols: {stats['symbols']}")
+        print(f"FTS: {stats['fts']}")
         if errors:
             print("Index status: DEGRADED (parse errors)")
         else:
             print("Index status: OK")
+
     elif args.command == "status":
         stats = store.get_stats()
         print(f"Files:         {stats['files']}")
@@ -80,6 +89,14 @@ def main() -> None:
         print(f"Parse errors:  {stats['parse_errors']}")
         print(f"DB path:       {db_path}")
         print(f"Schema:        {stats['schema_version']}")
+        fts = stats.get("fts", {})
+        print(f"FTS available: {fts.get('fts_available', False)}")
+        print(f"FTS rows:      {fts.get('indexed_fts_rows', 0)}")
+        failures = store.get_failures(5)
+        if failures:
+            print(f"Recent failures: {len(failures)}")
+            for f in failures:
+                print(f"  {f['path']}: {f['error_message'][:80]}")
         if stats['parse_errors']:
             print("Status: DEGRADED")
         else:
