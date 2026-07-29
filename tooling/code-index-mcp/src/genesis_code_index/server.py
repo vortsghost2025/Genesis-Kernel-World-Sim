@@ -103,10 +103,15 @@ def _build_mcp() -> FastMCP:
         skipped = 0
         errors = 0
 
-        # Determine scope
+        # Determine scope — component-aware validation
+        # A filter is valid only when it exactly equals an indexed root or
+        # is a descendant (separator-boundary check, not substring).
         if path_filter:
             norm_filter = path_filter.replace("\\", "/").strip("/")
-            scope_roots = [r for r in INDEXED_ROOTS if norm_filter.startswith(r)]
+            scope_roots = [
+                r for r in INDEXED_ROOTS
+                if norm_filter == r or norm_filter.startswith(r + "/")
+            ]
             if not scope_roots:
                 return {"error": f"path_filter '{path_filter}' is not under any indexed root",
                         "reindexed": 0, "skipped": 0, "errors": 0,
