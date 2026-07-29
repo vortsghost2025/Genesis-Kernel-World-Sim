@@ -740,7 +740,7 @@ class MemorySummaryRecord:
     def seal(self) -> MemorySummaryRecord:
         material = asdict(self)
         material.pop("integrity_commitment", None)
-        material.pop("source_commitment", None)
+        # source_commitment is now bound into the integrity hash
         self.integrity_commitment = _hash_canonical(material)
         return self
 
@@ -773,6 +773,28 @@ def save_summaries(store: FirstPairPersistenceStore, summaries: list[MemorySumma
     )
 
 
+_ALLOWED_DERIVATION_METHODS = frozenset({
+    "deterministic_stub",
+    "deterministic_extractive",
+})
+
+
+def compute_summary_source_commitment(
+    owner_agent_id: str,
+    covered_raw_memories: list[dict],
+) -> str:
+    """Canonical one-shot source commitment for a summary.
+
+    Both derivation and validation call this same function.  The input is a
+    raw dict/list, not a pre-serialised string, so the hash is computed
+    consistently.
+    """
+    return _hash_canonical({
+        "memories": covered_raw_memories,
+        "owner": owner_agent_id,
+    })
+
+
 def validate_summary(
     summary: MemorySummaryRecord,
     memory_list: list[dict],
@@ -781,6 +803,7 @@ def validate_summary(
     """Fail-closed validation for a summary before append.
 
     Returns a list of error strings (empty = valid).
+    All commitment and metadata fields are required.
     """
     errors: list[str] = []
     if not summary.summary_id:
@@ -791,28 +814,57 @@ def validate_summary(
         errors.append("summary text must be non-empty")
     if len(summary.summary) > 2000:
         errors.append("summary text exceeds 2000 characters")
+    if not summary.summary.startswith("[derived"):
+        errors.append("summary text must be visibly labelled as derived")
     if not summary.covered_memory_ids:
         errors.append("covered_memory_ids is required")
     else:
         if len(summary.covered_memory_ids) != len(set(summary.covered_memory_ids)):
             errors.append("covered_memory_ids contains duplicates")
-        if summary.covered_heartbeat_range and len(summary.covered_heartbeat_range) != 2:
+        if len(summary.covered_heartbeat_range) != 2:
             errors.append("covered_heartbeat_range must have exactly 2 values")
-        # Resolve against raw memories only when available
-        if memory_list:
+        # memory_list is required when covered IDs are present
+        if not memory_list:
+            errors.append("memory_list is required for covered_memory_ids validation")
+        else:
             ensured = _ensure_memory_ids(memory_list, owner_agent_id=summary.owner_agent_id)
             id_map = {m["memory_id"]: m for m in ensured}
+            resolved: list[dict] = []
             for mid in summary.covered_memory_ids:
                 if mid not in id_map:
                     errors.append(f"covered_memory_id {mid} not found in raw memories")
-            # Source commitment: recompute from covered memory material
-            covered_mems = [id_map[mid] for mid in summary.covered_memory_ids if mid in id_map]
-            covered_canonical = _canonical_json({"memories": covered_mems, "owner": summary.owner_agent_id})
-            recomputed_source = _hash_canonical(covered_canonical)
-            if summary.source_commitment and summary.source_commitment != recomputed_source:
-                errors.append(f"source_commitment mismatch: got {summary.source_commitment}, expected {recomputed_source}")
-    # Integrity commitment check
-    if summary.integrity_commitment:
+                else:
+                    resolved.append(id_map[mid])
+            if resolved:
+                # Heartbeat range check
+                hbs = [m.get("heartbeat", 0) for m in resolved]
+                expected_range = [min(hbs), max(hbs)]
+                if summary.covered_heartbeat_range != expected_range:
+                    errors.append(
+                        f"covered_heartbeat_range {summary.covered_heartbeat_range} "
+                        f"does not match raw evidence {expected_range}"
+                    )
+                # Source commitment
+                expected_source = compute_summary_source_commitment(
+                    summary.owner_agent_id, resolved
+                )
+                if not summary.source_commitment:
+                    errors.append("source_commitment is required")
+                elif summary.source_commitment != expected_source:
+                    errors.append(
+                        f"source_commitment mismatch: got {summary.source_commitment}, "
+                        f"expected {expected_source}"
+                    )
+    # Derivation method
+    if not summary.derivation_method:
+        errors.append("derivation_method is required")
+    elif summary.derivation_method not in _ALLOWED_DERIVATION_METHODS:
+        errors.append(f"derivation_method '{summary.derivation_method}' not in allow-list")
+
+    # Integrity commitment — always required
+    if not summary.integrity_commitment:
+        errors.append("integrity_commitment is required")
+    else:
         check = MemorySummaryRecord(
             summary_id=summary.summary_id,
             owner_agent_id=summary.owner_agent_id,
@@ -829,11 +881,18 @@ def validate_summary(
         ).seal()
         if check.integrity_commitment != summary.integrity_commitment:
             errors.append("integrity_commitment validation failed")
-    # Duplicate check
+
+    # Duplicate handling: identical existing summary = idempotent reuse (not an error)
+    # Conflicting same-id = collision error
     for existing in existing_summaries:
         if existing.summary_id == summary.summary_id:
-            errors.append(f"duplicate summary_id: {summary.summary_id}")
+            if (existing.source_commitment == summary.source_commitment
+                    and existing.integrity_commitment == summary.integrity_commitment):
+                pass  # identical — idempotent reuse
+            else:
+                errors.append(f"duplicate summary_id with conflicting material: {summary.summary_id}")
             break
+
     return errors
 
 
@@ -841,18 +900,33 @@ def append_summary(
     store: FirstPairPersistenceStore,
     summary: MemorySummaryRecord,
     memory_list: list[dict] | None = None,
-) -> list[str]:
+) -> dict:
     """Append a validated summary. Fail-closed: leaves store unchanged on error.
 
-    Returns a list of error strings (empty = success).
+    Returns structured result:
+      {"ok": bool, "summary_id": str, "errors": list[str]}
     """
     existing = load_summaries(store)
-    errors = validate_summary(summary, memory_list or [], existing)
+
+    # Idempotent reuse: if identical already exists, return ok
+    for exist in existing:
+        if exist.summary_id == summary.summary_id:
+            if (exist.source_commitment == summary.source_commitment
+                    and exist.integrity_commitment == summary.integrity_commitment):
+                return {"ok": True, "summary_id": summary.summary_id, "errors": []}
+            break
+
+    if not memory_list:
+        return {"ok": False, "summary_id": summary.summary_id,
+                "errors": ["memory_list is required"]}
+
+    errors = validate_summary(summary, memory_list, existing)
     if errors:
-        return errors
+        return {"ok": False, "summary_id": summary.summary_id, "errors": errors}
+
     existing.append(summary)
     save_summaries(store, existing)
-    return []
+    return {"ok": True, "summary_id": summary.summary_id, "errors": []}
 
 
 def derive_summaries_for_omitted(
@@ -907,10 +981,9 @@ def derive_summaries_for_omitted(
             related_public_object_ids=[],
             related_message_ids=[],
             derivation_method="deterministic_extractive",
-            source_commitment=_hash_canonical({
-                "memories": [mem],
-                "owner": owner_agent_id,
-            }),
+            source_commitment=compute_summary_source_commitment(
+                owner_agent_id, [mem]
+            ),
         ).seal()
         summaries.append(summ)
         included_ids.append(summ.summary_id)

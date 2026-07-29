@@ -304,35 +304,38 @@ class FirstPairRuntime:
         )
         human_answered = [r for r in human_selected if r.get("status") == "answered"]
         human_unresolved = [r for r in human_selected if r.get("status") == "pending"]
-        # Update manifest
+
+        # --- Derived summaries for older omitted memories (compute before manifest) ---
+        selected_ids = {m.get("memory_id", "") for m in selected_mems}
+        derived_sums, _candidate_ids = derive_summaries_for_omitted(
+            memory_list=memory_list,
+            selected_ids=selected_ids,
+            owner_agent_id=view["agent_id"],
+        )
+        # Attempt validated append for each candidate; track actually persisted
+        persisted_summary_ids: list[str] = []
+        for ds in derived_sums:
+            result = append_summary(self._store, ds, memory_list=memory_list)
+            if result.get("ok"):
+                persisted_summary_ids.append(ds.summary_id)
+
+        # Load owned summaries — include only those actually persisted
+        all_summaries = load_summaries(self._store)
+        agent_summaries = [
+            asdict(s) for s in all_summaries
+            if s.owner_agent_id == view["agent_id"]
+            and s.summary_id in persisted_summary_ids
+        ]
+
+        # --- Update manifest with ALL metadata, then persist once ---
+        sel_manifest["summary_ids"] = persisted_summary_ids
         sel_manifest["human_context_count"] = len(human_selected)
         sel_manifest["human_context_answered_ids"] = human_answered_ids
         sel_manifest["human_context_unresolved_ids"] = human_unresolved_ids
         sel_manifest["human_context_omitted_count"] = human_omitted_count
 
-        # Persist the manifest
         if self._store:
             append_memory_selection_manifest(self._store, sel_manifest)
-
-        # --- Derived summaries for older omitted memories ---
-        selected_ids = {m.get("memory_id", "") for m in selected_mems}
-        derived_sums, included_summary_ids = derive_summaries_for_omitted(
-            memory_list=memory_list,
-            selected_ids=selected_ids,
-            owner_agent_id=view["agent_id"],
-        )
-        # Persist validated derived summaries (skip existing via validate+append)
-        for ds in derived_sums:
-            append_summary(self._store, ds, memory_list=memory_list)
-        # Update manifest with actual included summary IDs
-        sel_manifest["summary_ids"] = included_summary_ids
-
-        # Load owned summaries for context (capped to included IDs)
-        all_summaries = load_summaries(self._store)
-        agent_summaries = [
-            asdict(s) for s in all_summaries
-            if s.owner_agent_id == view["agent_id"] and s.summary_id in included_summary_ids
-        ]
 
         rel_events_export = [
             asdict(e) for e in rel_events

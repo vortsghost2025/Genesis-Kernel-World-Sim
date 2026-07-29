@@ -26,6 +26,7 @@ from backend.world.first_pair_persistence import (
     append_memory_selection_manifest,
     append_relationship_event,
     append_summary,
+    compute_summary_source_commitment,
     derive_summaries_for_omitted,
     save_summaries,
     save_relationship_events,
@@ -1086,32 +1087,42 @@ class TestDerivedSummaryValidation:
         owner = rt._identity_record.adam_agent_id
         ensured = _ensure_memory_ids(mems, owner_agent_id=owner)
         covered_ids = [m["memory_id"] for m in ensured[:2]]
-        summary = MemorySummaryRecord(
+        covered_mems = [m for m in ensured if m["memory_id"] in covered_ids]
+        hbs = [m.get("heartbeat", 0) for m in covered_mems]
+        summ = MemorySummaryRecord(
             summary_id="sum-cov", owner_agent_id=owner,
-            covered_memory_ids=covered_ids, covered_heartbeat_range=[1, 1],
-            summary="Coverage test.", salient_entities=[],
+            covered_memory_ids=covered_ids,
+            covered_heartbeat_range=[min(hbs), max(hbs)],
+            summary="[derived from heartbeat 1] Coverage test.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
+            derivation_method="deterministic_extractive",
+            source_commitment=compute_summary_source_commitment(owner, covered_mems),
         ).seal()
-        errors = append_summary(store, summary, memory_list=mems)
-        assert errors == [], f"append_summary returned errors: {errors}"
+        result = append_summary(store, summ, memory_list=mems)
+        assert result["ok"], f"append_summary failed: {result['errors']}"
         loaded = load_summaries(store)
         assert len(loaded) == 1
         for cid in loaded[0].covered_memory_ids:
             assert any(m.get("memory_id") == cid for m in ensured)
 
     def test_failure_leaves_summaries_unchanged(self, tmp_path: Path) -> None:
+        from backend.world.first_pair_persistence import _ensure_memory_ids
         store = self._make_store(tmp_path, "sum-fail")
-        # Create a valid initial summary (must have non-empty covered_memory_ids
-        # and valid owner to pass fail-closed validation)
-        init_mids = ["mem-0000000000000001"]
+        # Build a valid memory list with derived IDs
+        raw_mems = [{"heartbeat": 1, "content": "Initial event", "type": "observation"}]
+        owner = "adam-aaa"
+        ensured = _ensure_memory_ids(raw_mems, owner_agent_id=owner)
+        init_mid = ensured[0]["memory_id"]
         s0 = MemorySummaryRecord(
-            summary_id="sum-init", owner_agent_id="adam-aaa",
-            covered_memory_ids=init_mids, covered_heartbeat_range=[1, 1],
-            summary="Initial.", salient_entities=[],
+            summary_id="sum-init", owner_agent_id=owner,
+            covered_memory_ids=[init_mid], covered_heartbeat_range=[1, 1],
+            summary="[derived from heartbeat 1] Initial.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
-        )
-        errors = append_summary(store, s0)
-        assert errors == []
+            derivation_method="deterministic_extractive",
+            source_commitment=compute_summary_source_commitment(owner, [ensured[0]]),
+        ).seal()
+        result = append_summary(store, s0, memory_list=raw_mems)
+        assert result["ok"], f"append_summary failed: {result['errors']}"
         loaded_before = load_summaries(store)
         # Append with empty owner and empty summary — should fail validation
         bad = MemorySummaryRecord(
@@ -1120,8 +1131,9 @@ class TestDerivedSummaryValidation:
             summary="", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
         )
-        errors = append_summary(store, bad)
-        assert len(errors) > 0, "append_summary should return errors for invalid summary"
+        result = append_summary(store, bad)
+        assert not result["ok"], "append_summary should fail for invalid summary"
+        assert len(result["errors"]) > 0
         loaded_after = load_summaries(store)
         # The initial summary must survive regardless of the failed append
         assert len(loaded_after) >= 1
@@ -1605,23 +1617,36 @@ class TestMemorySummaryPersistence:
         assert loaded[0].summary_id == "sum-001"
 
     def test_append_summary(self, tmp_path: Path) -> None:
+        from backend.world.first_pair_persistence import _ensure_memory_ids
         store = FirstPairPersistenceStore(tmp_path / ".runtime" / "test-summaries3")
+        mem_list = [
+            {"heartbeat": 1, "content": "First memory", "type": "observation"},
+            {"heartbeat": 2, "content": "Second memory", "type": "observation"},
+        ]
+        owner = "adam-aaa"
+        ensured = _ensure_memory_ids(mem_list, owner_agent_id=owner)
+        mid1 = ensured[0]["memory_id"]
+        mid2 = ensured[1]["memory_id"]
         s1 = MemorySummaryRecord(
-            summary_id="sum-010", owner_agent_id="adam-aaa",
-            covered_memory_ids=["mem-0000000000000001"], covered_heartbeat_range=[1, 1],
-            summary="First summary.", salient_entities=[],
+            summary_id="sum-010", owner_agent_id=owner,
+            covered_memory_ids=[mid1], covered_heartbeat_range=[1, 1],
+            summary="[derived from heartbeat 1] First summary.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
-        )
-        errors = append_summary(store, s1)
-        assert errors == [], f"errors: {errors}"
+            derivation_method="deterministic_extractive",
+            source_commitment=compute_summary_source_commitment(owner, [ensured[0]]),
+        ).seal()
+        result = append_summary(store, s1, memory_list=mem_list)
+        assert result["ok"], f"append failed: {result['errors']}"
         s2 = MemorySummaryRecord(
-            summary_id="sum-011", owner_agent_id="adam-aaa",
-            covered_memory_ids=["mem-0000000000000002"], covered_heartbeat_range=[2, 2],
-            summary="Second summary.", salient_entities=[],
+            summary_id="sum-011", owner_agent_id=owner,
+            covered_memory_ids=[mid2], covered_heartbeat_range=[2, 2],
+            summary="[derived from heartbeat 2] Second summary.", salient_entities=[],
             related_goal_ids=[], related_public_object_ids=[], related_message_ids=[],
-        )
-        errors = append_summary(store, s2)
-        assert errors == [], f"errors: {errors}"
+            derivation_method="deterministic_extractive",
+            source_commitment=compute_summary_source_commitment(owner, [ensured[1]]),
+        ).seal()
+        result = append_summary(store, s2, memory_list=mem_list)
+        assert result["ok"], f"append failed: {result['errors']}"
         loaded = load_summaries(store)
         assert len(loaded) == 2
 
