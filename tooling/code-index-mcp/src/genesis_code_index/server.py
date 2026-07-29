@@ -147,9 +147,12 @@ def _build_mcp() -> FastMCP:
                     reindexed += 1
 
         # For a full reindex, remove files that no longer exist on disk.
-        # For a filtered reindex, do not touch files outside the filter.
+        # For a filtered reindex, scope deletion to that subtree only.
         if not path_filter:
             store.remove_deleted_files(active)
+        else:
+            scope = {norm_filter}
+            store.remove_deleted_files(active, scope_prefixes=scope)
 
         elapsed = time.time() - t0
         stats = store.get_stats()

@@ -353,14 +353,35 @@ class CodeIndexStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def remove_deleted_files(self, active_paths: set[str]) -> int:
+    def remove_deleted_files(self, active_paths: set[str],
+                             scope_prefixes: set[str] | None = None) -> int:
         """Remove files and symbols for paths no longer on disk.
-        Returns count of removed files.  Only removes files present in the
-        database but absent from active_paths.  An empty set means every
-        indexed file will be removed."""
+
+        When scope_prefixes is provided, only files under those prefixes are
+        eligible for deletion.  Prefix matching uses path-component semantics
+        (``prefix/name`` does not match ``prefix/another/name`` as a prefix,
+        but it does match ``prefix/name`` itself).
+
+        An empty active_paths set with scope_prefixes removes every file
+        within scope.  An empty active_paths without scope_prefixes removes
+        every indexed file.
+        """
         conn = self.connect()
         existing = {r["path"] for r in
                     conn.execute("SELECT path FROM files").fetchall()}
+
+        # Limit to scope when provided
+        if scope_prefixes:
+            scoped = set()
+            for ep in existing:
+                for sp in scope_prefixes:
+                    norm_sp = sp.replace("\\", "/").rstrip("/")
+                    norm_ep = ep.replace("\\", "/")
+                    if norm_ep == norm_sp or norm_ep.startswith(norm_sp + "/"):
+                        scoped.add(ep)
+                        break
+            existing = scoped
+
         deleted = existing - active_paths
         for path in deleted:
             conn.execute("DELETE FROM symbols WHERE file_path = ?", (path,))
