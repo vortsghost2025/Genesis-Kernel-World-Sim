@@ -42,11 +42,11 @@
       "description": "Search codebase via code index MCP"
     },
     "code-reindex": {
-      "template": "Rebuild the code index by executing: python tooling/code-index-mcp/run_cli.py --repo-root \"$(pwd)\" reindex",
+      "template": "Rebuild the code index by executing: python world-sim/scripts/run_first_pair_checks.py code-index",
       "description": "Rebuild the code index database"
     },
     "code-status": {
-      "template": "Show code index status by executing: python tooling/code-index-mcp/run_cli.py --repo-root \"$(pwd)\" status",
+      "template": "Show code index status by executing: python world-sim/scripts/run_first_pair_checks.py code-index-status",
       "description": "Show code index status"
     }
   }
