@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _path_matches_filter(file_path: str, path_filter: str) -> bool:
+    """Component-aware scope check: path_filter must equal a path component
+    or be a proper prefix (separator-boundary, not substring)."""
+    nf = path_filter.replace("\\", "/").strip("/")
+    fp = file_path.replace("\\", "/")
+    return fp == nf or fp.startswith(nf + "/")
+
+
 SCHEMA_VERSION = "genesis-code-index-v2"
 
 CREATE_SQL = """
@@ -249,21 +257,25 @@ class CodeIndexStore:
         if kind:
             parts.append("kind = ?")
             params.append(kind)
+        rows = conn.execute(
+            f"SELECT * FROM symbols WHERE {' AND '.join(parts)} ORDER BY file_path, line",
+            params,
+        ).fetchall()
         if path_filter:
-            parts.append("file_path LIKE ?")
-            params.append(f"%{path_filter}%")
-        sql = f"SELECT * FROM symbols WHERE {' AND '.join(parts)} ORDER BY file_path, line"
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            rows = [r for r in rows if _path_matches_filter(r["file_path"], path_filter)]
+        return [dict(r) for r in rows]
 
     def query_references(self, name: str, path_filter: str | None = None) -> list[dict]:
         conn = self.connect()
         parts = ["kind IN ('name_ref', 'attr_ref', 'call')", "name = ?"]
         params: list[Any] = [name]
+        rows = conn.execute(
+            f"SELECT * FROM symbols WHERE {' AND '.join(parts)} ORDER BY file_path, line",
+            params,
+        ).fetchall()
         if path_filter:
-            parts.append("file_path LIKE ?")
-            params.append(f"%{path_filter}%")
-        sql = f"SELECT * FROM symbols WHERE {' AND '.join(parts)} ORDER BY file_path, line"
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            rows = [r for r in rows if _path_matches_filter(r["file_path"], path_filter)]
+        return [dict(r) for r in rows]
 
     def query_callers(self, func_name: str) -> list[dict]:
         conn = self.connect()

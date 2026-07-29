@@ -26,7 +26,8 @@ def _is_under_repo_root(path: Path, repo_root: Path) -> bool:
 def _is_indexed(path: Path, repo_root: Path) -> bool:
     try:
         rel = path.resolve().relative_to(repo_root.resolve())
-        return any(rel.as_posix().startswith(r) for r in INDEXED_ROOTS)
+        rel_str = rel.as_posix()
+        return any(rel_str == r or rel_str.startswith(r + "/") for r in INDEXED_ROOTS)
     except ValueError:
         return False
 
