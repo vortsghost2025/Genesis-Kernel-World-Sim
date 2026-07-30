@@ -855,11 +855,64 @@ class TestPathContainment:
                 f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
             )
 
-        # Both should be rejected with unique keys
+        # Both should be rejected by resolve_path_scope
         with pytest.raises(ValueError):
             resolve_path_scope("world-sim/backend/escape1", sample_repo)
         with pytest.raises(ValueError):
             resolve_path_scope("world-sim/backend/escape2", sample_repo)
+
+        # Now exercise _snapshot directly on a temp .code-index dir
+        # to verify unique keys are created for escaping entries.
+        import hashlib
+
+        test_index = tmp_path / ".code-index"
+        test_index.mkdir()
+        link_a = test_index / "escaped_a"
+        link_b = test_index / "escaped_b"
+        outside = tmp_path / "escape_target"
+        outside.mkdir()
+        try:
+            link_a.symlink_to(outside)
+            link_b.symlink_to(outside)
+        except OSError as e:
+            pytest.skip(
+                f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
+            )
+
+        def _entry_signature(p: Path) -> tuple:
+            try:
+                st = p.stat()
+            except OSError:
+                return ("STAT_FAIL", 0, "", 0)
+            if p.is_dir():
+                return ("DIR", st.st_size, "", st.st_mtime_ns)
+            try:
+                with p.open("rb") as f:
+                    sha = hashlib.sha256(f.read()).hexdigest()
+            except (PermissionError, OSError):
+                sha = "LOCKED"
+            return ("FILE", st.st_size, sha, st.st_mtime_ns)
+
+        def _snapshot(path: Path) -> dict:
+            if not path.exists():
+                return {"__absent__": ("ABSENT", 0, "", 0)}
+            snap = {}
+            snap["."] = _entry_signature(path)
+            for p in sorted(path.rglob("*")):
+                try:
+                    rel = p.resolve().relative_to(path.resolve()).as_posix()
+                except (ValueError, OSError):
+                    rel = f"__outside__:{p.as_posix()}"
+                snap[rel] = _entry_signature(p)
+            return snap
+
+        snap = _snapshot(test_index)
+        # Verify both escaping entries have distinct keys
+        outside_keys = [k for k in snap if k.startswith("__outside__:")]
+        assert len(outside_keys) == 2, (
+            f"Expected 2 distinct outside keys, got {len(outside_keys)}: {outside_keys}"
+        )
+        assert all(k.startswith("__outside__:") for k in outside_keys)
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
