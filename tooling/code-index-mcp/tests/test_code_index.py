@@ -833,6 +833,34 @@ class TestPathContainment:
                    for r in events["result"]), \
             f"Greeter not found: {events['result']}"
 
+    def test_resolve_path_scope_multiple_escaping_symlinks_unique_keys(self, sample_repo: Path, tmp_path: Path):
+        """Two distinct escaping symlinks produce two distinct snapshot keys.
+
+        Verifies that _snapshot records each escaping entry under a unique
+        key (not a shared "__outside__" key) so mutations are not lost.
+        """
+        from genesis_code_index.indexer import resolve_path_scope
+
+        # Create two separate escaping symlinks
+        link1 = sample_repo / "world-sim" / "backend" / "escape1"
+        link2 = sample_repo / "world-sim" / "backend" / "escape2"
+        target = tmp_path / "outside"
+        target.mkdir()
+
+        try:
+            link1.symlink_to(target)
+            link2.symlink_to(target)
+        except OSError as e:
+            pytest.skip(
+                f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
+            )
+
+        # Both should be rejected with unique keys
+        with pytest.raises(ValueError):
+            resolve_path_scope("world-sim/backend/escape1", sample_repo)
+        with pytest.raises(ValueError):
+            resolve_path_scope("world-sim/backend/escape2", sample_repo)
+
 # ── MCP integration tests ──────────────────────────────────────────────
 
 def _run_mcp_session(fixture_root: Path) -> dict:
@@ -1050,9 +1078,9 @@ class TestMCPIntegration:
             for p in sorted(path.rglob("*")):
                 try:
                     rel = p.resolve().relative_to(real_index_resolved).as_posix()
-                except ValueError:
-                    # Escaping symlink or filesystem race — record as outside marker.
-                    rel = "__outside__"
+                except (ValueError, OSError):
+                    # Escaping symlink or filesystem race — use unique key per entry.
+                    rel = f"__outside__:{p.as_posix()}"
                 snap[rel] = _entry_signature(p)
             return snap
 
@@ -1401,6 +1429,67 @@ class TestMcpSmokeNegative:
         assert not ok, "Wrong repo path should be rejected"
         assert "file_path" in reason.lower() or "world-sim" in reason, \
             f"Reason should mention file_path, got: {reason!r}"
+
+    def test_missing_file_path_rejected_even_with_file_fallback(self):
+        """Missing file_path is rejected even if 'file' field has correct value."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "Missing file_path should be rejected despite file field"
+        assert "file_path" in reason.lower(), f"Reason should mention file_path, got: {reason!r}"
+
+    def test_none_file_path_rejected_even_with_file_fallback(self):
+        """file_path=None is rejected even if 'file' field has correct value."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": None,
+            "file": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "file_path=None should be rejected despite file field"
+        assert "file_path" in reason.lower(), f"Reason should mention file_path, got: {reason!r}"
+
+    def test_empty_file_path_rejected_even_with_file_fallback(self):
+        """file_path='' is rejected even if 'file' field has correct value."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": "",
+            "file": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "Empty file_path should be rejected despite file field"
+        assert "file_path" in reason.lower(), f"Reason should mention file_path, got: {reason!r}"
+
+    def test_non_string_file_path_rejected(self):
+        """Non-string file_path is rejected."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": 123,
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "Non-string file_path should be rejected"
+        assert "file_path" in reason.lower(), f"Reason should mention file_path, got: {reason!r}"
+
+    def test_correct_file_path_still_passes(self):
+        """Payload with exact correct file_path still passes."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert ok, f"Correct payload should pass: {reason}"
 
     def test_non_list_payload_rejected(self):
         """A non-list, non-dict payload fails validation."""
