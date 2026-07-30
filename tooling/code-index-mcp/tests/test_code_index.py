@@ -48,7 +48,7 @@ def _snapshot_entry_signature(p: Path) -> tuple[str, int, str, int]:
 
 
 def _snapshot_index_tree(
-    path: Path, root_anchor: Path
+    path: Path
 ) -> dict[str, tuple[str, int, str, int]]:
     """Return {relative-posix-key: (type, size, sha|'LOCKED'|'STAT_FAIL', mtime_ns)}.
 
@@ -56,7 +56,7 @@ def _snapshot_index_tree(
     Every entry under ``path`` is captured, including directories, files,
     SQLite sidecars, and lock files.
 
-    Entries whose resolved path cannot be made relative to ``root_anchor``
+    Entries whose resolved path cannot be made relative to ``path``
     (e.g., escaping symlinks) are recorded with a deterministic unique key
     ``__outside__:<lexical-path-from-path>`` so mutations are not lost.
 
@@ -939,7 +939,7 @@ class TestPathContainment:
             )
 
         # Use the shared helper to verify unique keys are created for escaping entries.
-        snap = _snapshot_index_tree(test_index, test_index.resolve())
+        snap = _snapshot_index_tree(test_index)
 
         # Verify both escaping entries have distinct keys
         outside_keys = [k for k in snap if k.startswith("__outside__:")]
@@ -951,26 +951,34 @@ class TestPathContainment:
         assert "__outside__:escaped_a" in outside_keys
         assert "__outside__:escaped_b" in outside_keys
 
-# Verify both escaping entries have distinct keys
-        outside_keys = [k for k in snap if k.startswith("__outside__:")]
-        assert len(outside_keys) == 2, (
-            f"Expected 2 distinct outside keys, got {len(outside_keys)}: {outside_keys}"
-        )
-        assert all(k.startswith("__outside__:") for k in outside_keys)
-        # Verify the lexical link names are preserved in the keys
-        assert "__outside__:escaped_a" in outside_keys
-        assert "__outside__:escaped_b" in outside_keys
-
-    def test_snapshot_index_tree_collision_fail_closed(self, tmp_path: Path):
+    def test_snapshot_index_tree_collision_fail_closed(self, tmp_path: Path, monkeypatch):
         """_snapshot_index_tree fails closed on duplicate snapshot keys.
 
         This test is platform-independent and exercises the collision-guard
         logic even on Windows where symlink creation may be unavailable.
         """
-        import inspect
-        source = inspect.getsource(_snapshot_index_tree)
-        assert "raise ValueError" in source
-        assert "Snapshot key collision" in source
+        # Create a temp directory with two files that will collide
+        test_index = tmp_path / ".code-index"
+        test_index.mkdir()
+        file_a = test_index / "a"
+        file_b = test_index / "b"
+        file_a.write_text("a")
+        file_b.write_text("b")
+
+        # Monkeypatch Path.resolve so both files resolve to the same path,
+        # causing a key collision in _snapshot_index_tree
+        original_resolve = Path.resolve
+
+        def colliding_resolve(self):
+            # Make both files resolve to the same in-root path
+            if self.name in ("a", "b"):
+                return self.parent / "a"
+            return Path.resolve(self)
+
+        with monkeypatch.context() as m:
+            m.setattr(Path, "resolve", colliding_resolve)
+            with pytest.raises(ValueError, match="Snapshot key collision"):
+                _snapshot_index_tree(test_index)
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
@@ -1150,12 +1158,12 @@ class TestMCPIntegration:
         repo_root = Path(__file__).resolve().parents[3]
         real_index_dir = repo_root / ".code-index"
 
-        before = _snapshot_index_tree(real_index_dir, real_index_dir.resolve())
+        before = _snapshot_index_tree(real_index_dir)
 
         # Run the fixture MCP session — must not touch production index.
         _run_mcp_session(sample_repo)
 
-        after = _snapshot_index_tree(real_index_dir, real_index_dir.resolve())
+        after = _snapshot_index_tree(real_index_dir)
 
         # Distinguish "absent before, absent after" (still OK) from any other
         # transition.  An absent directory that becomes an empty directory
