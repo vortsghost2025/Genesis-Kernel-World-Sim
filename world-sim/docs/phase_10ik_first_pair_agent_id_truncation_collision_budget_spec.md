@@ -239,12 +239,14 @@ On collision detection:
 Collision detection applies to:
 
 - **Intra-pair**: Adam vs. Eve within the First Pair.
-- **Cross-cycle**: an identity presented at restart or recovery vs. the
-  canonical re-derivation (handled by 10IG §5 drift detection; exact
-  equality required).
 - **Future expansion**: if any future phase introduces additional
   identities, collision detection must extend to the new set. 10IK does
   not authorize future expansion.
+
+Cross-cycle re-derivation (an identity presented at restart or recovery
+vs. the canonical re-derivation) is handled exclusively by 10IG §5
+identity-drift detection (exact equality required), not by collision
+detection.
 
 ---
 
