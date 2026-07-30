@@ -646,8 +646,192 @@ class TestPathContainment:
         assert "error" in events["result"][0]
         assert "not under any indexed root" in events["result"][0]["error"]
 
+    # ── FIX 4 — additional filesystem-backed path-scope coverage ────────
 
-# ── Package bootstrap tests ────────────────────────────────────────────
+    def test_resolve_path_scope_backslash_input(self, sample_repo: Path):
+        """Backslash input is normalized to POSIX on Windows-like separators.
+
+        On POSIX, backslashes are not path separators, so the input is
+        treated as a literal filename component.  This test only asserts
+        the Windows normalization behavior; it is skipped on POSIX.
+        """
+        import os
+        if os.name != "nt":
+            pytest.skip("Backslash normalization is Windows-specific")
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("world-sim\\backend", sample_repo)
+        assert result == "world-sim/backend"
+
+    def test_resolve_path_scope_dot_component(self, sample_repo: Path):
+        """Single-dot components are normalized away while staying in scope."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("./world-sim/backend", sample_repo)
+        assert result == "world-sim/backend"
+
+    def test_resolve_path_scope_empty_rejected(self, sample_repo: Path):
+        """Empty path_filter resolves to repo_root itself, which is not under any indexed root."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        with pytest.raises(ValueError, match="not under any indexed root"):
+            resolve_path_scope("", sample_repo)
+
+    def test_resolve_path_scope_absolute_outside_rejected(self, sample_repo: Path, tmp_path: Path):
+        """An absolute path outside the repo raises ValueError."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        outside = tmp_path / "outside-target"
+        outside.mkdir()
+        # An absolute path outside the repo relative_to(repo_root) raises ValueError
+        with pytest.raises(ValueError):
+            resolve_path_scope(str(outside), sample_repo)
+
+    def test_resolve_path_scope_valid_descendant(self, sample_repo: Path):
+        """A valid descendant subtree resolves to itself."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("world-sim/backend/subpkg", sample_repo)
+        # Path.resolve() normalizes the logical path — the exact descendant
+        # scope is returned.
+        assert result == "world-sim/backend/subpkg"
+
+    def test_resolve_path_scope_canonical_posix_returned(self, sample_repo: Path):
+        """Returned path is POSIX-normalized regardless of input separator."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        result = resolve_path_scope("world-sim/tests/../backend/./", sample_repo)
+        assert result == "world-sim/backend", f"got {result!r}"
+        # POSIX separator only — no backslashes leaked through.
+        assert "\\" not in result, f"backslash leaked into result {result!r}"
+        # No trailing slash — resolve normalizes it away.
+        assert not result.endswith("/"), f"trailing slash in result {result!r}"
+
+    def test_resolve_path_scope_symlink_escape_rejected(self, sample_repo: Path, tmp_path: Path):
+        """A symlink that escapes the indexed root is rejected.
+
+        Skipped on platforms where unprivileged symlink creation is denied —
+        the exact OSError is recorded in the skip message.
+        """
+        from genesis_code_index.indexer import resolve_path_scope
+
+        link_path = sample_repo / "world-sim" / "backend" / "escaped_link"
+        target = tmp_path / "escape-target"
+        target.mkdir()
+        try:
+            link_path.symlink_to(target)
+        except OSError as e:
+            pytest.skip(
+                f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
+            )
+        with pytest.raises(ValueError):
+            resolve_path_scope("world-sim/backend/escaped_link", sample_repo)
+
+    def test_resolve_path_scope_missing_valid_subtree_accepted(self, sample_repo: Path):
+        """resolve_path_scope operates on the logical path — a missing but indexed
+        subtree is accepted because Path.resolve() does not require existence."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        # world-sim/scripts is an indexed root but not created in the fixture.
+        result = resolve_path_scope("world-sim/scripts", sample_repo)
+        assert result == "world-sim/scripts"
+
+    def test_resolve_path_scope_missing_path_beneath_symlink(self, sample_repo: Path, tmp_path: Path):
+        """A non-existent path that would resolve beneath an escaping symlink is rejected."""
+        from genesis_code_index.indexer import resolve_path_scope
+
+        link_path = sample_repo / "world-sim" / "backend" / "esc"
+        target = tmp_path / "outside"
+        target.mkdir()
+        try:
+            link_path.symlink_to(target)
+        except OSError as e:
+            pytest.skip(
+                f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
+            )
+        with pytest.raises(ValueError):
+            resolve_path_scope("world-sim/backend/esc/missing.py", sample_repo)
+
+    # ── FIX 4 — server-level approved file and subtree use ───────────────
+
+    def test_find_definition_approved_file(self, sample_repo: Path):
+        """find_definition accepts a valid file path_filter as scope."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    # Index the fixture first.
+                    await session.call_tool("reindex", {})
+                    r = await session.call_tool("find_definition", {
+                        "name": "Greeter",
+                        "path_filter": "world-sim/backend/module_a.py",
+                    })
+                    result = _parse_tool_result(r, expect_list=True)
+                    events["result"] = result
+
+        asyncio.run(_test())
+        # approved file returns at least one definition, NOT an error
+        assert events["result"], "no result returned"
+        assert "error" not in events["result"][0], \
+            f"unexpected error: {events['result'][0]}"
+        assert any(r.get("kind") == "class" and r.get("name") == "Greeter"
+                   for r in events["result"]), \
+            f"Greeter not found: {events['result']}"
+
+    def test_find_definition_approved_subtree(self, sample_repo: Path):
+        """find_definition accepts an indexed-root-level subtree as scope."""
+        import asyncio, json, os
+
+        server_dir = Path(__file__).resolve().parent.parent
+        run_server = str(server_dir / "run_server.py")
+        events = {}
+
+        async def _test():
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.session import ClientSession
+            env = os.environ.copy()
+            env.pop("GENESIS_CODE_INDEX_REPO_ROOT", None)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=[run_server],
+                env={**env, "GENESIS_CODE_INDEX_REPO_ROOT": str(sample_repo)},
+            )
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    # Index the fixture first.
+                    await session.call_tool("reindex", {})
+                    r = await session.call_tool("find_definition", {
+                        "name": "Greeter",
+                        "path_filter": "world-sim/backend",
+                    })
+                    result = _parse_tool_result(r, expect_list=True)
+                    events["result"] = result
+
+        asyncio.run(_test())
+        assert events["result"], "no result returned"
+        assert "error" not in events["result"][0], \
+            f"unexpected error: {events['result'][0]}"
+        assert any(r.get("kind") == "class" and r.get("name") == "Greeter"
+                   for r in events["result"]), \
+            f"Greeter not found: {events['result']}"
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
@@ -757,9 +941,34 @@ class TestMCPIntegration:
 
         assert "db_path" in events["status"]
         db_path = events["status"]["db_path"]
-        assert db_path.startswith(str(sample_repo)), (
-            f"Database {db_path} outside fixture {sample_repo}"
-        )
+
+        # FIX 3 — resolved-path fixture containment proof.
+        # Reject sibling-prefix tricks (e.g. fixture `/foo` vs DB reported
+        # as `/foobar/index.db`).  Resolve both paths and verify the
+        # DB is *inside* the fixture repo by checking its parent walk
+        # contains the resolved fixture root.
+        db_resolved = Path(db_path).resolve()
+        fixture_resolved = sample_repo.resolve()
+        # db_resolved must be equal to, or descend from, fixture_resolved.
+        try:
+            _ = db_resolved.relative_to(fixture_resolved)
+        except ValueError:
+            pytest.fail(
+                f"Database {db_resolved} resolves outside fixture {fixture_resolved}"
+            )
+        # Also enumerate every file under the resolved DB's directory and
+        # require each to remain inside the fixture root.  This catches
+        # SQLite sidecars (``-journal``, ``-wal``, ``-shm``) and any
+        # metadata/cache entries.
+        db_dir = db_resolved.parent
+        for entry in db_dir.rglob("*"):
+            try:
+                entry.resolve().relative_to(fixture_resolved)
+            except ValueError:
+                pytest.fail(
+                    f"DB sidecar/artifact {entry} resolves outside fixture "
+                    f"{fixture_resolved}"
+                )
 
         defs = events["definition"]
         assert len(defs) >= 1, f"No definitions found for Greeter: {defs}"
@@ -777,41 +986,133 @@ class TestMCPIntegration:
         assert events["malformed"]["isError"], "Malformed call should return error"
 
     def test_no_real_checkout_mutation(self, sample_repo: Path):
-        """The MCP test fixture uses its own repository; real checkout is unchanged.
+        """Real-checkout code-index isolation proof.
 
-        Snapshot is a dict keyed by resolved relative paths within .code-index,
-        with each value a (size, sha256) tuple for content-level proof.
+        Resolves the *production* repo-root ``.code-index`` directory
+        (i.e. the directory actually used by ``server.py``'s
+        ``_DEFAULT_DB = ".code-index/index.db"``), snapshot its complete
+        state, run a fixture MCP session, then require the after-snapshot to
+        equal the before-snapshot exactly.  Created, deleted, rewritten,
+        size-changed, metadata-changed, or sidecar (``-journal``/``-wal``/
+        ``-shm``) files all count as mutations; an absent directory becoming
+        an empty directory also counts.
+
+        ``LOCKED`` files (e.g. ``index.db`` open by a running MCP server) are
+        not hashed.  Their ``st_mtime_ns`` and ``st_size`` are compared, and
+        any change there is a mutation.
         """
         import hashlib
-        real_index = Path(__file__).resolve().parent.parent / ".." / ".." / ".code-index"
-        real_index_root = real_index.resolve()
+        import os
 
-        def _snapshot(path: Path) -> dict | None:
+        # Resolve the production repo-root .code-index, transitively.
+        # The live server uses ``repo_root / ".code-index/index.db"``.
+        # repo_root for this test = the directory two levels above
+        # ``tooling/code-index-mcp/tests/`` (i.e. the git repo root).
+        repo_root = Path(__file__).resolve().parents[3]
+        real_index_dir = repo_root / ".code-index"
+        real_index_resolved = real_index_dir.resolve()
+
+        def _entry_signature(p: Path) -> tuple:
+            """(type, size, sha256|'LOCKED'|'STAT_FAIL', mtime_ns) for one filesystem entry.
+
+            On stat failure, returns a sentinel that is treated as a distinct
+            signature — any change from the before-snapshot counts as a mutation.
+            """
+            try:
+                st = p.stat()
+            except OSError:
+                return ("STAT_FAIL", 0, "", 0)
+            if p.is_dir():
+                return ("DIR", st.st_size, "", st.st_mtime_ns)
+            try:
+                with p.open("rb") as f:
+                    sha = hashlib.sha256(f.read()).hexdigest()
+            except (PermissionError, OSError):
+                sha = "LOCKED"
+            return ("FILE", st.st_size, sha, st.st_mtime_ns)
+
+        def _snapshot(path: Path) -> dict:
+            """Return {repo-relative-posix-key: (type, size, sha, mtime_ns)}.
+
+            Distinguishes absent (``{"__absent__": ...}``) from present-but-empty
+            (``{key:signature}``). Every entry under ``path`` is captured,
+            including directories, files, SQLite sidecars, and lock files.
+
+            Entries whose resolved path cannot be made relative to
+            ``real_index_resolved`` (e.g., escaping symlinks) are recorded
+            with the key ``__outside__`` so they are detected as mutations.
+            """
             if not path.exists():
-                return None
-            snap = {}
+                return {"__absent__": ("ABSENT", 0, "", 0)}
+            snap: dict[str, tuple] = {}
+            # Capture the root directory itself so "empty dir" is detectable.
+            snap["."] = _entry_signature(path)
             for p in sorted(path.rglob("*")):
-                if p.is_file():
-                    rel = str(p.resolve().relative_to(real_index_root).as_posix())
-                    snap[rel] = (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+                try:
+                    rel = p.resolve().relative_to(real_index_resolved).as_posix()
+                except ValueError:
+                    # Escaping symlink or filesystem race — record as outside marker.
+                    rel = "__outside__"
+                snap[rel] = _entry_signature(p)
             return snap
 
-        before = _snapshot(real_index)
+        before = _snapshot(real_index_dir)
 
+        # Run the fixture MCP session — must not touch production index.
         _run_mcp_session(sample_repo)
 
-        after = _snapshot(real_index)
+        after = _snapshot(real_index_dir)
 
-        if before is None:
-            assert after is None or len(after) == 0, (
-                f"Real checkout index was created by test: {list(after.keys())}"
+        # Distinguish "absent before, absent after" (still OK) from any other
+        # transition.  An absent directory that becomes an empty directory
+        # counts as a mutation.
+        before_absent = ("__absent__" in before)
+        after_absent = ("__absent__" in after)
+        if before_absent and after_absent:
+            return  # absent → absent is the only OK transition involving ABSENT
+        if before_absent and not after_absent:
+            pytest.fail(
+                f"Real checkout .code-index was CREATED by the test.\n"
+                f"New entries: {sorted(after.keys())}"
             )
-        else:
-            assert before == after, (
-                f"Real checkout .code-index modified by test.\n"
-                f"Added:   {set(after.keys()) - set(before.keys())}\n"
-                f"Removed: {set(before.keys()) - set(after.keys())}\n"
-                f"Changed: {[k for k in before if k in after and before[k] != after[k]]}"
+        if (not before_absent) and after_absent:
+            pytest.fail(
+                f"Real checkout .code-index was DELETED by the test.\n"
+                f"Lost entries: {sorted(before.keys())}"
+            )
+
+        before_keys = set(before.keys())
+        after_keys = set(after.keys())
+        added = after_keys - before_keys
+        removed = before_keys - after_keys
+        changed = []
+        for k in before_keys & after_keys:
+            if before[k] != after[k]:
+                changed.append(k)
+        if added or removed or changed:
+            msgs = []
+            if added:
+                msgs.append(
+                    "Added:\n" + "\n".join(
+                        f"  {k} -> {after[k]}" for k in sorted(added)
+                    )
+                )
+            if removed:
+                msgs.append(
+                    "Removed:\n" + "\n".join(
+                        f"  {k} -> {before[k]}" for k in sorted(removed)
+                    )
+                )
+            if changed:
+                msgs.append(
+                    "Changed:\n" + "\n".join(
+                        f"  {k}: before={before[k]} after={after[k]}"
+                        for k in sorted(changed)
+                    )
+                )
+            pytest.fail(
+                "Real checkout .code-index mutated by fixture MCP session.\n"
+                + "\n\n".join(msgs)
             )
 
 
@@ -1023,6 +1324,97 @@ print("OK")
         assert result.returncode == 0 and "OK" in result.stdout, (
             f"Runner failed with non-executable launcher:\n{result.stderr[:500]}"
         )
+
+
+# ── FIX 5 — Production mcp-smoke negative proof ────────────────────────
+
+class TestMcpSmokeNegative:
+    """Direct unit-tests for the production mcp-smoke result validator.
+
+    These prove that the validator used by ``run_first_pair_checks.py
+    cmd_mcp_smoke`` (a) accepts the expected positive payload and
+    (b) fails for empty lists, wrong kind, and wrong repository path.
+    No MCP server or external provider contact is made — the tests call
+    the pure-Python ``_validate_smoke_result`` helper directly.
+    """
+
+    @staticmethod
+    def _load_validator():
+        import importlib.util
+        script_path = Path(__file__).resolve().parents[3] / "world-sim" / "scripts" / "run_first_pair_checks.py"
+        spec = importlib.util.spec_from_file_location("first_pair_checks", script_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._validate_smoke_result
+
+    def test_positive_payload_accepted(self):
+        """The canonical positive payload is accepted by the validator."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert ok, f"Positive payload should accept, got: {reason}"
+
+    def test_single_dict_wrapped_as_list(self):
+        """FastMCP unwraps single-element lists to dicts; validator wraps them."""
+        v = self._load_validator()
+        payload = {
+            "kind": "class",
+            "file_path": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }
+        ok, reason = v(payload)
+        assert ok, f"Dict-wrapped payload should accept, got: {reason}"
+
+    def test_empty_list_rejected(self):
+        """An empty definition list (missing symbol) fails validation."""
+        v = self._load_validator()
+        ok, reason = v([])
+        assert not ok, "Empty list should be rejected"
+        assert "not found" in reason or "empty" in reason, \
+            f"Reason should mention missing/empty, got: {reason!r}"
+
+    def test_wrong_symbol_kind_rejected(self):
+        """A symbol with the wrong kind (not 'class') fails validation."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "function",
+            "file_path": "world-sim/backend/agents/base.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "Wrong kind should be rejected"
+        assert "kind" in reason.lower(), f"Reason should mention kind, got: {reason!r}"
+
+    def test_wrong_repo_path_rejected(self):
+        """A symbol at the wrong file_path fails validation."""
+        v = self._load_validator()
+        payload = [{
+            "kind": "class",
+            "file_path": "world-sim/backend/somewhere_else.py",
+            "name": "WorldAgent",
+        }]
+        ok, reason = v(payload)
+        assert not ok, "Wrong repo path should be rejected"
+        assert "file_path" in reason.lower() or "world-sim" in reason, \
+            f"Reason should mention file_path, got: {reason!r}"
+
+    def test_non_list_payload_rejected(self):
+        """A non-list, non-dict payload fails validation."""
+        v = self._load_validator()
+        for bad in [None, "string", 42]:
+            ok, reason = v(bad)
+            assert not ok, f"Non-list {type(bad).__name__} should be rejected"
+            assert "list" in reason.lower() or "not found" in reason.lower(), \
+                f"Reason should mention shape, got: {reason!r}"
+
+        # Empty dict: wraps to [{}], then fails on missing kind.
+        ok, reason = v({})
+        assert not ok, "Empty dict should be rejected"
+        assert "kind" in reason.lower(), f"Reason should mention kind, got: {reason!r}"
 
 
 # ── First Pair regression ──────────────────────────────────────────────
