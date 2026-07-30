@@ -389,7 +389,7 @@ Still unresolved after both 10IG and 10IL:
 | Inclusion of `provenance_commitment` in `agent_id` material documented | ✅ Yes — by this spec |
 | Canonical `agent_id` derivation documented (sha256, canonical JSON, domain separator, full hash) | ✅ Yes — by this spec |
 | Exact-equality fail-closed identity-drift verification documented | ✅ Yes — by this spec |
-| `provenance_commitment` source-envelope construction specified (docs-level) | ✅ Yes — by Phase 10IL (envelope schema, canonical serialization, SHA-256 commitment, 20-item validation table, duplicate-key boundary, timestamp contract, safe-identifier grammar) |
+| `provenance_commitment` source-envelope construction specified (docs-level) | ✅ Yes — by Phase 10IL (envelope schema, canonical serialization, SHA-256 commitment, 20 validation rules, 40 acceptance tests, duplicate-key boundary, timestamp contract, safe-identifier grammar) |
 | `provenance_commitment` source-envelope runtime validator implemented | ❌ No — not implemented; requires separate phase with GPT-5.6 Sol/Luna + TDD |
 | Operator-approval binding to a specific source-envelope artifact specified | ❌ No — unresolved (see §8) |
 | Truncation/collision budget reviewed | ❌ No — deferred to a future 10IK |
