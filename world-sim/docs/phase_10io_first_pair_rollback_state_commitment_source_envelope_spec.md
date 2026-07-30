@@ -23,9 +23,29 @@ source-envelope specification (10IL).
 - **Phase number**: 10IO. This phase corrects the provisional 10IN label used
   in PR #17, which conflicted with AGENTS.md Rule 4 (10IN is reserved as the
   10IL implementation-candidate slot; 10IM is the 10IL metadata-sync slot).
-  No phase beyond 10IO is assigned by this document.
+  This spec is the **L** of the spec -> sync -> implementation-candidate chain
+  governed by AGENTS.md Rule 4. It assigns:
+  - **10IP** as the 10IO metadata-sync phase (L+1). 10IP records the 10IO row
+    in `phase_index.md` with the real commit that places the final corrected
+    10IO document on master and the document's LF-only SHA-256. 10IP is itself
+    docs-only metadata sync; it does not implement, test, or touch
+    runtime/backend/data.
+  - **10IQ** as the named 10IO runtime implementation candidate (L+2). 10IQ is
+    **not started and not authorized**. Specifying or implementing 10IQ requires
+    GPT-5.6 Sol/Luna, TDD, explicit Sean approval, and all First Pair creation
+    gates. The actual state-artifact content binding remains **unresolved**:
+    `declared_state_artifact_integrity_id` (§F) is a caller-asserted digest
+    string with hex64 shape validation only — it does **not** verify
+    correspondence to any actual state-artifact bytes (canonical serialization,
+    digest recomputation, storage lookup, and verification path remain
+    unresolved and separately governed). No rollback validator or rollback
+    executor exists anywhere in the repository. Per AGENTS.md Rule 4 the chain
+    10IO -> 10IP -> 10IQ is one spec-sync-implementation-candidate unit; 10IQ
+    is the named candidate slot for this unit, not a vacant slot.
+  No phase beyond 10IQ is assigned by this document.
 - **Boundary preservation**: Gate-7 remains closed. 10HD remains named-only.
   10CP remains the sole writer. `world-sim/data` remains forbidden.
+  **FIRST_PAIR_CREATION_AUTHORIZED = False**.
 
 ---
 

@@ -17,10 +17,23 @@ runtime source-envelope validator exists anywhere in the repository.
 - **Title**: Phase 10IL — First Pair Provenance Commitment Source-Envelope
   Specification.
 - **Status**: Docs-only specification. No runtime implementation.
-- **Phase number**: 10IL. No other new phase number is assigned by this
-  document.
+- **Phase number**: 10IL. This spec is the **L** of the spec -> sync ->
+  implementation-candidate chain governed by AGENTS.md Rule 4. It assigns:
+  - **10IM** as the 10IL metadata-sync phase (L+1). 10IM records the 10IL row
+    in `phase_index.md` with the real 10IL merge SHA and the document's LF-only
+    SHA-256. 10IM is itself docs-only metadata sync; it does not implement, test,
+    or touch runtime/backend/data.
+  - **10IN** as the named 10IL runtime implementation candidate (L+2). 10IN is
+    **not started and not authorized**. Specifying or implementing 10IN requires
+    GPT-5.6 Sol/Luna, TDD from this spec's §L acceptance-test matrix, explicit
+    Sean approval, and all First Pair creation gates. No runtime source-envelope
+    validator currently exists anywhere in the repository. Per AGENTS.md Rule 4
+    the chain 10IL -> 10IM -> 10IN is one spec-sync-implementation-candidate
+    unit; 10IN is the named candidate slot for this unit, not a vacant slot.
+  No phase beyond 10IN is assigned by this document.
 - **Boundary preservation**: Gate-7 remains closed. 10HD remains named-only.
   10CP remains the sole writer. `world-sim/data` remains forbidden.
+  **FIRST_PAIR_CREATION_AUTHORIZED = False**.
 
 ---
 
