@@ -58,7 +58,7 @@ by re-reading the module source; this spec does not modify them.
 
 - **The `state_commitment` source-envelope construction** — 10IC validates
   only hex64 shape. The source-envelope schema and commitment derivation
-  are specified by Phase 10IN ("First Pair Rollback State-Commitment
+  are specified by Phase 10IO ("First Pair Rollback State-Commitment
   Source-Envelope Specification"). Runtime source-envelope validator
   remains unimplemented.
 - **The last-known-good state material envelope** — what the rollback
@@ -250,7 +250,7 @@ signature, authorization artifact, or registry.
 
 The `state_commitment` source-envelope construction (the schema, fields,
 ordering, hash algorithm, canonical serialization, encoding, and verification
-path for the commitment value itself) is specified by Phase 10IN ("First Pair
+path for the commitment value itself) is specified by Phase 10IO ("First Pair
 Rollback State-Commitment Source-Envelope Specification"). The commitment
 derivation is now defined at the docs level.
 
@@ -346,7 +346,7 @@ This spec leaves open the following questions. They are not silently closed.
 
 | Unresolved Question | Resolution Path |
 |---|---|
-| `state_commitment` source-envelope construction | Closed by Phase 10IN (docs-level envelope schema, commitment derivation; runtime validator remains unresolved) |
+| `state_commitment` source-envelope construction | Closed by Phase 10IO (docs-level envelope schema, commitment derivation; runtime validator remains unresolved) |
 | Last-known-good state material envelope | Future phase (executor must have a defined state envelope and storage to revert to; separate from commitment derivation) |
 | Replay / uniqueness / tamper / expiry mechanism | Operator decision (sequence number, HMAC, signature, `previous_anchor_id`, none) |
 | Per-agent asymmetric-rollback scope | Future authorization/execution artifact (anchor remains scope-neutral) |
