@@ -56,7 +56,7 @@ writers; write authorization is not write execution.
 | **`world-sim/data` write authorization** | Write-Authority §8: "Any `world-sim/data` write requires a separate write-authority spec and explicit Sean authorization." No such spec exists; no authorization granted. Unresolved. |
 | **Heartbeat observation boundary module** | Heartbeat spec defines contract; 10IC provides heartbeat verifier but no standalone `first_pair_observation_boundary.py` module exists. The heartbeat contract is partially implemented inside 10IC. Unresolved if this needs a separate boundary module. |
 | **Founding role divergence** | Identity §3 uses example `founding_role: "first_observer" / "first_echo"`; 10IC implementation uses a single fixed `"founding_agent"` for both identities. Spec language allows diversity; implementation chose unification. Documented as intentional deviation, not a blocker. |
-| **Truncation/collision budget for `agent_id`** | Identity §52-55: "Truncation length and collision budget must be explicitly specified and reviewed before implementation." 10IC uses 32-char truncation (`genesis-agent-` + 32 hex). No separate review recorded. Unresolved. |
+| **Truncation/collision budget for `agent_id`** | Identity §52-55: "Truncation length and collision budget must be explicitly specified and reviewed before implementation." 10IC uses the full 64-character SHA-256 digest (`genesis-agent-<full 64-char hex>`, verified at `local_first_pair_birth_candidate.py:208,314`; `_ID_DERIVATION_VERSION = "sha256-full-v1"`). The docs-only Phase 10IK specification (now on master) records that decision: full-digest preservation, no truncation authorized, and seven conditions any future truncation must satisfy. **Docs-level decision recorded; runtime behavior unchanged.** Unresolved items remain: (1) 10IC performs no Adam-vs-Eve `agent_id` equality comparison; the first duplicate-ID check is in 10ID `local_first_pair_habitat_boundary.py:161-162` returning `duplicate_identity`; identity-layer collision detection inside 10IC is recorded as an unresolved future implementation requirement, not implemented. (2) `provenance_commitment` receives hex64 shape validation only; cross-domain source rejection is deferred until the source envelope is specified. (3) The truncation/collision **runtime behavior** has not been audited by GPT-5.6 Sol/Luna, which is a separate implementation-phase requirement. **Docs-level review recorded (10IK); runtime-implementation review NOT performed.** |
 
 ---
 
@@ -92,7 +92,8 @@ This document grants no new authority. The implemented 10IC, 10ID, and 10IE boun
 | Starting habitat tiles declared | ❌ No — only in test fixtures |
 | `world-sim/data` write authorized | ❌ No — not granted |
 | Provenance commitment construction documented | ❌ No — deferred |
-| Truncation/collision budget reviewed | ❌ No — not reviewed |
+| Truncation/collision budget docs-level decision recorded | ✅ Yes — 10IK docs-only spec on master preserves full 64-char SHA-256 digest |
+| Truncation/collision runtime-implementation review | ❌ No — not performed; requires separate implementation phase + GPT-5.6 Sol/Luna |
 | GPT-5.6 Sol/Luna invoked for implementation | ❌ No — creation unauthorized |
 | Explicit Sean approval for creation phase | ❌ No — not granted |
 
