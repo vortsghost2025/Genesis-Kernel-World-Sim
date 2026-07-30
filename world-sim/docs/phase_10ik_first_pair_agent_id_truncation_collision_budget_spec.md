@@ -351,19 +351,19 @@ all seven conditions in Section B.3) must provide tests covering:
    deterministic.
 4. **No silent replacement** — colliding identities are never silently
    replaced or aliased.
-4. **No fallback generation** — no secondary or fallback `agent_id` is
+5. **No fallback generation** — no secondary or fallback `agent_id` is
    produced.
-5. **Re-derivation stability** — truncated `agent_id` re-derivation from
+6. **Re-derivation stability** — truncated `agent_id` re-derivation from
    identical canonical material produces exact equality.
-6. **Cross-agent distinctness** — Adam and Eve truncated `agent_id`s are
+7. **Cross-agent distinctness** — Adam and Eve truncated `agent_id`s are
    distinct when canonical material differs.
-7. **Drift detection** — identity drift with truncated `agent_id` fails
+8. **Drift detection** — identity drift with truncated `agent_id` fails
    closed exactly as with full digest.
-8. **Domain separation** — truncated `agent_id` derivation rejects
+9. **Domain separation** — truncated `agent_id` derivation rejects
    cross-domain `provenance_commitment` values.
-9. **Derivation version handling** — new `id_derivation_version` triggers
-   re-derivation and requires explicit approval.
-10. **Bounded regression** — all existing 10IC, 10ID, 10IE, 10IG, 10IH, 10II
+10. **Derivation version handling** — new `id_derivation_version` triggers
+    re-derivation and requires explicit approval.
+11. **Bounded regression** — all existing 10IC, 10ID, 10IE, 10IG, 10IH, 10II
     tests continue to pass.
 
 Until truncation is authorized (which it is not by this spec), these tests
