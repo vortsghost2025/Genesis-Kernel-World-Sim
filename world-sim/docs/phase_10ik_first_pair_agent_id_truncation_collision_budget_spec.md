@@ -141,7 +141,7 @@ The canonical material dict contains exactly eight string-keyed fields:
 
 ### C.2 Canonical Serialization (per 10IG §4.2)
 
-```json
+```python
 json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 ```
 
