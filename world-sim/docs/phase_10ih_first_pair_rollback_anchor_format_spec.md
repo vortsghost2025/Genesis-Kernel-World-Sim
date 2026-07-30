@@ -57,10 +57,10 @@ by re-reading the module source; this spec does not modify them.
 ### Out of scope (what this spec does NOT close)
 
 - **The `state_commitment` source-envelope construction** — 10IC validates
-  only hex64 shape; no source fields, ordering, hash algorithm, canonical
-  serialization, encoding, or verification path is defined anywhere in the
-  repository. This remains the symmetric gap to `provenance_commitment`
-  (10IG §8).
+  only hex64 shape. The source-envelope schema and commitment derivation
+  are specified by Phase 10IM ("First Pair Rollback State-Commitment
+  Source-Envelope Specification"). Runtime source-envelope validator
+  remains unimplemented.
 - **The last-known-good state material envelope** — what the rollback
   executor would actually revert to.
 - **Replay / uniqueness / expiry / tamper mechanism** — no sequence number,
