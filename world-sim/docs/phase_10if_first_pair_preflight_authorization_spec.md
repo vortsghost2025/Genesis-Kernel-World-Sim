@@ -72,10 +72,11 @@ Before any First Pair creation phase may start, **all** of the following must be
 6. **Per-call write allow-list design documented** — 25-field authorization artifact, two enabled candidate surfaces, provenance rules, gate flag contract documented by Phase 10II (docs-level design complete; runtime validator, operator-approval artifact verification, replay prevention, freshness, exact-call binding, and 10CP consumption remain unresolved).
 7. **Provenance commitment source-envelope construction documented** — schema, serialization, commitment hash, verification rules specified in a reviewed document (10IL design complete; runtime validator not implemented).
 8. **Provenance commitment runtime validator implemented** — the source-envelope is presented and verified for Adam and Eve by a factory-trained runtime module (not implemented; requires separate phase + GPT-5.6 Sol/Luna).
-9. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
-10. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
-11. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
-12. **Explicit Sean approval for the specific creation phase** — not granted.
+9. **Rollback state-commitment runtime validator implemented** — the state-envelope is presented and verified for the rollback anchor by a factory-trained runtime module (not implemented; requires separate phase + GPT-5.6 Sol/Luna).
+10. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
+11. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
+12. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
+13. **Explicit Sean approval for the specific creation phase** — not granted.
 
 This document grants no new authority. The implemented 10IC, 10ID, and 10IE boundaries remain verified, while the unresolved creation prerequisites identified above remain open and require separate review and explicit authorization.
 

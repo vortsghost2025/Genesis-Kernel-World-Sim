@@ -248,12 +248,18 @@ signature, authorization artifact, or registry.
 
 ### Last-Known-Good State
 
-Remains **unresolved**. The `state_commitment` field is a hex64 value
-supplied by the caller. The source-envelope construction (what state this
-commitment commits to, its fields, ordering, hash algorithm, canonical
-serialization, encoding, and verification path) is **not defined** by this
-spec, not defined by 10IC, and not defined by any spec in the repository.
-It is the symmetric gap to `provenance_commitment` (see 10IG §8).
+The `state_commitment` source-envelope construction (the schema, fields,
+ordering, hash algorithm, canonical serialization, encoding, and verification
+path for the commitment value itself) is specified by Phase 10IN ("First Pair
+Rollback State-Commitment Source-Envelope Specification"). The commitment
+derivation is now defined at the docs level.
+
+The **last-known-good state material envelope** — what the rollback executor
+would actually revert to — remains **unresolved** and is separate from the
+commitment's source-envelope specification. The 10IH claim scope
+(`"operator_proof"`) remains a classification, not independent proof of
+approval. A future rollback executor phase must define the exact last-known-good
+state envelope, serialization, storage, and verification path.
 
 ---
 
@@ -340,8 +346,8 @@ This spec leaves open the following questions. They are not silently closed.
 
 | Unresolved Question | Resolution Path |
 |---|---|
-| `state_commitment` source-envelope construction | Future phase (operator decision required on fields, ordering, algorithm, serialization, encoding, verification, operator-approval binding) |
-| Last-known-good state material envelope | Future phase (executor must have a defined state to revert to) |
+| `state_commitment` source-envelope construction | Closed by Phase 10IN (docs-level envelope schema, commitment derivation; runtime validator remains unresolved) |
+| Last-known-good state material envelope | Future phase (executor must have a defined state envelope and storage to revert to; separate from commitment derivation) |
 | Replay / uniqueness / tamper / expiry mechanism | Operator decision (sequence number, HMAC, signature, `previous_anchor_id`, none) |
 | Per-agent asymmetric-rollback scope | Future authorization/execution artifact (anchor remains scope-neutral) |
 | Operator-approval artifact verification | Operator decision (signature, sign-off record, decision ID, or asserted-only) |
