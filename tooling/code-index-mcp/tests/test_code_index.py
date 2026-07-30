@@ -66,11 +66,13 @@ def _snapshot_index_tree(
     """
     if not path.exists():
         return {"__absent__": ("ABSENT", 0, "", 0)}
+
+    scan_root = path.resolve()
     snap: dict[str, tuple[str, int, str, int]] = {}
     snap["."] = _snapshot_entry_signature(path)
     for p in sorted(path.rglob("*")):
         try:
-            rel = p.resolve().relative_to(path).as_posix()
+            rel = p.resolve().relative_to(scan_root).as_posix()
         except (ValueError, OSError):
             # Escaping symlink or filesystem race — use unique key based on
             # lexical path from the scanned directory.
@@ -973,12 +975,45 @@ class TestPathContainment:
             # Make both files resolve to the same in-root path
             if self.name in ("a", "b"):
                 return self.parent / "a"
-            return Path.resolve(self)
+            return original_resolve(self)
 
         with monkeypatch.context() as m:
             m.setattr(Path, "resolve", colliding_resolve)
             with pytest.raises(ValueError, match="Snapshot key collision"):
                 _snapshot_index_tree(test_index)
+
+def test_snapshot_index_tree_relative_path_normal_keys(tmp_path: Path):
+        """Relative path input to _snapshot_index_tree produces normal keys.
+
+        When the scanned path is a relative path (not an absolute path),
+        entries should still produce normal relative keys without __outside__
+        prefixes, as long as the resolved paths stay within the scanned directory.
+        """
+        import os
+
+        test_index = tmp_path / ".code-index"
+        test_index.mkdir()
+        (test_index / "a").write_text("a")
+        (test_index / "b").write_text("b")
+
+        # Pass relative path to _snapshot_index_tree from tmp_path as cwd
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            rel_path = test_index.relative_to(tmp_path)
+            snap = _snapshot_index_tree(rel_path)
+        finally:
+            os.chdir(old_cwd)
+
+        # Should produce normal relative keys without __outside__ prefix
+        outside_keys = [k for k in snap if k.startswith("__outside__:")]
+        assert len(outside_keys) == 0, f"Unexpected outside keys: {outside_keys}"
+
+        # Normal relative keys should be present
+        assert "a" in snap
+        assert "b" in snap
+        assert snap["a"][0] == "FILE"
+        assert snap["b"][0] == "FILE"
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
