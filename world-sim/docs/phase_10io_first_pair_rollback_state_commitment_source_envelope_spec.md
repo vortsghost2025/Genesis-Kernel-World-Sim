@@ -1,4 +1,4 @@
-# Phase 10IN — First Pair Rollback State-Commitment Source-Envelope Specification
+# Phase 10IO — First Pair Rollback State-Commitment Source-Envelope Specification
 
 Numbered docs-only spec. This file specifies the caller-supplied source envelope
 from which the deterministic `state_commitment` is derived. It closes the
@@ -17,11 +17,13 @@ source-envelope specification (10IL).
 
 ## A. Title and Status
 
-- **Title**: Phase 10IN — First Pair Rollback State-Commitment Source-Envelope
+- **Title**: Phase 10IO — First Pair Rollback State-Commitment Source-Envelope
   Specification.
 - **Status**: Docs-only specification. No runtime implementation.
-- **Phase number**: 10IN. This phase does not reserve or name another phase
-  number beyond 10IN.
+- **Phase number**: 10IO. This phase corrects the provisional 10IN label used
+  in PR #17, which conflicted with AGENTS.md Rule 4 (10IN is reserved as the
+  10IL implementation-candidate slot; 10IM is the 10IL metadata-sync slot).
+  No phase beyond 10IO is assigned by this document.
 - **Boundary preservation**: Gate-7 remains closed. 10HD remains named-only.
   10CP remains the sole writer. `world-sim/data` remains forbidden.
 
@@ -32,7 +34,7 @@ source-envelope specification (10IL).
 ### B.1 Purpose
 
 The `state_commitment` in the First Pair rollback anchor (10IH) is a
-deterministic SHA-256 hash of a caller-supplied **State-Envelope**. 10IN
+deterministic SHA-256 hash of a caller-supplied **State-Envelope**. 10IO
 defines that envelope's schema, canonical serialization, hash derivation, and
 structural validation rules. This is a **docs-level contract**; no runtime
 module implements it.
@@ -145,17 +147,19 @@ the following fields and no others.
 | `rollback_anchor_ref` | `str` | Must satisfy the Safe Identifier Grammar (§C). Must equal the enclosing anchor's `rollback_anchor_id` when validated together |
 | `habitat_id` | `str` | Must satisfy the Safe Identifier Grammar (§C). Must equal the enclosing anchor's `habitat_id` when validated together |
 | `state_reference` | `str` | Must satisfy the Safe Identifier Grammar (§C) |
-| `state_artifact_integrity_id` | `str` | Exactly 64 lowercase hex characters (`[0-9a-f]{64}`). SHA-256 digest of the exact last-known-good state artifact being committed to |
+| `declared_state_artifact_integrity_id` | `str` | Exactly 64 lowercase hex characters (`[0-9a-f]{64}`). **Caller-asserted** digest string — shape validation only. Does not verify that the digest corresponds to any actual state artifact bytes. Actual state-artifact content, canonical serialization, digest recomputation, storage lookup, and verification path remain unresolved (see 10IH §7 last-known-good state)|
 
 ### F.1 No Authority Conferred
 
-All four fields are caller-supplied safe identifiers (or a hex digest).
-Shape validation establishes only that the fields contain structurally valid
-values. It does **not** prove:
+All four fields are caller-supplied values. Shape validation establishes only
+that the fields contain structurally valid values. It does **not** prove:
 
-- that rollback execution is authorized;
+- that rollback execution is authorized or safe;
 - that operator approval occurred;
-- that the referenced state is the true last-known-good state;
+- that `declared_state_artifact_integrity_id` corresponds to any actual
+  state artifact bytes — it is a caller assertion with hex64 shape only;
+- that the referenced state is the true last-known-good state (the
+  last-known-good state material envelope remains unresolved per 10IH §7);
 - uniqueness, freshness, or non-replay of the commitment.
 
 Operator-approval artifact verification, replay prevention, freshness, and
@@ -233,9 +237,9 @@ fail-closed error is `"Invalid state envelope; rollback commitment rejected."`
 | # | Check | Test |
 |---|---|---|
 | 1 | Exact-key-set (envelope) | Envelope has exactly 5 keys: `source_envelope_schema_version`, `domain_separator`, `source_ref`, `state_timestamp`, `state_material`. Any extra or missing key → reject |
-| 2 | Exact-key-set (material) | `state_material` has exactly 4 keys: `rollback_anchor_ref`, `habitat_id`, `state_reference`, `state_artifact_integrity_id`. Any extra or missing key → reject |
+| 2 | Exact-key-set (material) | `state_material` has exactly 4 keys: `rollback_anchor_ref`, `habitat_id`, `state_reference`, `declared_state_artifact_integrity_id`. Any extra or missing key → reject |
 | 3 | Key-value type (envelope) | Each key maps to its required type: `source_envelope_schema_version` → built-in `str`, `domain_separator` → built-in `str`, `source_ref` → built-in `str`, `state_timestamp` → built-in `str`, `state_material` → built-in `dict`. Subclass or wrong type → reject |
-| 4 | Key-value type (material) | Each key maps to its required type: `rollback_anchor_ref` → built-in `str`, `habitat_id` → built-in `str`, `state_reference` → built-in `str`, `state_artifact_integrity_id` → built-in `str`. Subclass or wrong type → reject |
+| 4 | Key-value type (material) | Each key maps to its required type: `rollback_anchor_ref` → built-in `str`, `habitat_id` → built-in `str`, `state_reference` → built-in `str`, `declared_state_artifact_integrity_id` → built-in `str`. Subclass or wrong type → reject |
 
 ### I.2 Value Constraint Checks
 
@@ -247,7 +251,7 @@ fail-closed error is `"Invalid state envelope; rollback commitment rejected."`
 | 8 | Safe identifier (rollback_anchor_ref) | §C |
 | 9 | Safe identifier (habitat_id) | §C |
 | 10 | Safe identifier (state_reference) | §C |
-| 11 | Digest format | `state_artifact_integrity_id` matches `[0-9a-f]{64}` — exactly 64 lowercase hex characters |
+| 11 | Digest format | `declared_state_artifact_integrity_id` matches `[0-9a-f]{64}` — exactly 64 lowercase hex characters |
 | 12 | Timestamp canonical form | §D |
 
 ### I.3 Cross-Validation Checks
@@ -310,7 +314,9 @@ A structurally valid state-envelope proves **only**:
 It does **not** prove:
 - Rollback execution is authorized or safe.
 - Operator approval occurred.
-- The referenced state is the true last-known-good state.
+- `declared_state_artifact_integrity_id` matches any actual state artifact bytes.
+- The referenced state is the true last-known-good state (that envelope remains
+  unresolved per 10IH §7).
 - Replay safety, freshness, uniqueness, or one-time consumption.
 - That creation, write, or any runtime operation is authorized.
 
@@ -386,31 +392,26 @@ requires a separate numbered phase with GPT-5.6 Sol/Luna and TDD.
 | 28 | Wrong schema version → rejected | Schema literal (§I.2 #5) |
 | 29 | Wrong domain separator → rejected | Domain literal (§I.2 #6) |
 | 30 | Timestamp not canonical → rejected | Timestamp (§I.2 #12) |
-| 31 | Digest format not 64-char lowercase hex → rejected | Digest format (§I.2 #11) |
-| 32 | `rollback_anchor_ref` does not match enclosing anchor's `rollback_anchor_id` → rejected | Anchor ref binding (§I.3 #13) |
-| 33 | `habitat_id` does not match enclosing anchor's `habitat_id` → rejected | Habitat id binding (§I.3 #14) |
+| 31 | Declared digest not 64-char lowercase hex → rejected | Declared digest format (§I.2 #11) |
+| 32 | Declared digest is 64-char lowercase hex → accepted for shape, does NOT verify artifact bytes | Shape only (§F.1) |
+| 33 | `rollback_anchor_ref` does not match enclosing anchor's `rollback_anchor_id` → rejected | Anchor ref binding (§I.3 #13) |
+| 34 | `habitat_id` does not match enclosing anchor's `habitat_id` → rejected | Habitat id binding (§I.3 #14) |
 
 ### K.8 Commitment and Cross-Domain
 
 | # | Test | Validates |
 |---|---|---|
-| 34 | Commitment digest matches presented `state_commitment` → accepted | Commitment check (§I.4 #16) |
-| 35 | Commitment digest does not match → rejected | Commitment check (§I.4 #16) |
-| 36 | Envelope with rollback domain separator substituted into provenance slot → rejected | Cross-domain (§I.6 #21) |
-| 37 | Envelope hash changed after mutation → different commitment | Immutability |
+| 35 | Commitment digest matches presented `state_commitment` → accepted | Commitment check (§I.4 #16) |
+| 36 | Commitment digest does not match → rejected | Commitment check (§I.4 #16) |
+| 37 | Envelope with rollback domain separator substituted into provenance slot → rejected | Cross-domain (§I.6 #21) |
+| 38 | Envelope hash changed after mutation → different commitment | Immutability |
 
 ### K.9 Authorization Boundaries
 
 | # | Test | Validates |
 |---|---|---|
-| 38 | Valid envelope + valid commitment → rollback still unauthorized, Gate-7 still closed | Non-authority (§J.2) |
-| 39 | All identifier fields pass shape check → no authority implied | Shape only (§F.1) |
-
-### K.10 Anchor Binding and Trust Separation
-
-| # | Test | Validates |
-|---|---|---|
-| 40 | Valid state-envelope → rollback anchor not authorized solely by this verification | Non-authority (§J.2) |
+| 39 | Valid envelope + valid commitment → rollback still unauthorized, Gate-7 still closed | Non-authority (§J.2) |
+| 40 | Valid declared digest shape → does NOT prove matching artifact bytes | Shape only (§F.1) |
 
 ---
 
@@ -422,6 +423,8 @@ requires a separate numbered phase with GPT-5.6 Sol/Luna and TDD.
 - It does **not** implement a runtime state-envelope validator.
 - It does **not** modify 10IC, 10ID, 10IE, 10IG, 10IH, 10II, 10IL, or any
   prior phase.
+- It does **not** prove that `declared_state_artifact_integrity_id` corresponds
+  to any actual state artifact bytes (caller assertion with hex64 shape only).
 - It does **not** authorize rollback execution.
 - It does **not** close the independent operator-approval binding gap.
 - It does **not** prove that the referenced state is the true last-known-good
@@ -450,7 +453,7 @@ Under this spec and all preceding First Pair preflight specs:
 - Runtime self-scheduling
 - Any write without an explicit per-call allow-list and provenance chain
 - Silent replacement or aliasing of state material
-- Implementing a runtime state-envelope validator under 10IN
+- Implementing a runtime state-envelope validator under 10IO
 - Claiming that a valid envelope proves operator approval, rollback authority,
   or creation authorization
 
@@ -458,8 +461,8 @@ Under this spec and all preceding First Pair preflight specs:
 
 ## N. Phase Index
 
-This phase receives a single `phase_index.md` row marked **Done**. The 10IN
-row's Commit cell records the merge commit that placed the 10IN specification
+This phase receives a single `phase_index.md` row marked **Done**. The 10IO
+row's Commit cell records the merge commit that placed the 10IO specification
 on master (7-char lowercase hex). The row's Notes cell records the document's
 LF-only SHA-256. Post-push synchronization follows the established W4 workflow:
 Commit A = content (this spec + consistency amendments to 10IH/10IF, excluding
