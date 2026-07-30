@@ -21,6 +21,61 @@ from genesis_code_index.semantic_adapter import (
 )
 
 
+# ── Shared snapshot helpers (used by isolation tests) ────────────────────
+
+def _snapshot_entry_signature(p: Path) -> tuple:
+    """Return (type, size, sha256|'LOCKED'|'STAT_FAIL', mtime_ns) for one fs entry.
+
+    On stat failure, returns a sentinel treated as a distinct signature —
+    any change from the before-snapshot counts as a mutation.
+    """
+    try:
+        st = p.stat()
+    except OSError:
+        return ("STAT_FAIL", 0, "", 0)
+    if p.is_dir():
+        return ("DIR", st.st_size, "", st.st_mtime_ns)
+    try:
+        with p.open("rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+    except (PermissionError, OSError):
+        sha = "LOCKED"
+    return ("FILE", st.st_size, sha, st.st_mtime_ns)
+
+
+def _snapshot_index_tree(
+    path: Path, root_anchor: Path, key_prefix: str = ""
+) -> dict:
+    """Return {relative-posix-key: (type, size, sha|'LOCKED'|'STAT_FAIL', mtime_ns)}.
+
+    Distinguishes absent ({"__absent__": ...}) from present-but-empty ({key: signature}).
+    Every entry under ``path`` is captured, including directories, files,
+    SQLite sidecars, and lock files.
+
+    Entries whose resolved path cannot be made relative to ``root_anchor``
+    (e.g., escaping symlinks) are recorded with a deterministic unique key
+    ``__outside__:<lexical-path-from-path>`` so mutations are not lost.
+
+    Raises ValueError if a snapshot key would collide (fail closed, no silent
+    overwrite).  Catches resolve/stat/read OSError races and records distinct
+    evidence rather than crashing or hiding an entry.
+    """
+    if not path.exists():
+        return {"__absent__": ("ABSENT", 0, "", 0)}
+    snap: dict[str, tuple] = {}
+    snap["."] = _snapshot_entry_signature(path)
+    for p in sorted(path.rglob("*")):
+        try:
+            rel = p.resolve().relative_to(root_anchor).as_posix()
+        except (ValueError, OSError):
+            rel = f"__outside__:{p.relative_to(path).as_posix()}"
+        key = f"{key_prefix}{rel}"
+        if key in snap:
+            raise ValueError(f"Snapshot key collision: {key}")
+        snap[key] = _snapshot_entry_signature(p)
+    return snap
+
+
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 @pytest.fixture
