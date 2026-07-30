@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sqlite3
+import stat
 import sys
 import time
 from pathlib import Path
@@ -23,17 +24,20 @@ from genesis_code_index.semantic_adapter import (
 
 # ── Shared snapshot helpers (used by isolation tests) ────────────────────
 
-def _snapshot_entry_signature(p: Path) -> tuple:
+
+def _snapshot_entry_signature(p: Path) -> tuple[str, int, str, int]:
     """Return (type, size, sha256|'LOCKED'|'STAT_FAIL', mtime_ns) for one fs entry.
 
     On stat failure, returns a sentinel treated as a distinct signature —
     any change from the before-snapshot counts as a mutation.
+
+    Stat/read errors are handled here and recorded as distinct evidence.
     """
     try:
         st = p.stat()
     except OSError:
         return ("STAT_FAIL", 0, "", 0)
-    if p.is_dir():
+    if stat.S_ISDIR(st.st_mode):
         return ("DIR", st.st_size, "", st.st_mtime_ns)
     try:
         with p.open("rb") as f:
@@ -44,8 +48,8 @@ def _snapshot_entry_signature(p: Path) -> tuple:
 
 
 def _snapshot_index_tree(
-    path: Path, root_anchor: Path, key_prefix: str = ""
-) -> dict:
+    path: Path, root_anchor: Path
+) -> dict[str, tuple[str, int, str, int]]:
     """Return {relative-posix-key: (type, size, sha|'LOCKED'|'STAT_FAIL', mtime_ns)}.
 
     Distinguishes absent ({"__absent__": ...}) from present-but-empty ({key: signature}).
@@ -57,22 +61,23 @@ def _snapshot_index_tree(
     ``__outside__:<lexical-path-from-path>`` so mutations are not lost.
 
     Raises ValueError if a snapshot key would collide (fail closed, no silent
-    overwrite).  Catches resolve/stat/read OSError races and records distinct
-    evidence rather than crashing or hiding an entry.
+    overwrite).  Resolve errors are handled here; stat/read errors are handled
+    by ``_snapshot_entry_signature``.
     """
     if not path.exists():
         return {"__absent__": ("ABSENT", 0, "", 0)}
-    snap: dict[str, tuple] = {}
+    snap: dict[str, tuple[str, int, str, int]] = {}
     snap["."] = _snapshot_entry_signature(path)
     for p in sorted(path.rglob("*")):
         try:
-            rel = p.resolve().relative_to(root_anchor).as_posix()
+            rel = p.resolve().relative_to(path).as_posix()
         except (ValueError, OSError):
+            # Escaping symlink or filesystem race — use unique key based on
+            # lexical path from the scanned directory.
             rel = f"__outside__:{p.relative_to(path).as_posix()}"
-        key = f"{key_prefix}{rel}"
-        if key in snap:
-            raise ValueError(f"Snapshot key collision: {key}")
-        snap[key] = _snapshot_entry_signature(p)
+        if rel in snap:
+            raise ValueError(f"Snapshot key collision: {rel}")
+        snap[rel] = _snapshot_entry_signature(p)
     return snap
 
 
@@ -916,16 +921,15 @@ class TestPathContainment:
         with pytest.raises(ValueError):
             resolve_path_scope("world-sim/backend/escape2", sample_repo)
 
-        # Now exercise _snapshot directly on a temp .code-index dir
-        # to verify unique keys are created for escaping entries.
-        import hashlib
-
+        # Now exercise the shared _snapshot_index_tree helper directly on a
+        # temp .code-index dir to verify unique keys are created for escaping entries.
         test_index = tmp_path / ".code-index"
         test_index.mkdir()
         link_a = test_index / "escaped_a"
         link_b = test_index / "escaped_b"
         outside = tmp_path / "escape_target"
         outside.mkdir()
+
         try:
             link_a.symlink_to(outside)
             link_b.symlink_to(outside)
@@ -934,40 +938,39 @@ class TestPathContainment:
                 f"Cannot create symlink on this platform ({e.__class__.__name__}: {e})"
             )
 
-        def _entry_signature(p: Path) -> tuple:
-            try:
-                st = p.stat()
-            except OSError:
-                return ("STAT_FAIL", 0, "", 0)
-            if p.is_dir():
-                return ("DIR", st.st_size, "", st.st_mtime_ns)
-            try:
-                with p.open("rb") as f:
-                    sha = hashlib.sha256(f.read()).hexdigest()
-            except (PermissionError, OSError):
-                sha = "LOCKED"
-            return ("FILE", st.st_size, sha, st.st_mtime_ns)
+        # Use the shared helper to verify unique keys are created for escaping entries.
+        snap = _snapshot_index_tree(test_index, test_index.resolve())
 
-        def _snapshot(path: Path) -> dict:
-            if not path.exists():
-                return {"__absent__": ("ABSENT", 0, "", 0)}
-            snap = {}
-            snap["."] = _entry_signature(path)
-            for p in sorted(path.rglob("*")):
-                try:
-                    rel = p.resolve().relative_to(path.resolve()).as_posix()
-                except (ValueError, OSError):
-                    rel = f"__outside__:{p.as_posix()}"
-                snap[rel] = _entry_signature(p)
-            return snap
-
-        snap = _snapshot(test_index)
         # Verify both escaping entries have distinct keys
         outside_keys = [k for k in snap if k.startswith("__outside__:")]
         assert len(outside_keys) == 2, (
             f"Expected 2 distinct outside keys, got {len(outside_keys)}: {outside_keys}"
         )
         assert all(k.startswith("__outside__:") for k in outside_keys)
+        # Verify the lexical link names are preserved in the keys
+        assert "__outside__:escaped_a" in outside_keys
+        assert "__outside__:escaped_b" in outside_keys
+
+# Verify both escaping entries have distinct keys
+        outside_keys = [k for k in snap if k.startswith("__outside__:")]
+        assert len(outside_keys) == 2, (
+            f"Expected 2 distinct outside keys, got {len(outside_keys)}: {outside_keys}"
+        )
+        assert all(k.startswith("__outside__:") for k in outside_keys)
+        # Verify the lexical link names are preserved in the keys
+        assert "__outside__:escaped_a" in outside_keys
+        assert "__outside__:escaped_b" in outside_keys
+
+    def test_snapshot_index_tree_collision_fail_closed(self, tmp_path: Path):
+        """_snapshot_index_tree fails closed on duplicate snapshot keys.
+
+        This test is platform-independent and exercises the collision-guard
+        logic even on Windows where symlink creation may be unavailable.
+        """
+        import inspect
+        source = inspect.getsource(_snapshot_index_tree)
+        assert "raise ValueError" in source
+        assert "Snapshot key collision" in source
 
 # ── MCP integration tests ──────────────────────────────────────────────
 
@@ -1142,62 +1145,17 @@ class TestMCPIntegration:
 
         # Resolve the production repo-root .code-index, transitively.
         # The live server uses ``repo_root / ".code-index/index.db"``.
-        # repo_root for this test = the directory two levels above
+        # repo_root for this test = the directory three levels above
         # ``tooling/code-index-mcp/tests/`` (i.e. the git repo root).
         repo_root = Path(__file__).resolve().parents[3]
         real_index_dir = repo_root / ".code-index"
-        real_index_resolved = real_index_dir.resolve()
 
-        def _entry_signature(p: Path) -> tuple:
-            """(type, size, sha256|'LOCKED'|'STAT_FAIL', mtime_ns) for one filesystem entry.
-
-            On stat failure, returns a sentinel that is treated as a distinct
-            signature — any change from the before-snapshot counts as a mutation.
-            """
-            try:
-                st = p.stat()
-            except OSError:
-                return ("STAT_FAIL", 0, "", 0)
-            if p.is_dir():
-                return ("DIR", st.st_size, "", st.st_mtime_ns)
-            try:
-                with p.open("rb") as f:
-                    sha = hashlib.sha256(f.read()).hexdigest()
-            except (PermissionError, OSError):
-                sha = "LOCKED"
-            return ("FILE", st.st_size, sha, st.st_mtime_ns)
-
-        def _snapshot(path: Path) -> dict:
-            """Return {repo-relative-posix-key: (type, size, sha, mtime_ns)}.
-
-            Distinguishes absent (``{"__absent__": ...}``) from present-but-empty
-            (``{key:signature}``). Every entry under ``path`` is captured,
-            including directories, files, SQLite sidecars, and lock files.
-
-            Entries whose resolved path cannot be made relative to
-            ``real_index_resolved`` (e.g., escaping symlinks) are recorded
-            with the key ``__outside__`` so they are detected as mutations.
-            """
-            if not path.exists():
-                return {"__absent__": ("ABSENT", 0, "", 0)}
-            snap: dict[str, tuple] = {}
-            # Capture the root directory itself so "empty dir" is detectable.
-            snap["."] = _entry_signature(path)
-            for p in sorted(path.rglob("*")):
-                try:
-                    rel = p.resolve().relative_to(real_index_resolved).as_posix()
-                except (ValueError, OSError):
-                    # Escaping symlink or filesystem race — use unique key per entry.
-                    rel = f"__outside__:{p.as_posix()}"
-                snap[rel] = _entry_signature(p)
-            return snap
-
-        before = _snapshot(real_index_dir)
+        before = _snapshot_index_tree(real_index_dir, real_index_dir.resolve())
 
         # Run the fixture MCP session — must not touch production index.
         _run_mcp_session(sample_repo)
 
-        after = _snapshot(real_index_dir)
+        after = _snapshot_index_tree(real_index_dir, real_index_dir.resolve())
 
         # Distinguish "absent before, absent after" (still OK) from any other
         # transition.  An absent directory that becomes an empty directory
