@@ -58,14 +58,12 @@ All identifier fields in this spec (`source_ref`, `source_artifact_id`,
 ### C.1 Exact Grammar
 
 | Property | Rule |
-|---|---|
+|---|---|---|
 | Type | Exact built-in `str` (subclasses rejected; `type(x) is str`) |
 | Length | 1–128 characters inclusive |
 | Allowed characters | `abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-` |
 | Forbidden sequence | `..` (two consecutive periods) |
-| Leading punctuation | Leading `.`, `_`, `:` or `-` rejected if the first character is not alphanumeric |
-| Trailing punctuation | Trailing `.`, `_`, `:` or `-` rejected if the last character is not alphanumeric |
-| Forbidden markers | Lowercased form must not contain any marker from `_FORBIDDEN_IDENTIFIER_MARKERS` |
+| Forbidden markers | Lowercased form must not contain `true_map`, `known_map`, `world-sim/data`, or `[redacted` (the exact `_FORBIDDEN_IDENTIFIER_MARKERS` tuple from 10IC) |
 | Hidden-substrate check | Alphanumeric-only lowercased collapsed form must not contain `truemap`, `knownmap`, or `hiddensubstrate` |
 | Sanitization round-trip | `sanitize_public_text(value) == value` must hold |
 | Normalization | None. Input is accepted as-is after validation — no NFC/NFD/NFKC/NFKD normalization |
@@ -90,7 +88,7 @@ YYYY-MM-DDTHH:MM:SSZ
 
 | Component | Constraint |
 |---|---|
-| Year | Four decimal digits. `0000`–`9999` inclusive |
+| Year | Four decimal digits. `0001`–`9999` inclusive. Year `0000` is rejected |
 | Month | Two decimal digits, `01`–`12` |
 | Day | Two decimal digits, valid for the given month and year (leap years observed) |
 | `T` | Literal `T` separator |
@@ -387,21 +385,21 @@ below are categorized by the validation rule they exercise.
 | 12 | `source_ref` longer than 128 chars → rejected | Safe identifier (§C) |
 | 13 | `source_ref` contains `..` → rejected | Safe identifier (§C) |
 | 14 | `source_ref` contains forbidden marker → rejected | Safe identifier (§C) |
-| 15 | `source_ref` with leading `.` → rejected | Safe identifier (§C) |
-| 16 | `source_ref` with trailing `-` → rejected | Safe identifier (§C) |
-| 17 | `source_artifact_id` empty string → rejected | Safe identifier (§C) |
-| 18 | `operator_approval_ref` valid identifier accepted, no operator approval implied | Shape only (§I.2 #9) |
+| 15 | `source_ref` with leading `.` or trailing `-` accepted (actual `_is_safe_identifier` permits leading/trailing punctuation) | Safe identifier (§C) |
+| 16 | `source_artifact_id` empty string → rejected | Safe identifier (§C) |
+| 17 | `operator_approval_ref` valid identifier accepted, no operator approval implied | Shape only (§I.2 #9) |
 
 ### L.5 Timestamp Violations
 
 | # | Test | Validates |
 |---|---|---|
-| 19 | Fractional second `2026-07-30T06:25:18.123Z` → rejected | Timestamp (§D) |
-| 20 | Offset `2026-07-30T06:25:18+00:00` → rejected | Timestamp (§D) |
-| 21 | Invalid date `2024-02-30` → rejected | Timestamp (§D) |
-| 22 | Space separator `2026-07-30 06:25:18Z` → rejected | Timestamp (§D) |
-| 23 | Missing seconds `2026-07-30T06:25Z` → rejected | Timestamp (§D) |
-| 24 | Non-UTC timezone `2026-07-30T06:25:18UTC` → rejected | Timestamp (§D) |
+| 18 | Fractional second `2026-07-30T06:25:18.123Z` → rejected | Timestamp (§D) |
+| 19 | Offset `2026-07-30T06:25:18+00:00` → rejected | Timestamp (§D) |
+| 20 | Invalid date `2024-02-30` → rejected | Timestamp (§D) |
+| 21 | Space separator `2026-07-30 06:25:18Z` → rejected | Timestamp (§D) |
+| 22 | Missing seconds `2026-07-30T06:25Z` → rejected | Timestamp (§D) |
+| 23 | Non-UTC timezone `2026-07-30T06:25:18UTC` → rejected | Timestamp (§D) |
+| 24 | Year `0000` timestamp → rejected | Timestamp (§D — year must be 0001–9999) |
 
 ### L.6 Duplicate-Key Violations
 

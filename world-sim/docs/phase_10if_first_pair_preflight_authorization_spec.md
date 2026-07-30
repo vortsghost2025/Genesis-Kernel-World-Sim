@@ -50,9 +50,9 @@ writers; write authorization is not write execution.
 | Issue | Location | Status |
 |---|---|---|
 | **Provenance commitment construction (docs-level)** | Identity §3: "The exact commitment construction (hash algorithm, input material, encoding, verification path) remains deferred to an implementation spec with explicit review." | 10IL ("First Pair Provenance Commitment Source-Envelope Specification") now defines the source-envelope schema, canonical serialization, SHA-256 commitment derivation, and a 40-item acceptance-test table. **Docs-level design complete. Runtime implementation not performed.** 10IC still validates only hex64 shape. Operator-approval binding remains unresolved. |
-| **Rollback anchor format deferred** | Rollback §11: anchor must be "explicit, caller-supplied, provenanced, sanitized." 10IC uses `rollback_anchor_schema_version`, `rollback_anchor_id`, `habitat_id`, `claim_scope`, `state_commitment` (hex64) — format lives in implementation, not spec. Unresolved. |
-| **Write allow-list not enumerated** | Write-Authority §11: "explicit write allow-list (enumerated per-call, not blanket)." No spec or implementation enumerates which fields are writable. Unresolved. |
-| **Starting habitat tiles not declared in spec** | Roadmap §3: "declared starting habitat tiles" missing; Habitat §5 references "public starting area / initial tile references." Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures. Unresolved. |
+| **Rollback anchor envelope format documented** | Rollback §11: anchor must be "explicit, caller-supplied, provenanced, sanitized." | Phase 10IH now documents the exact five-field envelope format and validation rules enforced by 10IC. Rollback execution, authorization, replay prevention, and state_commitment source-envelope construction remain unresolved. |
+| **Write allow-list design completed** | Write-Authority §11: "explicit write allow-list (enumerated per-call, not blanket)." | Phase 10II now specifies the 25-field authorization artifact design and two enabled candidate surfaces. The pure runtime validator, operator-approval artifact verification, replay prevention, freshness, and 10CP consumption remain unresolved. |
+| **Starting habitat tiles not declared in spec** | Roadmap §3: "declared starting habitat tiles" missing; Habitat §5 references "public starting area / initial tile references." Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures. | 10IJ is a protected uncommitted draft, not authoritative or closed. No tiles are declared in any committed spec. Unresolved. |
 | **`world-sim/data` write authorization** | Write-Authority §8: "Any `world-sim/data` write requires a separate write-authority spec and explicit Sean authorization." No such spec exists; no authorization granted. Unresolved. |
 | **Heartbeat observation boundary module** | Heartbeat spec defines contract; 10IC provides heartbeat verifier but no standalone `first_pair_observation_boundary.py` module exists. The heartbeat contract is partially implemented inside 10IC. Unresolved if this needs a separate boundary module. |
 | **Founding role divergence** | Identity §3 uses example `founding_role: "first_observer" / "first_echo"`; 10IC implementation uses a single fixed `"founding_agent"` for both identities. Spec language allows diversity; implementation chose unification. Documented as intentional deviation, not a blocker. |
@@ -68,8 +68,8 @@ Before any First Pair creation phase may start, **all** of the following must be
 2. **Valid habitat boundary** — verified exact habitat validation, `movement_allowed=False`, `observation_radius=1`, rollback anchor present (10ID implemented).
 3. **Valid observation boundary** — observation-only heartbeat contract verified, no hidden true_map, no private paths, no secrets (10IC heartbeat verifier implemented; standalone boundary module not implemented).
 4. **Valid memory boundary** — agent-scoped memory refs, cross-identity public-only, no leakage, fail-closed (10IE implemented).
-5. **Concrete rollback anchor** — explicit, enumerated, caller-supplied, provenanced, sanitized; format specified in a spec, not only in implementation (not resolved).
-6. **Explicit per-call write allow-list** — enumerated writable surfaces, not blanket; provenanced; 10CP remains sole writer; Adam/Eve are not writers (not resolved; no write-authority module).
+5. **Rollback anchor envelope format documented** — five-field envelope, exact validation rules, claim classification semantics, habitat binding documented by Phase 10IH (docs-level design complete; rollback execution, authorization, replay prevention, and state_commitment source-envelope construction remain unresolved).
+6. **Per-call write allow-list design documented** — 25-field authorization artifact, two enabled candidate surfaces, provenance rules, gate flag contract documented by Phase 10II (docs-level design complete; runtime validator, operator-approval artifact verification, replay prevention, freshness, exact-call binding, and 10CP consumption remain unresolved).
 7. **Provenance commitment source-envelope construction documented** — schema, serialization, commitment hash, verification rules specified in a reviewed document (10IL design complete; runtime validator not implemented).
 8. **Provenance commitment runtime validator implemented** — the source-envelope is presented and verified for Adam and Eve by a factory-trained runtime module (not implemented; requires separate phase + GPT-5.6 Sol/Luna).
 9. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
@@ -88,9 +88,11 @@ This document grants no new authority. The implemented 10IC, 10ID, and 10IE boun
 | All six preflight specs exist as unnumbered docs | ✅ Yes |
 | Implemented boundaries 10IC, 10ID, 10IE are verified and pushed | ✅ Yes |
 | Unimplemented boundaries (heartbeat, write-authority, rollback) have specs | ✅ Yes |
-| Rollback anchor format specified | ❌ No — deferred to implementation |
-| Write allow-list enumerated | ❌ No — not resolved |
-| Starting habitat tiles declared | ❌ No — only in test fixtures |
+| Rollback anchor envelope format documented | ✅ Yes — by Phase 10IH (five-field envelope, validation rules; execution/authorization/replay/state_commitment construction remain unresolved) |
+| Rollback anchor execution and authorization implemented | ❌ No — not implemented; requires separate phase + GPT-5.6 Sol/Luna |
+| Write allow-list design documented | ✅ Yes — by Phase 10II (25-field authorization artifact, two enabled surfaces; runtime validator, operator approval, replay prevention, freshness, 10CP consumption remain unresolved) |
+| Write allow-list runtime validator implemented | ❌ No — not implemented; requires separate phase + GPT-5.6 Sol/Luna |
+| Starting habitat tiles declared | ❌ No — 10IJ is a protected uncommitted draft, not authoritative or closed |
 | `world-sim/data` write authorized | ❌ No — not granted |
 | Provenance commitment source-envelope documented | ✅ Yes — 10IL docs-only spec on master defines source-envelope schema, validation rules, and 40-item acceptance-test table |
 | Provenance commitment runtime validator implemented | ❌ No — not implemented; 10IC validates only hex64 shape; requires separate phase + GPT-5.6 Sol/Luna |

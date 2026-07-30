@@ -48,11 +48,18 @@ creation, and does not open Gate-7.
   verification path)" to an implementation spec with explicit review.
   This gap is closed by Phase 10IL ("First Pair Provenance Commitment
   Source-Envelope Specification").
-- **Truncation and collision budget for `agent_id`** — deferred to a
-  future 10IK review.
-- **Rollback anchor format** — deferred to a future 10IH spec.
-- **Per-call write allow-list** — deferred to a future 10II spec.
-- **Starting habitat tiles declaration** — deferred to a future 10IJ spec.
+- **Truncation and collision budget for `agent_id`** — closed by Phase 10IK
+  (full 64-char digest preserved; identity-layer collision detection inside
+  10IC remains unimplemented).
+- **Rollback anchor format** — closed by Phase 10IH
+  (envelope format and 10IC validation documented; execution and authorization
+  remain unresolved).
+- **Per-call write allow-list** — closed by Phase 10II
+  (exact 25-field authorization artifact design; runtime validator and
+  operator-approval artifact remain unresolved).
+- **Starting habitat tiles declaration** — 10IJ is a protected uncommitted
+  draft, not authoritative or closed. No tiles are declared in any committed
+  spec.
 
 The `provenance_commitment`'s own source material and construction are
 specified by the Phase 10IL Source-Envelope Specification.
@@ -184,8 +191,9 @@ The `agent_id` is the string:
 - **No truncation.** The full 64-character sha256 hexdigest is used. 10IC
   uses `"genesis-agent-" + _hash_canonical(material)` — no `[:32]` slice
   on the `agent_id` form.
-- Truncation review (32-char or otherwise) is deferred to a future 10IK
-  spec and is not authorized by this document.
+- Truncation review (32-char or otherwise) — closed by Phase 10IK
+  (full 64-char SHA-256 digest preserved; identity-layer collision detection
+  inside 10IC remains unimplemented).
 - Prefix `"genesis-agent-"` is fixed; it namespaces First Pair agents
   from any other identity scheme in the project.
 
@@ -369,14 +377,18 @@ Still unresolved after both 10IG and 10IL:
   (that design is provided by Phase 10IL, which this document references).
 - It does **not** implement a runtime source-envelope validator
   (10IL's design requires a separate implementation phase).
-- It does **not** review truncation/collision budget (deferred to a
-  future 10IK).
-- It does **not** specify the rollback anchor envelope (deferred to a
-  future 10IH).
-- It does **not** enumerate the per-call write allow-list (deferred to a
-  future 10II).
-- It does **not** declare starting habitat tiles (deferred to a future
-  10IJ).
+- It does **not** review truncation/collision budget (that decision was
+  made by Phase 10IK, which preserves the full 64-char digest; identity-layer
+  collision detection inside 10IC remains unimplemented).
+- It does **not** specify the rollback anchor envelope (that format is
+  documented by Phase 10IH; rollback execution and authorization remain
+  unresolved).
+- It does **not** enumerate the per-call write allow-list (that design is
+  provided by Phase 10II; the pure validator, operator-approval artifact,
+  replay prevention, freshness, and 10CP consumption remain unresolved).
+- It does **not** declare starting habitat tiles (10IJ is a protected
+  uncommitted draft, not authoritative or closed; no tiles are declared in
+  any committed spec).
 
 ---
 
@@ -392,10 +404,10 @@ Still unresolved after both 10IG and 10IL:
 | `provenance_commitment` source-envelope construction specified (docs-level) | ✅ Yes — by Phase 10IL (envelope schema, canonical serialization, SHA-256 commitment, 20 validation rules, 40 acceptance tests, duplicate-key boundary, timestamp contract, safe-identifier grammar) |
 | `provenance_commitment` source-envelope runtime validator implemented | ❌ No — not implemented; requires separate phase with GPT-5.6 Sol/Luna + TDD |
 | Operator-approval binding to a specific source-envelope artifact specified | ❌ No — unresolved (see §8) |
-| Truncation/collision budget reviewed | ❌ No — deferred to a future 10IK |
-| Rollback anchor format specified | ❌ No — deferred to a future 10IH |
-| Write allow-list enumerated | ❌ No — deferred to a future 10II |
-| Starting habitat tiles declared | ❌ No — deferred to a future 10IJ |
+| Truncation/collision budget reviewed | ✅ Yes — by Phase 10IK (full 64-char digest preserved; identity-layer collision detection in 10IC remains unimplemented as a separate requirement) |
+| Rollback anchor format specified | ✅ Yes — by Phase 10IH (envelope format and validation documented; rollback execution and authorization remain unresolved) |
+| Write allow-list enumerated | ✅ Yes — by Phase 10II (25-field authorization artifact design; pure validator, operator-approval artifact, replay prevention, freshness, and 10CP consumption remain unresolved) |
+| Starting habitat tiles declared | ❌ No — 10IJ is a protected uncommitted draft, not authoritative; not closed |
 | `world-sim/data` write authorized | ❌ No — not granted |
 | GPT-5.6 Sol/Luna invoked for creation implementation | ❌ No — creation unauthorized |
 | Explicit Sean approval for creation phase | ❌ No — not granted |
