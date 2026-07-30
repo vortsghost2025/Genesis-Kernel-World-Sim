@@ -95,7 +95,8 @@ def _validate_smoke_result(
 
     Accepts the parsed JSON payload from a ``find_definition`` MCP call.
     Returns ``(ok, reason)`` — ``ok`` is True iff the payload is a non-empty
-    list whose first element has the expected ``kind`` and ``file_path``.
+    list whose first element has the expected ``kind`` and an exact, non-empty
+    ``file_path`` string matching ``expected_file_path``.
     Designed to be directly unit-tested without invoking an MCP server.
     """
     if isinstance(data, dict):
@@ -110,7 +111,9 @@ def _validate_smoke_result(
     kind = first.get("kind")
     if kind != expected_kind:
         return (False, f"Expected kind {expected_kind!r}, got {kind!r}")
-    fp = first.get("file_path") or first.get("file")
+    fp = first.get("file_path")
+    if not isinstance(fp, str) or fp == "":
+        return (False, f"Expected file_path non-empty string, got {fp!r}")
     if fp != expected_file_path:
         return (False, f"Expected file_path {expected_file_path!r}, got {fp!r}")
     return (True, "ok")
