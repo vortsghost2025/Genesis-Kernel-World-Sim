@@ -163,45 +163,68 @@ drift (per 10IG §5.3 and First Pair Identity Spec Section 6).
 
 ## D. Duplicate Identity Handling
 
-### D.1 Intra-Pair Duplicate Detection
+### D.1 Intra-Pair Derivation, Not Detection
 
 The First Pair consists of exactly two identities: Adam and Eve. The 10IC
-birth-candidate constructor enforces that Adam and Eve have distinct
-canonical identity material (`canonical_name` and `canonical_agent_ref` differ
-between the two), so their `agent_id`s are derived from different material.
+birth-candidate constructor derives Adam's and Eve's `agent_id`s from
+distinct canonical identity material (`canonical_name` and
+`canonical_agent_ref` differ between the two), so their `agent_id`s are
+derived from different material:
 
 - Adam's material: `canonical_name="Adam"`, `canonical_agent_ref="east_adam"`,
   `provenance_commitment=<Adam's commitment>`.
 - Eve's material: `canonical_name="Eve"`, `canonical_agent_ref="east_eve"`,
   `provenance_commitment=<Eve's commitment>`.
 
-If Adam and Eve were supplied with identical provenance_commitment values,
-their agent_ids would still differ because `canonical_name` and
+If Adam and Eve were supplied with identical `provenance_commitment` values,
+their `agent_id`s would still differ because `canonical_name` and
 `canonical_agent_ref` differ. The 10IC test fixtures use different
 placeholder commitments (`"a" * 64` for Adam, `"b" * 64` for Eve), but the
 derivation does not depend on commitments being distinct.
 
-### D.2 Deterministic Duplicate Handling
+### D.2 Actual Implementation Boundary (no 10IC equality check)
 
-If two distinct canonical identity materials were ever to produce the same
-full 64-character SHA-256 hex digest (an astronomically improbable SHA-256
-collision), the behavior must be:
+The 10IC module (`local_first_pair_birth_candidate.py`, `create_first_pair_birth_candidate`)
+does **not** compare Adam's and Eve's `agent_id` strings for equality. A
+full-hash collision between Adam and Eve is therefore **not surfaced** by
+the existing 10IC fail-closed errors `invalid_birth_candidate` or
+`candidate_declaration_drift`; both identities are returned as valid, and
+`create_first_pair_birth_candidate()` returns `ok=True` even if Adam's and
+Eve's full 64-character digests were identical.
 
-1. **Detect** — compare the two full `agent_id` strings for exact equality.
-2. **Fail closed** — do not proceed with creation under a colliding
-   identity pair. Emit an explicit collision error.
-3. **Report honestly** — the collision is reported as an impossible-but-
-   detected event. No silent replacement, no aliasing, no fallback.
-4. **Require operator decision** — the collision is escalated for explicit
-   Sean review before any further work. 10CP does not write, and Gate-7
-   does not open, to resolve a collision.
+The **first existing duplicate-ID check** is in the 10ID module
+(`local_first_pair_habitat_boundary.py`, `create_first_pair_habitat_boundary`):
+at `local_first_pair_habitat_boundary.py:161-162` it compares
+`adam_ref["agent_id"] == eve_ref["agent_id"]` and, on equality, appends
+`duplicate_identity` to the errors list. This check runs against the
+already-derived `agent_id` produced by 10IC; it does not re-derive and
+does not introduce a new derivation path.
 
-### D.3 No Duplicate Tolerance
+### D.3 Required Future Collision Handling (specification, not implementation)
+
+If identity-layer collision rejection is desired **inside 10IC** (so that
+`create_first_pair_birth_candidate()` itself fails closed on a colliding
+pair without depending on the downstream 10ID check), it remains an
+**unresolved future implementation requirement** and is **not** authorized
+or implemented by this docs-only spec. Any such change requires:
+
+- a separate numbered implementation phase,
+- GPT-5.6 Sol/Luna per AGENTS.md Rule 3,
+- explicit Sean approval,
+- TDD tests covering the collision case inside 10IC,
+- and backward-compatible handling so the existing 10ID `duplicate_identity`
+  check is not duplicated or weakened.
+
+This spec records that requirement; it does not satisfy it.
+
+### D.4 No Duplicate Tolerance (specification)
 
 The First Pair does not tolerate duplicate `agent_id`s. Two identities with
 the same `agent_id` is an invalid state, not a valid degenerate pair. This
 holds for the full-digest form and would hold for any future truncated form
-(see Section B.3).
+(see Section B.3). The current implementation enforces this at the 10ID
+boundary (D.2); a future 10IC-side enforcement is recorded in D.3 but not
+implemented here.
 
 ---
 
@@ -213,9 +236,13 @@ A collision occurs when two distinct canonical identity materials produce
 the same `agent_id` string. "Distinct" means the materials differ in at
 least one of the eight canonical fields (Section C.1).
 
-### E.2 Fail-Closed Behavior
+### E.2 Fail-Closed Behavior (specification, not 10IC behavior)
 
-On collision detection:
+The behavior below is the **specification** for how the First Pair lane
+must fail closed if and when identity-layer collision detection is ever
+implemented inside 10IC (see Section D.3). It is **not** a description of
+the current 10IC runtime, which does not detect an Adam-vs-Eve collision
+(see Section D.2 for the actual current boundary):
 
 - **Identity validation fails** — both colliding identities are marked
   invalid. Neither is accepted.
@@ -227,10 +254,11 @@ On collision detection:
 - **No fallback identifier generation** — no secondary, tertiary, or
   fallback `agent_id` is generated. The full SHA-256 digest is the only
   derivation path. If it collides, creation is blocked, not worked around.
-- **Error vocabulary** — the existing 10IC fail-closed errors
-  (`invalid_birth_candidate`, `candidate_declaration_drift`) surface the
-  collision. 10IK does not add a new collision-specific error string to
-  the runtime vocabulary without a separate implementation phase.
+- **Error vocabulary** — a future 10IC-side detection must surface the
+  collision via the existing 10IC fail-closed errors
+  (`invalid_birth_candidate`, `candidate_declaration_drift`) or via a new
+  collision-specific error string added through a separate implementation
+  phase. 10IK does not add a new error string to the runtime vocabulary.
 - **Escalation** — the collision is reported for operator review. No
   automatic resolution exists.
 
@@ -238,7 +266,9 @@ On collision detection:
 
 Collision detection applies to:
 
-- **Intra-pair**: Adam vs. Eve within the First Pair.
+- **Intra-pair**: Adam vs. Eve within the First Pair. (Currently detected
+  at the 10ID boundary as `duplicate_identity` per Section D.2; a 10IC-side
+  detection remains unresolved per Section D.3.)
 - **Future expansion**: if any future phase introduces additional
   identities, collision detection must extend to the new set. 10IK does
   not authorize future expansion.
@@ -283,24 +313,61 @@ Eve:
 
 The canonical identity material includes a domain separator:
 `"GENESIS_FIRST_PAIR_IDENTITY_V1"`. This namespaces the First Pair identity
-derivation from any other identity scheme in the project.
+derivation from any other identity scheme in the project. The current
+enforceable domain separation is limited to this `agent_id` canonical
+material and its `GENESIS_FIRST_PAIR_IDENTITY_V1` separator: the 10IC
+`_derive_identity()` function (verified at `local_first_pair_birth_candidate.py`)
+checks that the `domain_separator` field in the input material equals the
+10IC constant `_IDENTITY_DOMAIN_SEPARATOR = "GENESIS_FIRST_PAIR_IDENTITY_V1"`
+and folds that constant into the canonical-serialization hash input (see
+Section C.1 and C.2). No other domain claim is currently validated.
 
-### G.2 No Cross-Domain Substitution
+### G.2 Provenance Domain — Current Limited Enforcement
 
-- A `provenance_commitment` or `agent_id` from any other domain may not be
-  substituted into the First Pair derivation. The domain separator must
-  match exactly.
-- The `provenance_commitment` and rollback `state_commitment` are separate
-  trust domains. They may share a generic canonical-serialization utility
-  only if later authorized, but they must retain separate domain
-  separators, source-envelope schemas, semantic purposes, commitment
-  hashes, verification procedures, operator-approval bindings, and replay
-  and consumption rules. Cross-domain substitution must fail closed.
-- The `agent_id` derivation consumes `provenance_commitment` (identity
-  provenance), not `state_commitment` (rollback provenance). These are not
-  interchangeable.
+The `provenance_commitment` field currently receives **hex64 shape
+validation only** in 10IC (`_is_hex64()` at
+`local_first_pair_birth_candidate.py:211-214`: 64-char lowercase hex
+string). 10IC's `_derive_identity()` consumes the field into the canonical
+hash material (C.1, C.2) but does not verify the commitment's source
+envelope or source-domain metadata.
 
-### G.3 Derivation Version Pinning
+Consequences, stated exactly as the implementation behaves:
+
+- The 10IC identity derivation cannot currently determine the source
+  domain of a presented `provenance_commitment`. It validates only that
+  the string is a 64-character lowercase hex string.
+- A valid hex64 `provenance_commitment` produced by another source domain
+  (e.g., a non-First-Pair provenance envelope, or any external source
+  emitting a 64-char lowercase hex digest) **cannot presently be detected
+  or rejected** by the 10IC identity layer, because no source-envelope
+  metadata is captured and no source-domain comparison is performed.
+- Provenance-domain rejection — i.e., refusing a `provenance_commitment`
+  whose source envelope belongs to a different trust domain than the
+  First Pair — is **deferred** until the `provenance_commitment` source
+  envelope is specified (unresolved per 10IG §8), implemented, and
+  verified. This spec does not close that gap and does not claim
+  cross-domain rejection is currently enforced.
+
+Cross-domain `provenance_commitment` substitution must fail closed **once
+the source envelope is specified and verified**, but not before. This spec
+authorizes no such implementation.
+
+### G.3 Separate Trust Domains (unchanged constraint)
+
+The `provenance_commitment` (identity provenance) and rollback
+`state_commitment` (rollback provenance) are **separate trust domains**.
+They may share a generic canonical-serialization utility only if later
+authorized, but they must retain separate domain separators,
+source-envelope schemas, semantic purposes, commitment hashes,
+verification procedures, operator-approval bindings, and replay and
+consumption rules. The `agent_id` derivation consumes
+`provenance_commitment` (identity provenance), not `state_commitment`
+(rollback provenance). These are not interchangeable. Cross-domain
+substitution between them must fail closed. This constraint is
+unconditional; it is not contingent on the deferred source-envelope
+specification in G.2.
+
+### G.4 Derivation Version Pinning
 
 `id_derivation_version = "sha256-full-v1"` pins the current derivation to
 the full SHA-256 digest. Any future change to the derivation (truncation,
@@ -372,10 +439,32 @@ regression) validates the full-digest behavior.
 ## J. Non-Authority Statements
 
 - This spec authorizes **nothing beyond documenting the truncation and
-  collision-budget decision already implemented by 10IC**.
+  collision-budget decision already implemented by 10IC**, plus the
+  deferred requirements recorded in Sections D.3 and G.2.
 - It does **not** authorize creating Adam or Eve.
-- It does **not** modify 10IC, 10ID, 10IE, 10IF, 10IG, 10IH, or 10II.
+- It does **not** modify 10IC, 10ID, 10IE, 10IG, 10IH, or 10II.
+- A stale truncation record inside the 10IF document (10IF §3 and §5,
+  previously asserting 10IC used a 32-character truncation) is
+  corrected by direct amendment to the 10IF document in the same
+  forward-fix commit that amends this document. This is a documentation
+  correction to 10IF, not a 10IF phase restart; the 10IF phase number,
+  scope, status, and Commit cell are unchanged. The correction is
+  necessary because 10IF's stale claim was mutually exclusive with
+  10IK's full-digest decision. This 10IK spec records the necessity;
+  the actual amendment is owned by the 10IF document.
 - It does **not** implement a new boundary module.
+- It does **not** implement identity-layer collision detection inside
+  10IC. The 10IC-vs-Eve `agent_id` equality comparison remains
+  unimplemented; the existing duplicate check at the 10ID boundary
+  (`local_first_pair_habitat_boundary.py:161-162`, returning
+  `duplicate_identity`) is the current duplicate-ID enforcement
+  boundary. A 10IC-side check is recorded as an unresolved future
+  implementation requirement (Section D.3), not implemented here.
+- It does **not** enforce cross-domain rejection of a
+  `provenance_commitment` produced by a non-First-Pair source envelope.
+  10IC validates hex64 shape only and captures no source-envelope
+  metadata; provenance-domain rejection is deferred (Section G.2) until
+  the source envelope is specified and verified.
 - It does **not** open Gate-7, start a daemon, add a scheduler, open a
   network connection, call a provider, or touch `world-sim/data`.
 - It does **not** specify the `provenance_commitment` source envelope
@@ -413,13 +502,30 @@ forbidden and must fail closed:
 
 ## L. Phase Index
 
-This phase receives a single `phase_index.md` row marked **Done**, commit
-only, hash recorded after push. No tests, no backend/runtime changes.
+This phase receives a single `phase_index.md` row marked **Done**. The
+10IK row's Commit cell records the merge commit that placed the 10IK
+specification on master (7-char lowercase hex, recorded through the
+authorized post-push synchronization flow), and the Notes cell records
+the document's LF-only SHA-256 (Section M). The post-push synchronization
+follows the W4 documentation-correction workflow: Commit A (this spec +
+the 10IF amendment, excluding `phase_index.md`) is pushed first; Commit B
+records the actual pushed Commit SHA into the 10IK row's Commit cell and
+verifies the document SHA-256 recorded in Section M against the pushed
+file. No tests, no backend/runtime changes.
 
 ---
 
 ## M. 10IK SHA-256
 
-This document's SHA-256 (LF-only):
+This document's LF-only SHA-256 is recorded in the `phase_index.md` 10IK
+row's Notes cell during the post-push synchronization flow (Section L),
+**not** embedded inside this document. Embedding a file's own SHA-256
+inside the file would be self-referential and unverifiable; the design
+keeps the digest in the separate-tracked `phase_index.md` so the 10IK
+file's bytes are hashed solely by their content and the recorded digest
+can be independently verified against the pushed file's bytes.
 
-`TODO: Compute after commit and record in phase_index.md`
+If the `phase_index.md` Notes cell is ambiguous, the authoritative
+LF-only SHA-256 is the SHA-256 of the pushed file's bytes at the merge
+commit on master (computed by the authorized synchronization flow after
+Commit A is pushed).
