@@ -306,8 +306,10 @@ creation provenance material, no implementation in the repository
 computes the commitment from such material, and the 10IC tests supply
 placeholder values (`"a" * 64`, `"b" * 64`) directly.
 
-This corrected 10IG document does **not** close the Identity-spec §3
-construction gap. It closes only:
+This corrected 10IG document does **not** close the full Identity-spec §3
+construction gap by itself. (The source-envelope schema and commitment
+derivation side of the gap is closed by Phase 10IL — see below.) 10IG
+closes only:
 
 - the accepted shape of a caller-supplied `provenance_commitment` (§3);
 - the exact type and lowercase-hex validation 10IC applies (§3);

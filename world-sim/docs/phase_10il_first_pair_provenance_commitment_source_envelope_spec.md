@@ -63,8 +63,8 @@ All identifier fields in this spec (`source_ref`, `source_artifact_id`,
 | Length | 1–128 characters inclusive |
 | Allowed characters | `abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-` |
 | Forbidden sequence | `..` (two consecutive periods) |
-| Leading punctuation | Leading `.`, `_`, `:` or `-` rejected the first character is not alphanumeric |
-| Trailing punctuation | Trailing `.`, `_`, `:` or `-` rejected the last character is not alphanumeric |
+| Leading punctuation | Leading `.`, `_`, `:` or `-` rejected if the first character is not alphanumeric |
+| Trailing punctuation | Trailing `.`, `_`, `:` or `-` rejected if the last character is not alphanumeric |
 | Forbidden markers | Lowercased form must not contain any marker from `_FORBIDDEN_IDENTIFIER_MARKERS` |
 | Hidden-substrate check | Alphanumeric-only lowercased collapsed form must not contain `truemap`, `knownmap`, or `hiddensubstrate` |
 | Sanitization round-trip | `sanitize_public_text(value) == value` must hold |
@@ -269,7 +269,7 @@ the first failing rule need be reported.
 |---|---|---|
 | 13 | Deterministic serialization | Re-serializing the envelope with §G.1 and UTF-8 encoding produces the same bytes each time (idempotent round-trip) |
 | 14 | Commitment recomputation | Recomputing `sha256(canonical_json(envelope).encode("utf-8")).hexdigest()` produces a 64-character lowercase hex digest. That digest is compared against the separately-supplied `provenance_commitment` value from the identity material. Exact match required. Mismatch → reject |
-| 15 | Input immutability | Serialization does not mutate the input dict. The envlop is not consumed or cleared by validation |
+| 15 | Input immutability | Serialization does not mutate the input dict. The envelope is not consumed or cleared by validation |
 
 ### I.4 Structural Integrity Checks
 

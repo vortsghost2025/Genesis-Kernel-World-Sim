@@ -49,7 +49,7 @@ writers; write authorization is not write execution.
 
 | Issue | Location | Status |
 |---|---|---|
-| **Provenance commitment construction (docs-level)** | Identity §3: "The exact commitment construction (hash algorithm, input material, encoding, verification path) remains deferred to an implementation spec with explicit review." | 10IL ("First Pair Provenance Commitment Source-Envelope Specification") now defines the source-envelope schema, canonical serialization, SHA-256 commitment derivation, and a 20-item acceptance-test table. **Docs-level design complete. Runtime implementation not performed.** 10IC still validates only hex64 shape. Operator-approval binding remains unresolved. |
+| **Provenance commitment construction (docs-level)** | Identity §3: "The exact commitment construction (hash algorithm, input material, encoding, verification path) remains deferred to an implementation spec with explicit review." | 10IL ("First Pair Provenance Commitment Source-Envelope Specification") now defines the source-envelope schema, canonical serialization, SHA-256 commitment derivation, and a 40-item acceptance-test table. **Docs-level design complete. Runtime implementation not performed.** 10IC still validates only hex64 shape. Operator-approval binding remains unresolved. |
 | **Rollback anchor format deferred** | Rollback §11: anchor must be "explicit, caller-supplied, provenanced, sanitized." 10IC uses `rollback_anchor_schema_version`, `rollback_anchor_id`, `habitat_id`, `claim_scope`, `state_commitment` (hex64) — format lives in implementation, not spec. Unresolved. |
 | **Write allow-list not enumerated** | Write-Authority §11: "explicit write allow-list (enumerated per-call, not blanket)." No spec or implementation enumerates which fields are writable. Unresolved. |
 | **Starting habitat tiles not declared in spec** | Roadmap §3: "declared starting habitat tiles" missing; Habitat §5 references "public starting area / initial tile references." Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures. Unresolved. |
@@ -92,7 +92,7 @@ This document grants no new authority. The implemented 10IC, 10ID, and 10IE boun
 | Write allow-list enumerated | ❌ No — not resolved |
 | Starting habitat tiles declared | ❌ No — only in test fixtures |
 | `world-sim/data` write authorized | ❌ No — not granted |
-| Provenance commitment source-envelope documented | ✅ Yes — 10IL docs-only spec on master defines source-envelope schema, validation, and 20-item test table |
+| Provenance commitment source-envelope documented | ✅ Yes — 10IL docs-only spec on master defines source-envelope schema, validation rules, and 40-item acceptance-test table |
 | Provenance commitment runtime validator implemented | ❌ No — not implemented; 10IC validates only hex64 shape; requires separate phase + GPT-5.6 Sol/Luna |
 | Operator-approval independently verified for a specific envelope | ❌ No — not resolved; 10IL's `operator_approval_ref` is shape-only, proves no approval |
 | Truncation/collision budget docs-level decision recorded | ✅ Yes — 10IK docs-only spec on master preserves full 64-char SHA-256 digest |
