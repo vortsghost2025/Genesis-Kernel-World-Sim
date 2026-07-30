@@ -314,13 +314,20 @@ Eve:
 The canonical identity material includes a domain separator:
 `"GENESIS_FIRST_PAIR_IDENTITY_V1"`. This namespaces the First Pair identity
 derivation from any other identity scheme in the project. The current
-enforceable domain separation is limited to this `agent_id` canonical
-material and its `GENESIS_FIRST_PAIR_IDENTITY_V1` separator: the 10IC
-`_derive_identity()` function (verified at `local_first_pair_birth_candidate.py`)
-checks that the `domain_separator` field in the input material equals the
-10IC constant `_IDENTITY_DOMAIN_SEPARATOR = "GENESIS_FIRST_PAIR_IDENTITY_V1"`
-and folds that constant into the canonical-serialization hash input (see
-Section C.1 and C.2). No other domain claim is currently validated.
+enforceable domain separation is limited to this internally injected
+constant: in the 10IC `_derive_identity()` function (verified at
+`local_first_pair_birth_candidate.py`), the `domain_separator` field is
+**not** a member of `_IDENTITY_INPUT_FIELDS` and is **not** a caller-
+supplied field. The function rejects any identity input that adds
+`domain_separator` as an extra key (`_has_exact_string_keys` against
+`_IDENTITY_INPUT_FIELDS`), and it constructs the canonical hashing
+material itself by emitting `"domain_separator":
+_IDENTITY_DOMAIN_SEPARATOR = "GENESIS_FIRST_PAIR_IDENTITY_V1"` into
+the canonical dict (line 298 in `create_first_pair_birth_candidate`).
+Consequently no caller can present or substitute a different domain
+separator, but neither can a caller *assert* a domain claim — the
+domain is fixed by the implementation. No other domain claim is
+validated.
 
 ### G.2 Provenance Domain — Current Limited Enforcement
 
@@ -502,16 +509,44 @@ forbidden and must fail closed:
 
 ## L. Phase Index
 
-This phase receives a single `phase_index.md` row marked **Done**. The
-10IK row's Commit cell records the merge commit that placed the 10IK
-specification on master (7-char lowercase hex, recorded through the
-authorized post-push synchronization flow), and the Notes cell records
-the document's LF-only SHA-256 (Section M). The post-push synchronization
-follows the W4 documentation-correction workflow: Commit A (this spec +
-the 10IF amendment, excluding `phase_index.md`) is pushed first; Commit B
-records the actual pushed Commit SHA into the 10IK row's Commit cell and
-verifies the document SHA-256 recorded in Section M against the pushed
-file. No tests, no backend/runtime changes.
+This phase receives a single `phase_index.md` row marked **Done**. The 10IK
+row's Commit cell records the merge commit that placed the 10IK
+specification on master (7-char lowercase hex); the row's Notes cell
+records the document's LF-only SHA-256 (Section M).
+
+**Synchronization flow** (post-push of this forward-fix merge to master):
+
+1. **Commit A** (this spec + the 10IF amendment — `phase_index.md` is
+   **excluded** per W4) is pushed and the forward-fix PR is merged to
+   master. The merge commit SHA is the 10IK row's authoritative Commit
+   cell value.
+
+2. **Commit B** (phase-index hash-correction commit) does a direct,
+   hand-edited replacement of the 10IK row's `PENDING` placeholder with
+   the real 7-char merge SHA, and inserts this document's LF-only SHA-256
+   (computed over the file's bytes as pushed by Commit A) into the 10IK
+   row's Notes cell. Commit B stages only `phase_index.md`. **No
+   destructive Git operations** (no reset, revert, rebase, squash,
+   amend, stash, clean, force-push, or destructive deletion).
+
+3. **Verification after Commit B**: `sync_phase_index_sha.ps1` is run
+   as a **dry-run sanity check** (`-PhaseId 10IK -OldShortSha <the-new-SHA>
+   -NewFullSha <the-new-SHA>`). Because OldShortSha already equals the
+   initial 7 chars of NewFullSha on master, `sync_phase_index_sha.ps1`
+   returns `APPLIED: false` (a no-op) on a clean aligned tree. This
+   confirms the SHA is recorded in the row the script's regex accepts
+   (7-char lowercase hex in backticks). The dry-run does **not** perform
+   a byte-level apply; it reads the file in place and reports.
+
+   The `PENDING` placeholder **cannot** be processed by
+   `sync_phase_index_sha.ps1` (its apply-path regex requires an existing
+   7-char lowercase-hex SHA in backticks, not a token). The authorized
+   transition from `PENDING` to a real SHA is therefore the manual
+   Commit B edit above, **followed** by the dry-run check. This spec
+   does not claim `sync_phase_index_sha.ps1` bootstraps the `PENDING` →
+   SHA transition; that transition is owned by the manual Commit B.
+
+No tests, no backend/runtime changes.
 
 ---
 
