@@ -38,7 +38,7 @@ become writers.
 
 10IK decides that the canonical First Pair `agent_id` format remains:
 
-```
+```text
 genesis-agent-<full 64-character SHA-256 hex digest>
 ```
 
@@ -141,7 +141,7 @@ The canonical material dict contains exactly eight string-keyed fields:
 
 ### C.2 Canonical Serialization (per 10IG §4.2)
 
-```
+```json
 json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 ```
 
