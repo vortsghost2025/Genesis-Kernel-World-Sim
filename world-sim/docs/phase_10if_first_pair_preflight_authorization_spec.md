@@ -91,7 +91,7 @@ This document grants no new authority. The implemented 10IC, 10ID, and 10IE boun
 | Write allow-list enumerated | ❌ No — not resolved |
 | Starting habitat tiles declared | ❌ No — only in test fixtures |
 | `world-sim/data` write authorized | ❌ No — not granted |
-| Provenance commitment construction documented | ❌ No — deferred |
+| Provenance commitment construction documented | ✅ Yes — 10IL docs-only spec on master defines source-envelope schema and validation |
 | Truncation/collision budget docs-level decision recorded | ✅ Yes — 10IK docs-only spec on master preserves full 64-char SHA-256 digest |
 | Truncation/collision runtime-implementation review | ❌ No — not performed; requires separate implementation phase + GPT-5.6 Sol/Luna |
 | GPT-5.6 Sol/Luna invoked for implementation | ❌ No — creation unauthorized |

@@ -44,17 +44,16 @@ creation, and does not open Gate-7.
   `provenance_commitment` value.** The Identity spec §3 defers "the exact
   commitment construction (hash algorithm, input material, encoding,
   verification path)" to an implementation spec with explicit review.
-  No such source-envelope spec exists in the repository as of this phase.
-  This document does not invent one.
+  This gap is closed by Phase 10IL ("First Pair Provenance Commitment
+  Source-Envelope Specification").
 - **Truncation and collision budget for `agent_id`** — deferred to a
   future 10IK review.
 - **Rollback anchor format** — deferred to a future 10IH spec.
 - **Per-call write allow-list** — deferred to a future 10II spec.
 - **Starting habitat tiles declaration** — deferred to a future 10IJ spec.
 
-The `provenance_commitment`'s own source material and construction remain
-**unresolved**. This document explicitly does not close the Identity-spec
-§3 construction gap.
+The `provenance_commitment`'s own source material and construction are
+specified by the Phase 10IL Source-Envelope Specification.
 
 ---
 
