@@ -58,14 +58,12 @@ All identifier fields in this spec (`source_ref`, `source_artifact_id`,
 ### C.1 Exact Grammar
 
 | Property | Rule |
-|---|---|
+|---|---|---|
 | Type | Exact built-in `str` (subclasses rejected; `type(x) is str`) |
 | Length | 1–128 characters inclusive |
 | Allowed characters | `abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-` |
 | Forbidden sequence | `..` (two consecutive periods) |
-| Leading punctuation | Leading `.`, `_`, `:` or `-` rejected if the first character is not alphanumeric |
-| Trailing punctuation | Trailing `.`, `_`, `:` or `-` rejected if the last character is not alphanumeric |
-| Forbidden markers | Lowercased form must not contain any marker from `_FORBIDDEN_IDENTIFIER_MARKERS` |
+| Forbidden markers | Lowercased form must not contain any marker from `_FORBIDDEN_IDENTIFIER_MARKERS` (`true_map`, `known_map`, `world-sim/data`, `[redacted`) |
 | Hidden-substrate check | Alphanumeric-only lowercased collapsed form must not contain `truemap`, `knownmap`, or `hiddensubstrate` |
 | Sanitization round-trip | `sanitize_public_text(value) == value` must hold |
 | Normalization | None. Input is accepted as-is after validation — no NFC/NFD/NFKC/NFKD normalization |
@@ -90,7 +88,7 @@ YYYY-MM-DDTHH:MM:SSZ
 
 | Component | Constraint |
 |---|---|
-| Year | Four decimal digits. `0000`–`9999` inclusive |
+| Year | Four decimal digits. `0001`–`9999` inclusive. Year `0000` is rejected |
 | Month | Two decimal digits, `01`–`12` |
 | Day | Two decimal digits, valid for the given month and year (leap years observed) |
 | `T` | Literal `T` separator |
@@ -387,57 +385,56 @@ below are categorized by the validation rule they exercise.
 | 12 | `source_ref` longer than 128 chars → rejected | Safe identifier (§C) |
 | 13 | `source_ref` contains `..` → rejected | Safe identifier (§C) |
 | 14 | `source_ref` contains forbidden marker → rejected | Safe identifier (§C) |
-| 15 | `source_ref` with leading `.` → rejected | Safe identifier (§C) |
-| 16 | `source_ref` with trailing `-` → rejected | Safe identifier (§C) |
-| 17 | `source_artifact_id` empty string → rejected | Safe identifier (§C) |
-| 18 | `operator_approval_ref` valid identifier accepted, no operator approval implied | Shape only (§I.2 #9) |
+| 15 | `source_artifact_id` empty string → rejected | Safe identifier (§C) |
+| 16 | `operator_approval_ref` valid identifier accepted, no operator approval implied | Shape only (§I.2 #9) |
 
 ### L.5 Timestamp Violations
 
 | # | Test | Validates |
 |---|---|---|
-| 19 | Fractional second `2026-07-30T06:25:18.123Z` → rejected | Timestamp (§D) |
-| 20 | Offset `2026-07-30T06:25:18+00:00` → rejected | Timestamp (§D) |
-| 21 | Invalid date `2024-02-30` → rejected | Timestamp (§D) |
-| 22 | Space separator `2026-07-30 06:25:18Z` → rejected | Timestamp (§D) |
-| 23 | Missing seconds `2026-07-30T06:25Z` → rejected | Timestamp (§D) |
-| 24 | Non-UTC timezone `2026-07-30T06:25:18UTC` → rejected | Timestamp (§D) |
+| 17 | Fractional second `2026-07-30T06:25:18.123Z` → rejected | Timestamp (§D) |
+| 18 | Offset `2026-07-30T06:25:18+00:00` → rejected | Timestamp (§D) |
+| 19 | Invalid date `2024-02-30` → rejected | Timestamp (§D) |
+| 20 | Space separator `2026-07-30 06:25:18Z` → rejected | Timestamp (§D) |
+| 21 | Missing seconds `2026-07-30T06:25Z` → rejected | Timestamp (§D) |
+| 22 | Non-UTC timezone `2026-07-30T06:25:18UTC` → rejected | Timestamp (§D) |
+| 23 | Year `0000` timestamp → rejected | Timestamp (§D — year must be 0001–9999) |
 
 ### L.6 Duplicate-Key Violations
 
 | # | Test | Validates |
 |---|---|---|
-| 25 | Raw JSON with duplicate top-level key → rejected | Duplicate-key (§H) |
-| 26 | Raw JSON with duplicate key inside `provenance_material` → rejected | Duplicate-key (§H) |
-| 27 | Normalized dict with no duplicate keys → accepted when raw JSON also had none | Duplicate-key (§H) |
+| 24 | Raw JSON with duplicate top-level key → rejected | Duplicate-key (§H) |
+| 25 | Raw JSON with duplicate key inside `provenance_material` → rejected | Duplicate-key (§H) |
+| 26 | Normalized dict with no duplicate keys → accepted when raw JSON also had none | Duplicate-key (§H) |
 
 ### L.7 Value Constraint Violations
 
 | # | Test | Validates |
 |---|---|---|
-| 28 | Wrong schema version `"v2"` → rejected | Schema literal (§I.2 #5) |
-| 29 | Wrong domain separator `"PROVENANCE_V2"` → rejected | Domain literal (§I.2 #6) |
-| 30 | `canonical_name` is `"Nope"` → rejected | Canonical name (§I.2 #10) |
-| 31 | `canonical_name` is `"adam"` (lowercase) → rejected | Canonical name (§I.2 #10) |
-| 32 | `source_artifact_integrity_id` has uppercase hex → rejected | Digest format (§I.2 #12) |
-| 33 | `source_artifact_integrity_id` is not 64 chars → rejected | Digest format (§I.2 #12) |
+| 27 | Wrong schema version `"v2"` → rejected | Schema literal (§I.2 #5) |
+| 28 | Wrong domain separator `"PROVENANCE_V2"` → rejected | Domain literal (§I.2 #6) |
+| 29 | `canonical_name` is `"Nope"` → rejected | Canonical name (§I.2 #10) |
+| 30 | `canonical_name` is `"adam"` (lowercase) → rejected | Canonical name (§I.2 #10) |
+| 31 | `source_artifact_integrity_id` has uppercase hex → rejected | Digest format (§I.2 #12) |
+| 32 | `source_artifact_integrity_id` is not 64 chars → rejected | Digest format (§I.2 #12) |
 
 ### L.8 Commitment and Cross-Domain
 
 | # | Test | Validates |
 |---|---|---|
-| 34 | Commitment digest matches presented `provenance_commitment` → accepted | Commitment check (§I.3 #14) |
-| 35 | Commitment digest does not match presented commitment → rejected | Commitment check (§I.3 #14) |
-| 36 | Envelope with correct provenance domain separator but substituted into rollback slot → rejected | Cross-domain (§I.5 #19) |
-| 37 | Envelope hash changed after mutation of any field → different commitment | Immutability/collision |
+| 33 | Commitment digest matches presented `provenance_commitment` → accepted | Commitment check (§I.3 #14) |
+| 34 | Commitment digest does not match presented commitment → rejected | Commitment check (§I.3 #14) |
+| 35 | Envelope with correct provenance domain separator but substituted into rollback slot → rejected | Cross-domain (§I.5 #19) |
+| 36 | Envelope hash changed after mutation of any field → different commitment | Immutability/collision |
 
 ### L.9 Authorization Boundaries
 
 | # | Test | Validates |
 |---|---|---|
-| 38 | Valid envelope + valid commitment → creation still unauthorized, Gate-7 still closed | Non-authority (§J.2) |
-| 39 | `operator_approval_ref` passes shape check → no authority implied | Shape only (§F.1) |
-| 40 | `operator_approval_ref` fails shape check → envelope rejected | Shape only (§F.1) |
+| 37 | Valid envelope + valid commitment → creation still unauthorized, Gate-7 still closed | Non-authority (§J.2) |
+| 38 | `operator_approval_ref` passes shape check → no authority implied | Shape only (§F.1) |
+| 39 | `operator_approval_ref` fails shape check → envelope rejected | Shape only (§F.1) |
 
 ---
 
