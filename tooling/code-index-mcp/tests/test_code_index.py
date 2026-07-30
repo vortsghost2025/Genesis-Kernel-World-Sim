@@ -649,7 +649,15 @@ class TestPathContainment:
     # ── FIX 4 — additional filesystem-backed path-scope coverage ────────
 
     def test_resolve_path_scope_backslash_input(self, sample_repo: Path):
-        """Backslash input is normalized to POSIX on Windows-like separators."""
+        """Backslash input is normalized to POSIX on Windows-like separators.
+
+        On POSIX, backslashes are not path separators, so the input is
+        treated as a literal filename component.  This test only asserts
+        the Windows normalization behavior; it is skipped on POSIX.
+        """
+        import os
+        if os.name != "nt":
+            pytest.skip("Backslash normalization is Windows-specific")
         from genesis_code_index.indexer import resolve_path_scope
 
         result = resolve_path_scope("world-sim\\backend", sample_repo)
@@ -1005,8 +1013,15 @@ class TestMCPIntegration:
         real_index_resolved = real_index_dir.resolve()
 
         def _entry_signature(p: Path) -> tuple:
-            """(type, size, sha256|'LOCKED', mtime_ns) for one filesystem entry."""
-            st = p.stat()
+            """(type, size, sha256|'LOCKED'|'STAT_FAIL', mtime_ns) for one filesystem entry.
+
+            On stat failure, returns a sentinel that is treated as a distinct
+            signature — any change from the before-snapshot counts as a mutation.
+            """
+            try:
+                st = p.stat()
+            except OSError:
+                return ("STAT_FAIL", 0, "", 0)
             if p.is_dir():
                 return ("DIR", st.st_size, "", st.st_mtime_ns)
             try:
@@ -1019,9 +1034,13 @@ class TestMCPIntegration:
         def _snapshot(path: Path) -> dict:
             """Return {repo-relative-posix-key: (type, size, sha, mtime_ns)}.
 
-            Distinguishes absent (``{}``) from present-but-empty (``{key:signature}``).
-            Every entry under ``path`` is captured, including directories,
-            files, SQLite sidecars, and lock files.
+            Distinguishes absent (``{"__absent__": ...}``) from present-but-empty
+            (``{key:signature}``). Every entry under ``path`` is captured,
+            including directories, files, SQLite sidecars, and lock files.
+
+            Entries whose resolved path cannot be made relative to
+            ``real_index_resolved`` (e.g., escaping symlinks) are recorded
+            with the key ``__outside__`` so they are detected as mutations.
             """
             if not path.exists():
                 return {"__absent__": ("ABSENT", 0, "", 0)}
@@ -1029,7 +1048,11 @@ class TestMCPIntegration:
             # Capture the root directory itself so "empty dir" is detectable.
             snap["."] = _entry_signature(path)
             for p in sorted(path.rglob("*")):
-                rel = p.resolve().relative_to(real_index_resolved).as_posix()
+                try:
+                    rel = p.resolve().relative_to(real_index_resolved).as_posix()
+                except ValueError:
+                    # Escaping symlink or filesystem race — record as outside marker.
+                    rel = "__outside__"
                 snap[rel] = _entry_signature(p)
             return snap
 
