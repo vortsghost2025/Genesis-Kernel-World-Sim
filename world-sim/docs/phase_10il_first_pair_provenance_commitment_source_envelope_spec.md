@@ -63,7 +63,7 @@ All identifier fields in this spec (`source_ref`, `source_artifact_id`,
 | Length | 1–128 characters inclusive |
 | Allowed characters | `abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-` |
 | Forbidden sequence | `..` (two consecutive periods) |
-| Forbidden markers | Lowercased form must not contain any marker from `_FORBIDDEN_IDENTIFIER_MARKERS` (`true_map`, `known_map`, `world-sim/data`, `[redacted`) |
+| Forbidden markers | Lowercased form must not contain `true_map`, `known_map`, `world-sim/data`, or `[redacted` (the exact `_FORBIDDEN_IDENTIFIER_MARKERS` tuple from 10IC) |
 | Hidden-substrate check | Alphanumeric-only lowercased collapsed form must not contain `truemap`, `knownmap`, or `hiddensubstrate` |
 | Sanitization round-trip | `sanitize_public_text(value) == value` must hold |
 | Normalization | None. Input is accepted as-is after validation — no NFC/NFD/NFKC/NFKD normalization |
