@@ -7,11 +7,13 @@ place under this same phase number; no new phase number is created.
 
 The Identity spec §3 explicitly defers "the exact commitment construction
 (hash algorithm, input material, encoding, verification path) remains
-deferred to an implementation spec with explicit review." That full gap
-is **not** closed by this document. What this document closes is the
-narrower, evidence-grounded question of how the already-implemented 10IC
-module validates a caller-supplied `provenance_commitment` and binds it
-into the canonical `agent_id` derivation material.
+deferred to an implementation spec with explicit review." The source-
+envelope schema and commitment derivation side of that gap is closed by
+Phase 10IL ("First Pair Provenance Commitment Source-Envelope Specification").
+What this 10IG document closes is the narrower, evidence-grounded question of
+how the already-implemented 10IC module validates a caller-supplied
+`provenance_commitment` and binds it into the canonical `agent_id` derivation
+material.
 
 This spec is grounded in the actual behavior of the pushed 10IC module
 `backend/world/local_first_pair_birth_candidate.py` (commit `2e1d189`) and
@@ -44,17 +46,16 @@ creation, and does not open Gate-7.
   `provenance_commitment` value.** The Identity spec §3 defers "the exact
   commitment construction (hash algorithm, input material, encoding,
   verification path)" to an implementation spec with explicit review.
-  No such source-envelope spec exists in the repository as of this phase.
-  This document does not invent one.
+  This gap is closed by Phase 10IL ("First Pair Provenance Commitment
+  Source-Envelope Specification").
 - **Truncation and collision budget for `agent_id`** — deferred to a
   future 10IK review.
 - **Rollback anchor format** — deferred to a future 10IH spec.
 - **Per-call write allow-list** — deferred to a future 10II spec.
 - **Starting habitat tiles declaration** — deferred to a future 10IJ spec.
 
-The `provenance_commitment`'s own source material and construction remain
-**unresolved**. This document explicitly does not close the Identity-spec
-§3 construction gap.
+The `provenance_commitment`'s own source material and construction are
+specified by the Phase 10IL Source-Envelope Specification.
 
 ---
 
@@ -305,8 +306,10 @@ creation provenance material, no implementation in the repository
 computes the commitment from such material, and the 10IC tests supply
 placeholder values (`"a" * 64`, `"b" * 64`) directly.
 
-This corrected 10IG document does **not** close the Identity-spec §3
-construction gap. It closes only:
+This corrected 10IG document does **not** close the full Identity-spec §3
+construction gap by itself. (The source-envelope schema and commitment
+derivation side of the gap is closed by Phase 10IL — see below.) 10IG
+closes only:
 
 - the accepted shape of a caller-supplied `provenance_commitment` (§3);
 - the exact type and lowercase-hex validation 10IC applies (§3);
@@ -316,20 +319,40 @@ construction gap. It closes only:
 - the exact-equality and fail-closed identity-drift verification
   procedure 10IC implements (§5).
 
-The construction of `provenance_commitment` itself — the source-envelope
-fields, the source-envelope hash algorithm, the source-envelope canonical
-ordering and JSON settings, the source-envelope UTF-8 encoding, the
-source-envelope output encoding, the source-envelope verification
-procedure, the unknown/missing-field handling for the source envelope,
-the list ordering and duplicate handling for source-envelope fields, the
-source-envelope input immutability, and the operator-approval binding to
-a specific source-envelope artifact — **remains unresolved**.
+The construction of `provenance_commitment` itself has been partially
+closed by Phase 10IL ("First Pair Provenance Commitment Source-Envelope
+Specification"), which specifies:
 
-A future phase (numbered, not this one) must specify the
-`provenance_commitment` source envelope exactly before the Identity-spec
-§3 gap can be closed. That future phase requires an already-approved
-exact source envelope to exist; if none exists, it must design one with
-explicit operator review. This document does neither.
+- the source-envelope schema (exact fields, types, literals);
+- the source-envelope canonical serialization (deterministic JSON,
+  `sort_keys=True`, `separators=(",",":")`, `ensure_ascii=False`);
+- the source-envelope UTF-8 encoding;
+- the source-envelope SHA-256 hash algorithm and full 64-char lowercase
+  hex output;
+- the source-envelope verification procedure (20 enumerated checks
+  covering exact-key-set, type, value constraint, serialization,
+  commitment recomputation, structural integrity, and trust-domain);
+- the unknown-field and missing-field handling (exact-key-set
+  enforcement — any extra or missing key fails closed);
+- the list/ordering/duplicate rules (duplicate-key detection at the raw
+  JSON parsing boundary, no last-value-wins);
+- the source-envelope input immutability (serialization does not mutate).
+
+**Docs-level design is closed. Runtime implementation remains open.**
+
+Still unresolved after both 10IG and 10IL:
+
+- **Operator-approval binding to a specific source-envelope artifact.**
+  10IL's `operator_approval_ref` is a shape-only safe-identifier reference.
+  It does not verify that operator approval actually occurred, does not
+  consult an approval registry, and does not prove authority. The
+  independent operator-approval artifact schema and verification procedure
+  remain unresolved and separately governed.
+- **Runtime source-envelope validator.** No module in the repository
+  implements the 20-check validation table. 10IC still validates only the
+  presented hex64 `provenance_commitment` shape. A future implementation
+  phase (with GPT-5.6 Sol/Luna, TDD, and explicit Sean approval) is
+  required before any envelope is presented and verified for Adam or Eve.
 
 ---
 
@@ -342,7 +365,10 @@ explicit operator review. This document does neither.
 - It does **not** implement a new boundary module.
 - It does **not** open Gate-7, start a daemon, add a scheduler, open a
   network connection, call a provider, or touch `world-sim/data`.
-- It does **not** specify the `provenance_commitment` source envelope.
+- It does **not** specify the `provenance_commitment` source envelope
+  (that design is provided by Phase 10IL, which this document references).
+- It does **not** implement a runtime source-envelope validator
+  (10IL's design requires a separate implementation phase).
 - It does **not** review truncation/collision budget (deferred to a
   future 10IK).
 - It does **not** specify the rollback anchor envelope (deferred to a
@@ -363,7 +389,8 @@ explicit operator review. This document does neither.
 | Inclusion of `provenance_commitment` in `agent_id` material documented | ✅ Yes — by this spec |
 | Canonical `agent_id` derivation documented (sha256, canonical JSON, domain separator, full hash) | ✅ Yes — by this spec |
 | Exact-equality fail-closed identity-drift verification documented | ✅ Yes — by this spec |
-| `provenance_commitment` source-envelope construction specified | ❌ No — unresolved (see §8) |
+| `provenance_commitment` source-envelope construction specified (docs-level) | ✅ Yes — by Phase 10IL (envelope schema, canonical serialization, SHA-256 commitment, 20 validation rules, 40 acceptance tests, duplicate-key boundary, timestamp contract, safe-identifier grammar) |
+| `provenance_commitment` source-envelope runtime validator implemented | ❌ No — not implemented; requires separate phase with GPT-5.6 Sol/Luna + TDD |
 | Operator-approval binding to a specific source-envelope artifact specified | ❌ No — unresolved (see §8) |
 | Truncation/collision budget reviewed | ❌ No — deferred to a future 10IK |
 | Rollback anchor format specified | ❌ No — deferred to a future 10IH |
@@ -375,11 +402,16 @@ explicit operator review. This document does neither.
 
 **FIRST_PAIR_CREATION_AUTHORIZED = False**
 
-This document does not close the 10IF audit finding "Provenance commitment
-construction deferred." That finding remains open. This document closes
-only the narrower question of how 10IC validates and binds a
-caller-supplied commitment value, which is a prerequisite for, but not a
-substitute for, the future construction spec.
+This document, together with Phase 10IL, closes the 10IF audit finding
+"Provenance commitment construction deferred" **at the docs-specification
+level only**. The source-envelope schema, canonical commitment derivation,
+and structural validation rules are now specified. However, a runtime
+source-envelope validator has not been implemented; 10IC still validates
+only the presented hex64 `provenance_commitment` shape; operator-approval
+binding to a specific source-envelope artifact remains unresolved. The
+10IF finding is therefore closed in its docs-level construction requirement
+and remains open in its runtime-implementation and operator-approval
+requirements.
 
 ---
 

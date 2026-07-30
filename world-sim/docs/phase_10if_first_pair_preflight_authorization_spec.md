@@ -49,7 +49,7 @@ writers; write authorization is not write execution.
 
 | Issue | Location | Status |
 |---|---|---|
-| **Provenance commitment construction deferred** | Identity §3: "The exact commitment construction (hash algorithm, input material, encoding, verification path) remains deferred to an implementation spec with explicit review." | 10IC uses hex64 `provenance_commitment` in test fixtures but algorithm/implementation choice is not documented in any spec. Unresolved. |
+| **Provenance commitment construction (docs-level)** | Identity §3: "The exact commitment construction (hash algorithm, input material, encoding, verification path) remains deferred to an implementation spec with explicit review." | 10IL ("First Pair Provenance Commitment Source-Envelope Specification") now defines the source-envelope schema, canonical serialization, SHA-256 commitment derivation, and a 40-item acceptance-test table. **Docs-level design complete. Runtime implementation not performed.** 10IC still validates only hex64 shape. Operator-approval binding remains unresolved. |
 | **Rollback anchor format deferred** | Rollback §11: anchor must be "explicit, caller-supplied, provenanced, sanitized." 10IC uses `rollback_anchor_schema_version`, `rollback_anchor_id`, `habitat_id`, `claim_scope`, `state_commitment` (hex64) — format lives in implementation, not spec. Unresolved. |
 | **Write allow-list not enumerated** | Write-Authority §11: "explicit write allow-list (enumerated per-call, not blanket)." No spec or implementation enumerates which fields are writable. Unresolved. |
 | **Starting habitat tiles not declared in spec** | Roadmap §3: "declared starting habitat tiles" missing; Habitat §5 references "public starting area / initial tile references." Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures. Unresolved. |
@@ -70,11 +70,12 @@ Before any First Pair creation phase may start, **all** of the following must be
 4. **Valid memory boundary** — agent-scoped memory refs, cross-identity public-only, no leakage, fail-closed (10IE implemented).
 5. **Concrete rollback anchor** — explicit, enumerated, caller-supplied, provenanced, sanitized; format specified in a spec, not only in implementation (not resolved).
 6. **Explicit per-call write allow-list** — enumerated writable surfaces, not blanket; provenanced; 10CP remains sole writer; Adam/Eve are not writers (not resolved; no write-authority module).
-7. **Provenance commitment construction** — hash algorithm, input material, encoding, verification path documented and reviewed (not resolved).
-8. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
-9. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
-10. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
-11. **Explicit Sean approval for the specific creation phase** — not granted.
+7. **Provenance commitment source-envelope construction documented** — schema, serialization, commitment hash, verification rules specified in a reviewed document (10IL design complete; runtime validator not implemented).
+8. **Provenance commitment runtime validator implemented** — the source-envelope is presented and verified for Adam and Eve by a factory-trained runtime module (not implemented; requires separate phase + GPT-5.6 Sol/Luna).
+9. **Declared starting habitat tiles** — concrete tile set for both identities, enumerated in a spec, not only test fixtures (not resolved).
+10. **Explicit `world-sim/data` write authorization** — separate spec + Sean authorization (not granted).
+11. **GPT-5.6 Sol/Luna for implementation** — per AGENTS.md Rule 3 + all six specs + preflight closure review (not invoked; creation unauthorized).
+12. **Explicit Sean approval for the specific creation phase** — not granted.
 
 This document grants no new authority. The implemented 10IC, 10ID, and 10IE boundaries remain verified, while the unresolved creation prerequisites identified above remain open and require separate review and explicit authorization.
 
@@ -91,7 +92,9 @@ This document grants no new authority. The implemented 10IC, 10ID, and 10IE boun
 | Write allow-list enumerated | ❌ No — not resolved |
 | Starting habitat tiles declared | ❌ No — only in test fixtures |
 | `world-sim/data` write authorized | ❌ No — not granted |
-| Provenance commitment construction documented | ❌ No — deferred |
+| Provenance commitment source-envelope documented | ✅ Yes — 10IL docs-only spec on master defines source-envelope schema, validation rules, and 40-item acceptance-test table |
+| Provenance commitment runtime validator implemented | ❌ No — not implemented; 10IC validates only hex64 shape; requires separate phase + GPT-5.6 Sol/Luna |
+| Operator-approval independently verified for a specific envelope | ❌ No — not resolved; 10IL's `operator_approval_ref` is shape-only, proves no approval |
 | Truncation/collision budget docs-level decision recorded | ✅ Yes — 10IK docs-only spec on master preserves full 64-char SHA-256 digest |
 | Truncation/collision runtime-implementation review | ❌ No — not performed; requires separate implementation phase + GPT-5.6 Sol/Luna |
 | GPT-5.6 Sol/Luna invoked for implementation | ❌ No — creation unauthorized |
