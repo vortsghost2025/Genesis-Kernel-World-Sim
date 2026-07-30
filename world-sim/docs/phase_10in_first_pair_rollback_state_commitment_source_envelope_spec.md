@@ -85,7 +85,7 @@ All `state_timestamp` values use the same exact canonical representation as
 
 ### D.1 Canonical Form
 
-```
+```text
 YYYY-MM-DDTHH:MM:SSZ
 ```
 

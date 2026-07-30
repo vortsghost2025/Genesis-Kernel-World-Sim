@@ -58,7 +58,7 @@ by re-reading the module source; this spec does not modify them.
 
 - **The `state_commitment` source-envelope construction** — 10IC validates
   only hex64 shape. The source-envelope schema and commitment derivation
-  are specified by Phase 10IM ("First Pair Rollback State-Commitment
+  are specified by Phase 10IN ("First Pair Rollback State-Commitment
   Source-Envelope Specification"). Runtime source-envelope validator
   remains unimplemented.
 - **The last-known-good state material envelope** — what the rollback
