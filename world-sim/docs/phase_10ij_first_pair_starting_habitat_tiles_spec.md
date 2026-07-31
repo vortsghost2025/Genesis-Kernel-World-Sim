@@ -3,8 +3,10 @@
 Numbered docs-only spec. This file formally declares the concrete starting
 habitat tiles for the First Pair, resolving the audit finding in 10IF
 §3 ("Starting habitat tiles not declared in spec"). The tiles currently
-exist only in 10IC test fixtures; this spec elevates them to documented,
-reviewable ground truth.
+exist in the 10IC test fixtures and additionally in the legacy-demo
+runtime path (`backend/world/first_pair_persistence.py:1381-1387`
+`_default_declaration()`, consumed by `initialize_first_pair_state()`);
+this spec elevates them to documented, reviewable ground truth.
 
 It is **docs-only**: it implements no module, adds no tests, performs no
 write, authorizes no persistence, creates no Adam/Eve runtime entity, does
