@@ -34,8 +34,25 @@ Eve never become writers.
   implemented; it requires GPT-5.6 Sol/Luna, TDD from the 10IJ spec,
   explicit Sean approval, and all First Pair creation gates. No
   starting-habitat-tiles runtime validator, no runtime habitat
-  enforcement module, and no First Pair runtime creation path currently
-  exists. 10IS remains named-but-not-implemented.
+  enforcement module against this canonical 10IJ contract, and no
+  10IS-authoritative First Pair runtime creation path currently exist.
+  **Note (per Codex review of 4fbcf6e)**: a **legacy/demo runtime
+  path** for First Pair creation does exist in the checked-in codebase
+  (`backend/world/first_pair_runtime.py`, `backend/world/first_pair_persistence.py`,
+  and related `first_pair_cognition_*` modules; introduced via commits
+  such as `8166146` "feat: add bounded persistent First Pair runtime",
+  `b58ed07` "feat: grant bounded First Pair movement and shared habitat
+  (10IM)", and subsequent fixes). That legacy path is **outside this
+  10IJ spec's authority**, predates the establishment of the 10IJ/10IR/
+  10IS chain as the authoritative implementation route, runs against
+  the current docs-level boundary closure (which explicitly states
+  `FIRST_PAIR_CREATION_AUTHORIZED = False`), and is **not the 10IS-
+  authoritative runtime path** that 10IS is reserved to define. Any
+  relationship between this 10IJ canonical contract and that legacy
+  runtime path (alignment, drift, replacement, deprecation) is
+  deferred to a future audit phase; this 10IJ spec neither retroactively
+  blesses the legacy path nor amends it. 10IS remains named-but-not-
+  implemented as the **authoritative** future implementation route.
 
 ---
 
@@ -122,14 +139,29 @@ starting tile from the allowed set. The mapping is:
 | `east_adam`     | `public-start-adam` |
 | `east_eve`      | `public-start-eve` |
 
-These assignments are deterministic and must be validated for exact
-equality by the 10ID habitat boundary validator. The `starting_tile_ids`
+These assignments are deterministic. The `starting_tile_ids`
 object in the habitat declaration must contain exactly these two keys
 with exactly these two values. Extra keys, missing keys, or value
-mismatches cause the habitat boundary to fail closed.
+mismatches must cause the habitat boundary to fail closed.
 
 The starting tile for each agent **must** be a member of the
 `allowed_tile_ids` array. The validator enforces this containment.
+
+**Enforcement scope — important clarification (per Codex review of
+4fbcf6e)**: The 10ID habitat boundary validator
+(`backend/world/local_first_pair_habitat_boundary.py`) currently
+validates **structural self-consistency** of the caller-supplied
+habitat declaration (key-set, type, reference-key containment,
+`movement_allowed = False`), **not** canonical equality against this
+10IJ spec's specific declared identifiers. A caller-supplied
+declaration with `alternate-habitat`, three allowed tiles, and
+multi-tile observation boundaries is therefore accepted by 10ID with
+`within_bounds = True` as long as it is internally self-consistent.
+Canonical-identifier equality enforcement against this 10IJ spec is
+**future 10IS implementation work**, not existing 10ID behavior. This
+spec records the canonical contract; the 10IS implementation candidate
+(named-but-not-implemented; requires GPT-5.6 Sol/Luna, TDD, and
+explicit Sean approval) is the phase that will enforce it.
 
 ---
 
@@ -171,9 +203,18 @@ value. No movement action is valid at creation.
 
 The following is the exact canonical habitat declaration object that a
 future First Pair birth candidate must contain in its `habitat` field.
-All fields are required. All values are exact literals. The 10ID habitat
-boundary validator validates exact key-set equality and exact value
-equality.
+All fields are required. All values are exact literals.
+
+**Enforcement scope (per the §F clarification and the Codex review of
+4fbcf6e)**: The 10ID habitat boundary validator
+(`backend/world/local_first_pair_habitat_boundary.py`) currently
+validates structural self-consistency of the caller-supplied declaration
+— exact key-set, exact type, reference containment, `movement_allowed =
+false` literal — but does **not** enforce canonical equality against
+this 10IJ-declared object's specific identifier values (e.g.,
+`"genesis-first-habitat"`, exactly two allowed tiles, single-element
+observation boundaries). Canonical-equality enforcement against this
+10IJ spec is **future 10IS implementation work**.
 
 ```json
 {
@@ -237,24 +278,29 @@ boundary, and the validator enforces the chain.
 
 The 10IH rollback anchor specification requires that the anchor's
 `habitat_id` field exactly equal the validated habitat's `habitat_id`.
-Since 10IJ fixes the habitat identifier as `"genesis-first-habitat"`,
-any valid rollback anchor for the First Pair must carry:
+Since 10IJ fixes the canonical habitat identifier as
+`"genesis-first-habitat"`, any valid 10IS-enforced rollback anchor for
+the First Pair must carry:
 
 ```
 habitat_id = "genesis-first-habitat"
 ```
 
-The 10ID validator enforces this equality.
+Note: 10ID's current validator (per §F clarification) enforces equality
+between the caller's habitat declaration's `habitat_id` and the rollback
+anchor's `habitat_id`, but does **not** enforce canonical equality to
+`"genesis-first-habitat"` itself. The 10IS implementation candidate is
+the phase that will enforce the canonical binding.
 
 ---
 
 ## L. Cross-Spec Audit Resolution
 
-This spec closes the following audit finding from 10IF §3:
+This spec partially addresses the following audit finding from 10IF §3:
 
 | 10IF Issue | Resolution |
 |------------|------------|
-| **Starting habitat tiles not declared in spec** — Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures | **Resolved**: This spec formally declares the habitat identifier, allowed tiles, starting tile assignments, observation boundaries, and movement prohibition as canonical ground truth. Test fixtures must align with this spec; the spec is the source of truth. |
+| **Starting habitat tiles not declared in spec** — Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures | **Resolved at the docs-level by this spec**: this document formally declares the canonical habitat identifier, allowed tiles, starting tile assignments, observation boundaries, and movement prohibition. Test fixtures must align with this spec; the spec is the source of truth. **Note**: 10IF itself (`phase_10if_first_pair_preflight_authorization_spec.md:55`, `:76`, `:97`) still references 10IJ as an "uncommitted draft" and the starting-tiles finding as "unresolved". Updating 10IF to reflect this 10IJ closure is **out of scope for this 10IJ spec**: 10IF is a separately numbered phase that must be amended via its own docs-correction lifecycle (or audited in a future consolidated preflight refresh). The 10IR sync row's metadata scope is `phase_index.md` only; it does not amend 10IF. The repository therefore holds a temporary contradiction between this 10IJ spec (starting tiles declared) and 10IF's stale preflight text (starting tiles unresolved) until a future 10IF-amendment phase closes it. |
 
 No other 10IF audit findings are closed by this document. Specifically:
 
@@ -262,7 +308,11 @@ No other 10IF audit findings are closed by this document. Specifically:
 - Rollback `state_commitment` source envelope remains unresolved (10IF issue #2).
 - Write allow-list enumeration is addressed by 10II, not this spec.
 - `world-sim/data` write authorization remains ungranted.
-- Truncation/collision budget for `agent_id` remains unreviewed (10IK).
+- Truncation/collision budget for `agent_id` is **complete at the docs
+  level**: Phase 10IK (`9ba43ba`) records the full-digest-no-truncation
+  decision and is marked Done in `phase_index.md`. The docs-level review
+  is closed; **truncation/collision runtime-implementation review** by
+  GPT-5.6 Sol/Luna remains a separate implementation-phase requirement.
 - GPT-5.6 Sol/Luna invocation and explicit Sean approval remain required
   for any implementation phase.
 
