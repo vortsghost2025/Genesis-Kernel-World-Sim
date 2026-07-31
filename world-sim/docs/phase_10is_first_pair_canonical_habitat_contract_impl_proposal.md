@@ -224,7 +224,7 @@ The entry returns a `dict` with **exactly** this key set:
 | `world_sim_data_accessed` | bool | `False` |
 | `gate7_activity_allowed` | bool | `False` |
 | `claim_boundary` | str | `"canonical_first_pair_habitat_contract_only"` |
-| `errors` | list[str] | empty when canonical, else sorted set of codes |
+| `errors` | list[str] | empty when `within_bounds` is True, else sorted set of codes |
 
 ### C5. Fail-closed acceptance matrix (docs, 24 cases)
 
@@ -420,7 +420,7 @@ provided in the separate docs-only file:
 
 `world-sim/docs/phase_10is_sol_handoff_prompt.md`
 
-That file is untracked and uncommitted. It instructs Sol/Luna to:
+It instructs Sol/Luna to:
 
 - recover the authoritative master checkpoint;
 - read 10IJ, 10IR, and the approved 10IS proposal;
@@ -438,6 +438,8 @@ That file is untracked and uncommitted. It instructs Sol/Luna to:
 ## I. Verification Plan (docs-only)
 
 - `git diff --check` on every proposed change.
+- `git diff --numstat` to confirm only the intended files change.
+- `git status -sb` to confirm branch and working-tree state.
 - LF/CRLF verification (CRLF=0; LF only).
 - Review: diff inspection, Kilo Code Review, GitGuardian, bounded tests,
   active-thread review. GitHub Codex review remains unavailable until

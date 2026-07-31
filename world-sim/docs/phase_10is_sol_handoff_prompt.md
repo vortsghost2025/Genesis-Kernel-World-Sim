@@ -2,10 +2,9 @@
 
 Docs-only handoff package. This file is the **exact implementation
 prompt** for GPT-5.6 Sol/Luna to author the Phase 10IS executable
-artifacts. It is untracked and uncommitted. It authorizes nothing by
-itself; it becomes active only when Sean separately authorizes the 10IS
-implementation lifecycle (after Sol/Luna is available, currently
-expected after August 5, 2026).
+artifacts. It authorizes nothing by itself; it becomes active only when
+Sean separately authorizes the 10IS implementation lifecycle (after
+Sol/Luna is available, currently expected after August 5, 2026).
 
 **FIRST_PAIR_CREATION_AUTHORIZED = False**
 
@@ -22,10 +21,14 @@ executable 10IS work.
 ## Preconditions (verify before writing anything)
 
 1. Recover the authoritative master checkpoint:
+   - Verify the live repository state first (AGENTS.md source-of-truth
+     precedence): `git status -sb`, confirm the current branch, review
+     `git log --oneline -10`, and confirm the working tree is clean.
+     Abort if the tree is dirty.
    - `git checkout master`
    - `git fetch origin master && git pull --ff-only origin master`
    - `git rev-parse HEAD` must equal the public master head.
-   - Working tree must be clean before any new work.
+   - Working tree must remain clean before any new work.
 2. Read, in order:
    - `AGENTS.md` (constitutional constraints, Rules 1–4).
    - `world-sim/docs/phase_10ij_first_pair_starting_habitat_tiles_spec.md`
@@ -110,8 +113,11 @@ executable 10IS work.
     + all new 10IS tests.
 - Do NOT run full `pytest` (legacy canonical/world mutation tests cause
   import-time collection errors).
-- Verify `git diff --check` clean and CRLF=0 (LF only) on all touched
-  files.
+- Run the mandatory repository checks and confirm each passes:
+  - `git diff --check` clean
+  - `git diff --numstat` (only the new test + module files change)
+  - `git status -sb` (branch and working-tree state)
+  - CRLF=0 (LF only) on all touched files.
 
 ## Boundaries (mandatory)
 
@@ -148,7 +154,8 @@ Report:
 - RED evidence (the initial failing run)
 - GREEN evidence (passing run with counts)
 - regression totals (225 + new)
-- `git diff --check` and CRLF=0 confirmation
+- all four mandatory checks: `git diff --check` clean, `git diff
+  --numstat` results, `git status -sb`, CRLF=0 (LF only)
 - confirmation that no existing module or data file was modified
 - confirmation that boundaries (Gate-7, 10CP, 10HD, FIRST_PAIR_CREATION_AUTHORIZED)
   are preserved
