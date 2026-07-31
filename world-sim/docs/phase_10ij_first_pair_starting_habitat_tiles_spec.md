@@ -22,9 +22,13 @@ Eve never become writers.
 - **Status**: Docs-only specification. Repository documentation reserves
   10IJ for the concrete starting habitat tiles declaration. The phase is
   started as docs-only under the preflight authorization recorded in 10IF.
-- **Phase number**: 10IJ. No new phase number is assigned by this
-  document; 10IK remains the next named future work and remains
-  **not started**.
+- **Phase number**: 10IJ. The next sequenced phase is 10IR (metadata
+  sync, L+1) and then 10IS (named implementation candidate, L+2).
+  Adjacent numbered phases 10IK (commit `9ba43ba`) and 10IL (commit
+  `4f0aaaf`) / 10IO (commit `0fe8dba`) are already marked Done in
+  `phase_index.md`; their docs-level reviews are complete and their
+  runtime-implementation reviews remain separate GPT-5.6 Sol/Luna
+  requirements.
 - **Boundary preservation**: Gate-7 remains closed. 10HD remains
   named-only and untouched. 10CP remains the sole writer.
   `world-sim/data` remains forbidden.
@@ -103,9 +107,13 @@ The single canonical habitat identifier for the First Pair is:
 genesis-first-habitat
 ```
 
-This identifier **must** appear as the `habitat_id` field in any First Pair
-birth candidate habitat declaration and must be strictly validated for
-equality by the 10ID habitat boundary validator.
+This identifier **must** appear as the `habitat_id` field in any
+authoritative First Pair birth candidate habitat declaration and is the
+canonical target that the future **10IS implementation candidate** (not
+current 10ID) must enforce. 10ID's current validator only enforces
+self-consistency between the caller-supplied declaration (see §F, §I
+clarifications); canonical-equality enforcement against this identifier
+is reserved for 10IS.
 
 ---
 
@@ -194,8 +202,11 @@ movement_allowed = False
 ```
 
 This value **must** appear as a literal `false` boolean in the habitat
-declaration. The 10ID habitat boundary validator enforces this exact
-value. No movement action is valid at creation.
+declaration. The 10ID habitat boundary validator enforces this literal
+boolean value (this is one structural rule that 10ID does perform today).
+Canonical-equality enforcement against the complete habitat declaration
+(including this field's surrounding context) remains future 10IS work.
+No movement action is valid at creation.
 
 ---
 
@@ -247,9 +258,13 @@ observation boundaries). Canonical-equality enforcement against this
 | `observation_boundaries` | object | Must have exactly keys `"east_adam"` and `"east_eve"` with array values `["public-start-adam"]` and `["public-start-eve"]` respectively |
 | `movement_allowed` | boolean | Must be exactly `false` |
 
-Any deviation from this exact structure causes the 10ID habitat boundary
-to fail closed with an appropriate error (e.g., `invalid_habitat`,
-`habitat_declaration_drift`, `invalid_observation_radius`, etc.).
+Any deviation from this exact canonical structure must cause the future
+10IS-authoritative habitat validator to fail closed with an appropriate
+error (e.g., `invalid_habitat`, `habitat_declaration_drift`,
+`invalid_observation_radius`, etc.). The current 10ID validator fails
+closed only on structural-self-consistency violations, not on canonical
+deviations; see §F, §I, and §K for the full enforcement-scope
+clarification.
 
 ---
 
@@ -300,13 +315,27 @@ This spec partially addresses the following audit finding from 10IF §3:
 
 | 10IF Issue | Resolution |
 |------------|------------|
-| **Starting habitat tiles not declared in spec** — Concrete tiles (`public-start-adam`, `public-start-eve`) exist only in test fixtures | **Resolved at the docs-level by this spec**: this document formally declares the canonical habitat identifier, allowed tiles, starting tile assignments, observation boundaries, and movement prohibition. Test fixtures must align with this spec; the spec is the source of truth. **Note**: 10IF itself (`phase_10if_first_pair_preflight_authorization_spec.md:55`, `:76`, `:97`) still references 10IJ as an "uncommitted draft" and the starting-tiles finding as "unresolved". Updating 10IF to reflect this 10IJ closure is **out of scope for this 10IJ spec**: 10IF is a separately numbered phase that must be amended via its own docs-correction lifecycle (or audited in a future consolidated preflight refresh). The 10IR sync row's metadata scope is `phase_index.md` only; it does not amend 10IF. The repository therefore holds a temporary contradiction between this 10IJ spec (starting tiles declared) and 10IF's stale preflight text (starting tiles unresolved) until a future 10IF-amendment phase closes it. |
+| **Starting habitat tiles not declared in spec** — Concrete tiles (`public-start-adam`, `public-start-eve`) existed in test fixtures (`test_phase10ic_first_pair_birth_candidate.py:230-241`, `test_phase10id_first_pair_habitat_boundary.py:142-152`, `test_phase10ie_first_pair_memory_boundary.py:166-176`) and additionally in the legacy-demo runtime path (`backend/world/first_pair_persistence.py:1381-1387` `_default_declaration()`, consumed by `initialize_first_pair_state()`) | **Resolved at the docs-level by this spec**: this document formally declares the canonical habitat identifier, allowed tiles, starting tile assignments, observation boundaries, and movement prohibition. Test fixtures and the legacy-demo runtime path must align with this spec; the spec is the source of truth. **Note**: 10IF itself (`phase_10if_first_pair_preflight_authorization_spec.md:55`, `:76`, `:97`) still references 10IJ as an "uncommitted draft" and the starting-tiles finding as "unresolved". Updating 10IF to reflect this 10IJ closure is **out of scope for this 10IJ spec**: 10IF is a separately numbered phase that must be amended via its own docs-correction lifecycle (or audited in a future consolidated preflight refresh). The 10IR sync row's metadata scope is `phase_index.md` only; it does not amend 10IF. The repository therefore holds a temporary contradiction between this 10IJ spec (starting tiles declared) and 10IF's stale preflight text (starting tiles unresolved) until a future 10IF-amendment phase closes it. |
 
 No other 10IF audit findings are closed by this document. Specifically:
 
-- Provenance commitment construction remains unresolved (10IF issue #1).
-- Rollback `state_commitment` source envelope remains unresolved (10IF issue #2).
-- Write allow-list enumeration is addressed by 10II, not this spec.
+- **Provenance commitment construction** — the docs-level spec is
+  **complete**: Phase 10IL (`4f0aaaf`) defines the source-envelope
+  schema, validation, serialization, and commitment derivation. The
+  **runtime source-envelope validator** (10IN, named implementation
+  candidate for 10IL) is not implemented; requires GPT-5.6 Sol/Luna,
+  TDD, and explicit Sean approval. Operator-approval binding remains
+  unresolved.
+- **Rollback `state_commitment` source envelope** — the docs-level
+  spec is **complete**: Phase 10IO (`0fe8dba`) defines the state-
+  envelope schema and commitment derivation. The **runtime state-
+  envelope validator** (10IQ, named implementation candidate for 10IO)
+  is not implemented; requires GPT-5.6 Sol/Luna, TDD, and explicit
+  Sean approval. Actual state-artifact binding, rollback execution,
+  and operator approval remain unresolved.
+- Write allow-list enumeration is addressed by 10II (docs-level design
+  complete; runtime validator, operator-approval verification, replay
+  prevention, freshness, and 10CP consumption remain unresolved).
 - `world-sim/data` write authorization remains ungranted.
 - Truncation/collision budget for `agent_id` is **complete at the docs
   level**: Phase 10IK (`9ba43ba`) records the full-digest-no-truncation
