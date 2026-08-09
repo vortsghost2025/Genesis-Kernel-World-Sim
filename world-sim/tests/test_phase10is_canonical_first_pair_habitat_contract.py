@@ -254,12 +254,10 @@ def _assert_schema(result: dict, *, is_canonical: bool, anchor_supplied: bool):
     if anchor_supplied and result["rollback_anchor_binding_valid"]:
         assert result["rollback_anchor_habitat_id"] == HABITAT_ID
     elif anchor_supplied:
-        # Supplied but invalid: binding is invalid; the surface echoes the
-        # supplied anchor's habitat_id (a str) or is None when the anchor was
-        # malformed (non-dict / missing or non-str habitat_id).
-        assert result["rollback_anchor_habitat_id"] is None or (
-            type(result["rollback_anchor_habitat_id"]) is str
-        )
+        # Supplied but invalid: binding is invalid and the surface is None.
+        # Per section C4 the field may contain only the canonical habitat id
+        # or None; an untrusted mismatched value is never echoed.
+        assert result["rollback_anchor_habitat_id"] is None
         assert result["rollback_anchor_binding_valid"] is False
     else:
         assert result["rollback_anchor_habitat_id"] is None
@@ -664,6 +662,37 @@ def test_errors_sorted_and_deduplicated():
     assert _entry()(
         _canonical_declaration(), rollback_anchor={"habitat_id": "x"}
     )["errors"] == ["invalid_rollback_anchor"]
+
+
+def test_multiple_declaration_deviations_accumulate():
+    """10IS section D: when multiple deviations coexist, all applicable codes
+    are returned (sorted, deduplicated) -- not just the first deviation found."""
+    # Drift in allowed_tile_ids AND observation_boundaries simultaneously:
+    # both habitat_drift and invalid_observation_radius must be reported.
+    declaration = _canonical_declaration()
+    declaration["allowed_tile_ids"] = ["public-start-adam"]  # missing element
+    declaration["observation_boundaries"]["east_adam"] = [
+        "public-start-adam",
+        "public-start-eve",
+    ]  # not single-element
+    result = _entry()(declaration)
+    assert result["canonical"] is False
+    assert result["errors"] == ["habitat_drift", "invalid_observation_radius"]
+
+    # Structural failure in schema_version AND drift in habitat_id:
+    # both invalid_habitat and habitat_drift must be reported.
+    declaration2 = _canonical_declaration()
+    declaration2["habitat_schema_version"] = "wrong"  # invalid_habitat
+    declaration2["habitat_id"] = "other-habitat"  # habitat_drift
+    result2 = _entry()(declaration2)
+    assert result2["canonical"] is False
+    assert result2["errors"] == ["habitat_drift", "invalid_habitat"]
+
+    # A declaration-code plus an anchor-code accumulate across layers.
+    declaration3 = _canonical_declaration()
+    declaration3["movement_allowed"] = True  # habitat_drift
+    result3 = _entry()(declaration3, rollback_anchor={"habitat_id": "x"})
+    assert result3["errors"] == ["habitat_drift", "invalid_rollback_anchor"]
 
 
 def test_deterministic_output_identical_inputs():

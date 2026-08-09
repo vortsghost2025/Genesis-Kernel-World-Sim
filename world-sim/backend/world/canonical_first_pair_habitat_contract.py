@@ -135,10 +135,16 @@ def _validate_canonical(declaration: Any) -> tuple[bool, set[str]]:
 
     Returns ``(canonical, errors)``. ``canonical`` is True iff the
     declaration exactly satisfies the 10IJ canonical habitat contract
-    (independent of any optional rollback anchor). Errors is a set of
-    codes; a single deviation yields exactly one code, and when multiple
-    deviations coexist all applicable codes are returned (sorted and
-    deduplicated by the caller).
+    (independent of any optional rollback anchor). Errors is a set of codes;
+    a single deviation yields exactly one code, and when multiple deviations
+    coexist all applicable codes are returned (sorted and deduplicated by the
+    caller), per 10IS proposal section D.
+
+    Structural gate failures (non-dict input, empty dict, wrong top-level key
+    set) are terminal: the field-level checks cannot be trusted to run safely
+    on a declaration whose shape is not the canonical envelope, so they return
+    immediately with the single structural code. Once the key set is exact,
+    every field check is independent and errors accumulate.
     """
     if type(declaration) is not dict:
         return False, {"invalid_habitat"}
@@ -148,69 +154,74 @@ def _validate_canonical(declaration: Any) -> tuple[bool, set[str]]:
     if not declaration:
         return False, {"invalid_habitat"}
 
-    # Exact top-level key set: any extra or missing key fails closed.
+    # Exact top-level key set: any extra or missing key fails closed. Field
+    # values are only trustworthy once the envelope shape is canonical.
     keys = list(declaration.keys())
     if len(keys) != len(_HABITAT_KEYS) or frozenset(keys) != _HABITAT_KEYS:
         return False, {"habitat_drift"}
 
-    # Every value type-checked strictly (type(x) is T; bool != int).
-    if type(declaration["habitat_schema_version"]) is not str:
-        return False, {"invalid_habitat"}
-    if declaration["habitat_schema_version"] != _HABITAT_SCHEMA_VERSION:
-        return False, {"invalid_habitat"}
+    errors: set[str] = set()
 
-    if type(declaration["habitat_id"]) is not str:
-        return False, {"invalid_habitat"}
-    if declaration["habitat_id"] != _HABITAT_ID:
-        return False, {"habitat_drift"}
+    # habitat_schema_version: exactly the canonical str.
+    if (
+        type(declaration["habitat_schema_version"]) is not str
+        or declaration["habitat_schema_version"] != _HABITAT_SCHEMA_VERSION
+    ):
+        errors.add("invalid_habitat")
 
-    if not _is_str_list(declaration["allowed_tile_ids"], _ALLOWED_TILE_IDS):
-        # Order-insensitive per 10IJ section I; wrong type -> invalid_habitat,
-        # otherwise canonical-value drift -> habitat_drift.
-        if type(declaration["allowed_tile_ids"]) is not list or any(
-            type(item) is not str for item in declaration["allowed_tile_ids"]
-        ):
-            return False, {"invalid_habitat"}
-        return False, {"habitat_drift"}
+    # habitat_id: canonical str (drift) or non-str (structural).
+    habitat_id = declaration["habitat_id"]
+    if type(habitat_id) is not str:
+        errors.add("invalid_habitat")
+    elif habitat_id != _HABITAT_ID:
+        errors.add("habitat_drift")
+
+    # allowed_tile_ids: canonical set in any order; wrong type -> structural,
+    # otherwise canonical-value drift.
+    allowed = declaration["allowed_tile_ids"]
+    if type(allowed) is not list or any(type(item) is not str for item in allowed):
+        errors.add("invalid_habitat")
+    elif not _is_str_list(allowed, _ALLOWED_TILE_IDS):
+        errors.add("habitat_drift")
 
     # starting_tile_ids: exact two-key dict, str values matching canonical.
     starting = declaration["starting_tile_ids"]
     if type(starting) is not dict:
-        return False, {"invalid_habitat"}
-    starting_keys = frozenset(starting.keys())
-    if starting_keys != frozenset(_AGENT_REFS):
-        return False, {"habitat_drift"}
-    for ref in _AGENT_REFS:
-        if type(starting[ref]) is not str:
-            return False, {"invalid_habitat"}
-        if starting[ref] != _STARTING_TILE_IDS[ref]:
-            return False, {"habitat_drift"}
+        errors.add("invalid_habitat")
+    elif frozenset(starting.keys()) != frozenset(_AGENT_REFS):
+        errors.add("habitat_drift")
+    else:
+        for ref in _AGENT_REFS:
+            if type(starting[ref]) is not str:
+                errors.add("invalid_habitat")
+            elif starting[ref] != _STARTING_TILE_IDS[ref]:
+                errors.add("habitat_drift")
 
     # observation_boundaries: exact two-key dict; each value a single-element
     # list equal to the canonical observation tile for that reference.
     obs = declaration["observation_boundaries"]
     if type(obs) is not dict:
-        return False, {"invalid_observation_radius"}
-    obs_keys = frozenset(obs.keys())
-    if obs_keys != frozenset(_AGENT_REFS):
-        return False, {"invalid_observation_radius"}
-    for ref in _AGENT_REFS:
-        boundary = obs[ref]
-        if type(boundary) is not list:
-            return False, {"invalid_observation_radius"}
-        if len(boundary) != 1:
-            return False, {"invalid_observation_radius"}
-        if type(boundary[0]) is not str:
-            return False, {"invalid_observation_radius"}
-        if boundary[0] != _OBSERVATION_BOUNDARIES[ref][0]:
-            return False, {"invalid_observation_radius"}
+        errors.add("invalid_observation_radius")
+    elif frozenset(obs.keys()) != frozenset(_AGENT_REFS):
+        errors.add("invalid_observation_radius")
+    else:
+        for ref in _AGENT_REFS:
+            boundary = obs[ref]
+            if type(boundary) is not list:
+                errors.add("invalid_observation_radius")
+            elif len(boundary) != 1:
+                errors.add("invalid_observation_radius")
+            elif type(boundary[0]) is not str:
+                errors.add("invalid_observation_radius")
+            elif boundary[0] != _OBSERVATION_BOUNDARIES[ref][0]:
+                errors.add("invalid_observation_radius")
 
     # movement_allowed: must be the literal Python bool False (identity,
     # not truthiness). 0, 0.0, "false", [] all fail closed.
     if declaration["movement_allowed"] is not False:
-        return False, {"habitat_drift"}
+        errors.add("habitat_drift")
 
-    return True, set()
+    return (not errors), errors
 
 
 def _rollback_binding(rollback_anchor: Any) -> tuple[bool, str | None, set[str]]:
@@ -222,6 +233,12 @@ def _rollback_binding(rollback_anchor: Any) -> tuple[bool, str | None, set[str]]
     binding invalid, errors contains ``invalid_rollback_anchor``. A supplied
     anchor that is not a dict, or whose ``habitat_id`` is not a str, is
     malformed and also fails closed.
+
+    The ``habitat_id_surface`` is only ever the canonical habitat id (when the
+    binding is valid) or ``None``. Per 10IS proposal section C4 the result
+    field ``rollback_anchor_habitat_id`` may contain only
+    ``"genesis-first-habitat"`` or ``None``; an untrusted mismatched value is
+    never echoed onto the result surface.
     """
     if rollback_anchor is None:
         return True, None, set()
@@ -231,7 +248,7 @@ def _rollback_binding(rollback_anchor: Any) -> tuple[bool, str | None, set[str]]
     if type(habitat_id) is not str:
         return False, None, {"invalid_rollback_anchor"}
     if habitat_id != _HABITAT_ID:
-        return False, habitat_id, {"invalid_rollback_anchor"}
+        return False, None, {"invalid_rollback_anchor"}
     return True, habitat_id, set()
 
 
