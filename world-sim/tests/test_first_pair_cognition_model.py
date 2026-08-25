@@ -18,6 +18,7 @@ from backend.world.first_pair_cognition_interface import (
     CognitionBackend,
     CognitionOutput,
 )
+import backend.world.first_pair_cognition_model as cmod
 from backend.world.first_pair_cognition_model import (
     ModelCognitionBackend,
     ProviderConfig,
@@ -1080,3 +1081,146 @@ class TestModelBackendRuntimeIntegration:
             results = runtime.run()
             assert results["heartbeats_completed"] == 1
             assert mock_cls.called
+
+
+# ---------------------------------------------------------------------------
+# Ollama credential-free transport (latent real-construction fix)
+#
+# Local Ollama genuinely requires no credential: resolve_provider() must keep
+# returning ProviderConfig(api_key=None). Only at the OpenAI-SDK client
+# construction boundary may the local placeholder "ollama" be supplied,
+# because OpenAI SDK 2.24 requires a non-empty api_key string even though the
+# local OpenAI-compatible endpoint ignores authentication.
+# ---------------------------------------------------------------------------
+
+
+class _CapturingOpenAIClient:
+    """In-memory stand-in for the OpenAI SDK constructor to capture kwargs."""
+
+    instances = []
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.__class__.instances.append(kwargs)
+
+
+def _clear_provider_env(monkeypatch):
+    for name in (
+        "GENESIS_FIRST_PAIR_BASE_URL",
+        "GENESIS_FIRST_PAIR_API_KEY",
+        "GENESIS_FIRST_PAIR_MODEL",
+        "NVIDIA_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OLLAMA_HOST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+class TestOllamaClientConstruction:
+    def test_ollama_resolve_provider_still_returns_none_api_key(self, monkeypatch):
+        _clear_provider_env(monkeypatch)
+        monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "qwen3.5:4b")
+        cfg = resolve_provider()
+        assert cfg.provider_type == "ollama"
+        assert cfg.api_key is None
+        assert cfg.base_url == "http://127.0.0.1:11434/v1"
+
+    def test_from_provider_config_ollama_converts_none_to_placeholder(self, monkeypatch):
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        config = ProviderConfig(
+            provider_type="ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            model="qwen3.5:4b",
+            api_key=None,
+        )
+        backend = ModelCognitionBackend.from_provider_config("east_adam", config)
+        assert config.api_key is None  # semantic config preserved
+        assert backend._config.api_key is None  # not mutated on the config
+        assert len(_CapturingOpenAIClient.instances) == 1
+        assert _CapturingOpenAIClient.instances[0]["api_key"] == "ollama"
+        assert _CapturingOpenAIClient.instances[0]["base_url"] == "http://127.0.0.1:11434/v1"
+
+    def test_constructor_ollama_converts_none_to_placeholder(self, monkeypatch):
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        _clear_provider_env(monkeypatch)
+        monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "qwen3.5:4b")
+        backend = ModelCognitionBackend("east_adam")
+        assert backend._config.api_key is None
+        assert len(_CapturingOpenAIClient.instances) == 1
+        assert _CapturingOpenAIClient.instances[0]["api_key"] == "ollama"
+
+    @pytest.mark.parametrize(
+        "provider_type,api_key,expected_key",
+        [
+            ("nvidia", "nvapi-secret", "nvapi-secret"),
+            ("openrouter", "sk-or-secret", "sk-or-secret"),
+            ("explicit_url", "sk-abc123", "sk-abc123"),
+        ],
+    )
+    def test_other_providers_use_supplied_credential_unchanged(
+        self, monkeypatch, provider_type, api_key, expected_key
+    ):
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        config = ProviderConfig(
+            provider_type=provider_type,
+            base_url="http://remote.example/v1",
+            model="m",
+            api_key=api_key,
+        )
+        ModelCognitionBackend.from_provider_config("east_adam", config)
+        assert len(_CapturingOpenAIClient.instances) == 1
+        assert _CapturingOpenAIClient.instances[0]["api_key"] == expected_key
+        assert _CapturingOpenAIClient.instances[0]["api_key"] == api_key
+
+    def test_fake_client_injection_path_is_unaffected(self, monkeypatch):
+        # with_client never constructs an OpenAI SDK client and never mangles
+        # the api_key — it uses the injected client verbatim.
+        mark = object()
+
+        class _Injected:
+            def __init__(self, client):
+                self.client = client
+
+        fake = mark
+        config = ProviderConfig("ollama", "http://127.0.0.1:11434/v1", "qwen3.5:4b", None)
+        monkeypatch.setattr(ModelCognitionBackend, "with_client", lambda *a, **k: "called")
+        # Directly assert with_client passes the client through by inspecting it:
+        backend = ModelCognitionBackend.with_client("east_adam", fake, config)
+        assert backend == "called"
+
+        # The real with_client (not monkeypatched) must preserve the injected client.
+        monkeypatch.undo()
+        _CapturingOpenAIClient.instances = []
+        original_with_client = ModelCognitionBackend.with_client
+        sentinel = type("S", (), {})()
+        backend = original_with_client("east_adam", sentinel, config)
+        assert backend._client is sentinel
+        assert len(_CapturingOpenAIClient.instances) == 0
+
+    def test_no_provider_credential_persisted(self, monkeypatch):
+        # Provider resolution + real client construction must not create or
+        # write any credential/provider file inside the workspace scratch root.
+        import shutil
+
+        scratch = Path(__file__).resolve().parent.parent / ".ollama-fix-scratch"
+        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.mkdir(parents=True, exist_ok=True)
+        before = set(p for p in scratch.rglob("*") if p.is_file())
+
+        _clear_provider_env(monkeypatch)
+        monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "qwen3.5:4b")
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        cfg = resolve_provider()
+        ModelCognitionBackend("east_adam")
+
+        after = set(p for p in scratch.rglob("*") if p.is_file())
+        assert before == after
+        shutil.rmtree(scratch, ignore_errors=True)

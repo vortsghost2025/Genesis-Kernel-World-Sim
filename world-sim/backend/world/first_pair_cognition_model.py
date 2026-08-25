@@ -745,6 +745,27 @@ Do not include any text outside the JSON object. Do not include chain-of-thought
 # ---------------------------------------------------------------------------
 
 
+_OLLAMA_LOCAL_API_KEY_PLACEHOLDER = "ollama"
+
+
+def _client_api_key(config: ProviderConfig) -> str | None:
+    """Return the api_key to hand the OpenAI SDK for a real client.
+
+    Local Ollama (``provider_type == "ollama"``) genuinely requires no
+    credential, so ``ProviderConfig.api_key`` remains ``None``. However the
+    OpenAI SDK 2.24 constructor requires a non-empty api_key string, even
+    though the local OpenAI-compatible endpoint ignores authentication.
+    Supply a fixed, non-secret local placeholder only at this SDK construction
+    boundary for Ollama; every other provider passes its supplied api_key
+    through unchanged (``resolve_provider`` already guarantees non-empty for
+    remote providers). The placeholder is not a credential and must never be
+    logged or persisted as one.
+    """
+    if config.provider_type == "ollama" and not config.api_key:
+        return _OLLAMA_LOCAL_API_KEY_PLACEHOLDER
+    return config.api_key
+
+
 class ModelCognitionBackend(CognitionBackend):
     """Cognition backend backed by an OpenAI-compatible model provider.
 
@@ -764,7 +785,7 @@ class ModelCognitionBackend(CognitionBackend):
         self._config = resolve_provider()
         self._client = client or OpenAI(
             base_url=self._config.base_url,
-            api_key=self._config.api_key,
+            api_key=_client_api_key(self._config),
             timeout=300.0,
         )
         self._model = self._config.model
@@ -780,7 +801,7 @@ class ModelCognitionBackend(CognitionBackend):
         self._config = config
         self._client = OpenAI(
             base_url=config.base_url,
-            api_key=config.api_key,
+            api_key=_client_api_key(config),
             timeout=300.0,
         )
         self._model = config.model
