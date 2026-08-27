@@ -670,6 +670,32 @@ def build_system_prompt(context: AgentContext) -> str:
         else "[]"
     )
 
+    # Movement grant note (truthful to context)
+    if context.current_runtime_capabilities:
+        if context.available_moves:
+            movement_note = (
+                "Note: A bounded runtime movement grant is active. "
+                "You may move only to tiles listed in available_moves."
+            )
+        else:
+            movement_note = (
+                "Note: A bounded runtime movement grant is active, "
+                "but no movement destination is currently available. "
+                "Do not attempt to move unless a destination appears in available_moves."
+            )
+    else:
+        if context.available_moves:
+            movement_note = (
+                "Note: No active runtime movement grant is represented in the current context. "
+                "Movement availability is determined solely by available_moves."
+            )
+        else:
+            movement_note = (
+                "Note: No active runtime movement grant is represented in the current context, "
+                "and no movement destinations are currently available. "
+                "You cannot move at this time."
+            )
+
     return f"""You are {context.canonical_name}, an agent operating inside a constructed world simulation.
 
 Your persistent identity:
@@ -716,7 +742,7 @@ Other agents at your current tile: {occupants_str}
 Visible public messages: {vis_msgs_str}
 Human answers you have received: {ans_questions_str}
 
-Note: The original habitat restriction has been superseded by a bounded runtime movement grant within a shared public habitat. You may move to any tile listed in available_moves.
+{movement_note}
 
 Unresolved questions you have asked:
 {unanswered_str}

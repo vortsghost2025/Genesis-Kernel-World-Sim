@@ -184,6 +184,30 @@ class FirstPairRuntime:
         return AlternatingStubBackend(agent_ref)
 
     # ------------------------------------------------------------------
+    # Movement authority
+    # ------------------------------------------------------------------
+
+    def _movement_grant_active(self) -> bool:
+        """Single authoritative predicate for whether the currently loaded
+        grant+policy authorize MOVEMENT.
+
+        Fail-closed: authorized only when the grant is a granted 'movement'
+        capability bound to the policy's movement_grant_ref, the policy is
+        active, and the policy topology itself allows movement.
+        """
+        grant = self._capability_grant
+        policy = self._runtime_policy
+        if grant is None or policy is None:
+            return False
+        return (
+            grant.status == "granted"
+            and grant.capability_id == "movement"
+            and policy.status == "active"
+            and policy.topology.get("movement_allowed") is True
+            and grant.grant_id == policy.movement_grant_ref
+        )
+
+    # ------------------------------------------------------------------
     # Context builder
     # ------------------------------------------------------------------
 
@@ -222,7 +246,7 @@ class FirstPairRuntime:
         ]
 
         # Visible tiles: use runtime policy topology if grant active, else habitat
-        if self._capability_grant and self._runtime_policy:
+        if self._movement_grant_active():
             available_moves = get_adjacent_tiles(self._runtime_policy, position)
             visible_tiles = [position] + available_moves
             policy_allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
@@ -257,7 +281,7 @@ class FirstPairRuntime:
 
         # Current runtime capabilities
         caps = []
-        if self._capability_grant:
+        if self._movement_grant_active():
             caps.append(self._capability_grant.capability_id)
 
         observation = {
@@ -399,10 +423,10 @@ class FirstPairRuntime:
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
         if not self._habitat or not self._world_state:
             return {"status": "error", "reason": "Runtime not initialized"}
-        if not self._capability_grant or not self._runtime_policy:
-            return {"status": "blocked", "reason": "No active movement grant. Request capability from human operator."}
-        if self._capability_grant.status != "granted":
+        if self._capability_grant is not None and self._capability_grant.status != "granted":
             return {"status": "blocked", "reason": f"Grant status is {self._capability_grant.status}"}
+        if not self._movement_grant_active():
+            return {"status": "blocked", "reason": "No active movement grant. Request capability from human operator."}
 
         target = action.get("target_tile")
         allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
