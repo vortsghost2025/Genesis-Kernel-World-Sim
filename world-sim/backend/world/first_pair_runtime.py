@@ -59,13 +59,13 @@ from backend.world.first_pair_persistence import (
     maybe_record_relationship_event,
     save_goals,
     save_memory,
-    save_questions,
     save_runtime_policy,
     save_world_state,
     select_human_context,
     select_private_memories,
     validate_persistence_integrity,
 )
+from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
@@ -110,6 +110,10 @@ class FirstPairRuntime:
         self._world_state: WorldStateRecord | None = None
         self._goals: list[GoalRecord] = []
         self._questions: list[QuestionRecord] = []
+        # Noncanonical, authority-free question proposals. Never persisted to
+        # questions.json; they require a separate signed operator authorization
+        # before becoming canonical.
+        self._question_proposals: list[QuestionProposal] = []
 
         self._adam_memory: list[dict] = []
         self._eve_memory: list[dict] = []
@@ -573,9 +577,12 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Missing question_id, question, or reason_for_asking"}
         if not _is_safe_object_id(str(question_id)):
             return {"status": "rejected", "reason": "Invalid question_id"}
-        # Deduplicate
+        # Deduplicate against existing canonical questions AND pending proposals
         for existing in self._questions:
             if existing.question_id == question_id:
+                return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
+        for existing_proposal in self._question_proposals:
+            if existing_proposal.question_id == question_id:
                 return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
         agent_id = (
             self._identity_record.adam_agent_id
@@ -585,18 +592,18 @@ class FirstPairRuntime:
         urgency = action.get("urgency", "low")
         if urgency not in ("low", "medium", "high"):
             return {"status": "rejected", "reason": "Invalid urgency value"}
-        self._questions.append(QuestionRecord(
+        proposal = QuestionProposal(
             question_id=question_id,
             asking_agent_id=agent_id,
-            heartbeat=heartbeat_number,
+            related_goal_id=action.get("related_goal_id"),
             question=question,
             reason_for_asking=reason,
-            related_goal_id=action.get("related_goal_id"),
             requested_human_capability=action.get("requested_human_capability", ""),
             urgency=urgency,
-            status="pending",
-        ))
-        return {"status": "success", "question_id": question_id}
+        )
+        self._question_proposals.append(proposal)
+        # Noncanonical: no signature, no authority, no persistence to questions.json.
+        return {"status": "proposed", "question_id": question_id, "proposal": asdict(proposal)}
 
     def _execute_request_capability(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
@@ -662,25 +669,26 @@ class FirstPairRuntime:
         if output.questions_raised:
             for q in output.questions_raised:
                 qid = q["question_id"]
-                # Deduplicate against existing questions
+                # Deduplicate against existing canonical questions AND proposals
                 if any(existing.question_id == qid for existing in self._questions):
+                    continue
+                if any(p.question_id == qid for p in self._question_proposals):
                     continue
                 agent_id = (
                     self._identity_record.adam_agent_id
                     if agent_ref == "east_adam"
                     else self._identity_record.eve_agent_id
                 )
-                self._questions.append(QuestionRecord(
+                proposal = QuestionProposal(
                     question_id=qid,
                     asking_agent_id=agent_id,
-                    heartbeat=heartbeat_number,
+                    related_goal_id=q.get("related_goal_id"),
                     question=q["question"],
                     reason_for_asking=q["reason_for_asking"],
-                    related_goal_id=q.get("related_goal_id"),
                     requested_human_capability=q.get("requested_human_capability", ""),
                     urgency=q.get("urgency", "low"),
-                    status="pending",
-                ))
+                )
+                self._question_proposals.append(proposal)
 
     # ------------------------------------------------------------------
     # Main loop
@@ -827,7 +835,7 @@ class FirstPairRuntime:
         }
         save_memory(self._store, shared_memory)
         save_goals(self._store, self._goals)
-        save_questions(self._store, self._questions)
+        self._persist_questions_without_stale_overwrite()
 
         actions_taken = {}
         if adam_action:
@@ -848,6 +856,17 @@ class FirstPairRuntime:
             ],
         )
         append_heartbeat(self._store, hb_record)
+
+    def _persist_questions_without_stale_overwrite(self) -> None:
+        """Reconcile canonical questions WITHOUT writing back local state.
+
+        Canonical questions are store-owned. The runtime no longer mints
+        questions (proposals are noncanonical), so it has no authority to write
+        ``questions.json``. On every tick it re-syncs ``self._questions`` from the
+        canonical store, guaranteeing that stale in-memory state (e.g. an old
+        pending Q1) can never overwrite a newer governed answer.
+        """
+        self._questions = load_questions(self._store)
 
     # ------------------------------------------------------------------
     # Evidence / inspection

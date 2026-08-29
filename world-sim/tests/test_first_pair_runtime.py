@@ -62,6 +62,48 @@ def _run(store: FirstPairPersistenceStore, heartbeats: int = 2) -> dict:
     return rt.run()
 
 
+def _signed_answer_authorization(monkeypatch, *, question_id: str, asking_agent_id: str, answer: str) -> dict:
+    """Test-only Signed Answer Authority V1 envelope (ephemeral Ed25519 key).
+
+    Mirrors the external operator signer: signs the canonical unsigned answer
+    payload with a throwaway private key and installs its PUBLIC key (only) as
+    the env trust root. The private key never leaves this helper. Production
+    backend remains verify-only.
+    """
+    import hashlib
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+
+    def canonical(v: dict) -> str:
+        return json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def h(v: dict) -> str:
+        return hashlib.sha256(canonical(v).encode("utf-8")).hexdigest()
+
+    priv = Ed25519PrivateKey.generate()
+    pub = priv.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    monkeypatch.setenv("GENESIS_FIRST_PAIR_OPERATOR_PUBLIC_KEY_HEX", pub.hex())
+
+    payload = {
+        "schema": "single_question_answer_authorization.ed25519.1",
+        "domain": "GENESIS_FIRST_PAIR_SINGLE_QUESTION_ANSWER_AUTH_ED25519_V1",
+        "action": "single_question_answer",
+        "question_id": question_id,
+        "asking_agent_id": asking_agent_id,
+        "formatted_answer_hash": h({"answer_material": answer.strip()}),
+        "max_writes": 1,
+        "nonce": "host-119-test-nonce",
+        "issued_at_utc": "2026-01-01T00:00:00Z",
+        "expires_at_utc": "9999-01-01T00:00:00Z",
+        "operator_proof_ref": "proof-1",
+    }
+    envelope = dict(payload)
+    envelope["signature"] = priv.sign(canonical(payload).encode("utf-8")).hex()
+    return envelope
+
+
 # ---------------------------------------------------------------------------
 # 1 – Fresh initialisation
 # ---------------------------------------------------------------------------
@@ -620,23 +662,34 @@ class TestRuntimePolicyAndGrant:
         assert "public-shared-center" in ctx.available_moves
         assert "public-start-eve" not in ctx.available_moves  # not adjacent to start
 
-    def test_answer_operation_zero_heartbeats(self, tmp_path: Path) -> None:
-        """mark_question_answered runs zero heartbeats (no side effects on state)."""
-        from backend.world.first_pair_persistence import mark_question_answered, list_unanswered_questions
+    def test_answer_operation_zero_heartbeats(self, tmp_path: Path, monkeypatch) -> None:
+        """The governed answer operation runs zero heartbeats (no side effects on state)."""
+        from backend.world.first_pair_persistence import list_unanswered_questions
         store = _fresh_store(tmp_path)
         rt = FirstPairRuntime(heartbeat_limit=1, store=store)
         rt.run()
-        # Manually add a question
-        from backend.world.first_pair_persistence import QuestionRecord, save_questions
+        # Manually add a question (test-only fixture seed: bypasses production authority)
+        from backend.world.first_pair_persistence import QuestionRecord, _save_questions_raw
         q = QuestionRecord(
             question_id="q-test", asking_agent_id=rt._identity_record.adam_agent_id,
             heartbeat=1, question="Why?", reason_for_asking="curiosity",
             related_goal_id=None, requested_human_capability="", urgency="low",
         )
-        save_questions(store, [q])
-        # Answer it
-        result = mark_question_answered(store, "q-test", "Because.")
-        assert result is not None
+        _save_questions_raw(store, [q])
+        # Answer it through the governed seam, under a signed answer authorization.
+        from backend.world.local_single_question_answer import apply_question_answer
+        auth = _signed_answer_authorization(
+            monkeypatch,
+            question_id="q-test",
+            asking_agent_id=rt._identity_record.adam_agent_id,
+            answer="Because.",
+        )
+        result = apply_question_answer(
+            store, question_id="q-test",
+            asking_agent_id=rt._identity_record.adam_agent_id,
+            answer="Because.", authorization=auth,
+        )
+        assert result["ok"] is True
         assert result["status"] == "answered"
         # Verify no new heartbeat created
         history = load_heartbeat_history(store)
@@ -656,22 +709,33 @@ class TestRuntimePolicyAndGrant:
         history = load_heartbeat_history(store)
         assert len(history) == 1
 
-    def test_answer_does_not_imply_grant(self, tmp_path: Path) -> None:
+    def test_answer_does_not_imply_grant(self, tmp_path: Path, monkeypatch) -> None:
         """Answering a question does not create a capability grant."""
-        from backend.world.first_pair_persistence import (
-            mark_question_answered, load_capability_grant,
-        )
+        from backend.world.first_pair_persistence import load_capability_grant
         store = _fresh_store(tmp_path)
         rt = FirstPairRuntime(heartbeat_limit=1, store=store)
         rt.run()
-        from backend.world.first_pair_persistence import QuestionRecord, save_questions
+        from backend.world.first_pair_persistence import QuestionRecord, _save_questions_raw
         q = QuestionRecord(
             question_id="q-grant-test", asking_agent_id=rt._identity_record.adam_agent_id,
             heartbeat=1, question="Can I move?", reason_for_asking="testing",
             related_goal_id=None, requested_human_capability="movement", urgency="low",
         )
-        save_questions(store, [q])
-        mark_question_answered(store, "q-grant-test", "Not yet.")
+        # Test-only fixture seed: bypasses production creation authority intentionally.
+        _save_questions_raw(store, [q])
+        from backend.world.local_single_question_answer import apply_question_answer
+        auth = _signed_answer_authorization(
+            monkeypatch,
+            question_id="q-grant-test",
+            asking_agent_id=rt._identity_record.adam_agent_id,
+            answer="Not yet.",
+        )
+        result = apply_question_answer(
+            store, question_id="q-grant-test",
+            asking_agent_id=rt._identity_record.adam_agent_id,
+            answer="Not yet.", authorization=auth,
+        )
+        assert result["ok"] is True
         grant = load_capability_grant(store)
         assert grant is None  # No grant created by answering
 

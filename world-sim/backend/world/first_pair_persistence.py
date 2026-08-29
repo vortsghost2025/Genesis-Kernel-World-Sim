@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +26,10 @@ from backend.world.local_first_pair_habitat_boundary import (
 )
 from backend.world.local_first_pair_memory_boundary import (
     create_first_pair_memory_boundary,
+)
+from backend.world.question_proposal import (
+    canonicalize_proposal_material,
+    material_commitment,
 )
 
 _RUNTIME_POLICY_SCHEMA_VERSION = "10FN.1"
@@ -45,6 +52,14 @@ _SUMMARY_FILE = "memory_summaries.json"
 _RELATIONSHIP_FILE = "relationship_ledger.json"
 _MEMORY_SELECTION_MANIFEST_FILE = "memory_selection_manifest.json"
 _PROVENANCE_FILE = "provenance.jsonl"
+
+# --- Signed question-creation authority ---
+RECEIPT_DIR_NAME = "question-create-receipts"
+# --- Signed answer authority ---
+ANSWER_RECEIPT_DIR_NAME = "answer-authorization-receipts"
+_STORE_LOCK_FILE = ".question.store.lock"
+_LOCK_ACQUIRE_TIMEOUT_SECONDS = 30.0
+_LOCK_POLL_INTERVAL_SECONDS = 0.05
 
 # --- Bounded memory selection limits ---
 _MAX_SELECTED_RECENT_MEMORIES = 6
@@ -75,11 +90,25 @@ class FirstPairPersistenceStore:
     def _path(self, filename: str) -> Path:
         return self.root / filename
 
+    def _receipt_dir(self) -> Path:
+        return self._path(RECEIPT_DIR_NAME)
+
+    def _answer_receipt_dir(self) -> Path:
+        return self._path(ANSWER_RECEIPT_DIR_NAME)
+
     def _atomic_write(self, path: Path, data: dict) -> None:
+        """Durable atomic write: temp file in same dir → flush → fsync → replace.
+
+        Process-crash durability is guaranteed (a completed write is visible to a
+        subsequent open and a torn write leaves only the .tmp file). OS/power-loss
+        durability beyond os.replace is NOT claimed (no directory-entry fsync).
+        """
         tmp_path = path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        tmp_path.replace(path)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
 
     def _read_json(self, path: Path) -> dict | None:
         if not path.exists():
@@ -99,6 +128,76 @@ class FirstPairPersistenceStore:
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }
         self._append_jsonl(self._path(_PROVENANCE_FILE), record)
+
+    # ------------------------------------------------------------------
+    # Cross-process store lock (msvcrt byte-range on Windows; fcntl on POSIX)
+    # ------------------------------------------------------------------
+
+    def _lock_path(self) -> Path:
+        return self._path(_STORE_LOCK_FILE)
+
+    @contextmanager
+    def _store_lock(self):
+        """Serialize the entire logical creation transaction across processes.
+
+        Byte-range lock on a stable dedicated file. The lock file is NOT deleted
+        (deleting introduces a delete/recreate race); byte-range locks are
+        released by the OS when the owning handle closes (including on crash).
+        """
+        lock_path = self._lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(lock_path, "a+", encoding="utf-8")
+        try:
+            if f.tell() == 0:
+                f.write("\n")
+            f.flush()
+            self._acquire_lock(f)
+            try:
+                yield
+            finally:
+                self._release_lock(f)
+        finally:
+            f.close()
+
+    def _acquire_lock(self, f) -> None:
+        deadline = time.monotonic() + _LOCK_ACQUIRE_TIMEOUT_SECONDS
+        try:
+            import msvcrt
+
+            _lock = msvcrt
+        except ImportError:
+            _lock = None
+
+        while True:
+            try:
+                if _lock is not None:
+                    _lock.locking(f.fileno(), _lock.LK_NBLCK, 1)
+                    return
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return
+            except (OSError, BlockingIOError):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("store_lock_unavailable")
+                time.sleep(_LOCK_POLL_INTERVAL_SECONDS)
+
+    def _release_lock(self, f) -> None:
+        try:
+            import msvcrt
+        except ImportError:
+            msvcrt = None
+        try:
+            if msvcrt is not None:
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            # Unlock best-effort; the OS releases byte-range locks on close anyway.
+            pass
 
 
 @dataclass
@@ -1348,10 +1447,7 @@ def initialize_first_pair_state(
         store._path(_GOALS_FILE),
         {"type": "goals_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": []},
     )
-    store._atomic_write(
-        store._path(_QUESTIONS_FILE),
-        {"type": "questions_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": []},
-    )
+    _initialize_questions_if_absent(store)
     store._atomic_write(
         store._path(_HEARTBEAT_FILE),
         {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": []},
@@ -1443,11 +1539,459 @@ def load_questions(store: FirstPairPersistenceStore) -> list[QuestionRecord]:
     return []
 
 
-def save_questions(store: FirstPairPersistenceStore, questions: list[QuestionRecord]) -> None:
+def _save_questions_raw(store: FirstPairPersistenceStore, questions: list[QuestionRecord]) -> None:
+    """Internal unguarded write. Used ONLY by the signed creation transaction so
+    it may add exactly one new id inside the lock. External callers must go
+    through save_questions (guarded)."""
     store._atomic_write(
         store._path(_QUESTIONS_FILE),
         {"type": "questions_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(q) for q in questions]},
     )
+
+
+def _initialize_questions_if_absent(store: FirstPairPersistenceStore) -> None:
+    """Check-and-create questions.json under the SAME store lock, no overwrite.
+
+    Initialization must NEVER overwrite an already-existing questions.json (which
+    could erase a created/answered canonical question). It only creates the
+    empty seed when the file is absent, and it participates in the common
+    ``_store_lock`` so it cannot race a concurrent creation transaction.
+    """
+    with store._store_lock():
+        qpath = store._path(_QUESTIONS_FILE)
+        if qpath.exists():
+            return  # never overwrite an existing canonical questions file
+        store._atomic_write(
+            qpath,
+            {"type": "questions_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": []},
+        )
+
+
+def _validate_question_ids(questions: list[QuestionRecord]) -> list[str]:
+    """Fail-closed structural validation of a proposed question collection.
+
+    Every record must have a non-empty string ``question_id``, and IDs must be
+    unique in the collection. Designed so a malformed/coerced ID cannot smuggle
+    through set-based comparison.
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+    for q in questions:
+        qid = q.question_id
+        if not isinstance(qid, str):
+            errors.append(f"non_string_question_id:{qid!r}")
+            continue
+        if not qid:
+            errors.append("empty_question_id")
+            continue
+        if qid in seen:
+            errors.append(f"duplicate_question_id:{qid}")
+            continue
+        seen.add(qid)
+    return errors
+
+
+def _question_record_semantics(q: QuestionRecord) -> str:
+    """Canonical bytes of a record's full semantic content (all fields)."""
+    return _canonical_json(asdict(q))
+
+
+def save_questions(store: FirstPairPersistenceStore, questions: list[QuestionRecord]) -> None:
+    """Guarded public question save: NO new IDs, NO deletions, NO mutation.
+
+    Fail-closed on the ordinary persistence path. A NEW_ID (present in the
+    proposed list but absent from canonical state), a REMOVED existing id, and
+    ANY content/status/answer/owner/binding difference on an existing id are all
+    rejected. Generic save is therefore a no-op that may only succeed when the
+    proposed collection is semantically identical to canonical state.
+
+    Canonical creation happens ONLY inside the locked, signed
+    ``create_authorized_question`` transaction; the only existing-id mutation
+    path is the governed answer transaction.
+    """
+    result = save_questions_guarded(store, questions)
+    if not result.get("ok"):
+        raise ValueError(
+            "save_questions rejected: " + "; ".join(result.get("errors", []))
+        )
+
+
+def save_questions_guarded(
+    store: FirstPairPersistenceStore, questions: list[QuestionRecord]
+) -> dict:
+    """Guarded question save returning a structured result rather than raising.
+
+    - NEW_ID  = present in proposed state AND absent from current canonical state
+    - REMOVED = present in current canonical state AND absent from proposed state
+    - MUTATED = an existing id whose record content differs from canonical state
+
+    New IDs, removals, and ANY existing-id mutation are rejected. Generic save
+    only succeeds when the proposed collection is semantically identical to the
+    stored collection (i.e. it performs no mutation).
+    """
+    structural = _validate_question_ids(questions)
+    if structural:
+        return {"ok": False, "errors": structural}
+
+    current = load_questions(store)
+    current_by_id = {q.question_id: q for q in current}
+    proposed_by_id = {q.question_id: q for q in questions}
+
+    existing_ids = set(current_by_id)
+    proposed_ids = set(proposed_by_id)
+
+    new_ids = proposed_ids - existing_ids
+    removed_ids = existing_ids - proposed_ids
+
+    if new_ids:
+        return {"ok": False, "errors": [f"unauthorized_new_id:{sorted(new_ids)}"]}
+    if removed_ids:
+        return {"ok": False, "errors": [f"unauthorized_deletion:{sorted(removed_ids)}"]}
+
+    # Existing-id mutation check: any content difference is a governed mutation.
+    mutated: list[str] = []
+    for qid in sorted(existing_ids & proposed_ids):
+        if _question_record_semantics(proposed_by_id[qid]) != _question_record_semantics(current_by_id[qid]):
+            mutated.append(qid)
+    if mutated:
+        return {"ok": False, "errors": [
+            f"existing_question_mutation_requires_governed_transaction:{sorted(mutated)}"
+        ]}
+
+    # Semantically identical -> no mutation needed.
+    return {"ok": True}
+
+
+def question_requires_creation_receipt(
+    store: FirstPairPersistenceStore, existing_question_id: str
+) -> bool:
+    """Grandfather rule: an already-persisted question never requires a receipt.
+
+    The authority requirement applies to NEW IDs (present in a proposed state and
+    absent from canonical state at the start of a write). An ID that already
+    exists canonically — including the historical ``q1-habitat-structure`` — is
+    not a new addition and therefore requires no creation receipt, and no
+    retroactive receipt/signature is synthesized.
+    """
+    current = load_questions(store)
+    present = any(q.question_id == existing_question_id for q in current)
+    # Existing IDs do not require a receipt (grandfather); only NEW additions do.
+    return not present
+
+
+def _receipt_path(store: FirstPairPersistenceStore, auth_id: str, stage: str) -> Path:
+    return store._receipt_dir() / f"auth-{auth_id}.{stage}.json"
+
+
+# --- Signed answer authority receipts ---
+
+def answer_receipt_path(store: FirstPairPersistenceStore, authorization_id: str) -> Path:
+    """Dedicated consumed-answer-authorization receipt path (NOT provenance)."""
+    return store._answer_receipt_dir() / f"auth-{authorization_id}.consumed.json"
+
+
+def write_answer_consumed_receipt(
+    store: FirstPairPersistenceStore,
+    *,
+    authorization_id: str,
+    question_id: str,
+    asking_agent_id: str,
+    formatted_answer_hash: str,
+    signed_envelope: dict,
+    consumed_at_utc: str,
+) -> None:
+    """Persist the FULL SIGNED answer-authorization envelope as the authority
+    receipt. The receipt's authority derives from the valid signature contained
+    in ``signed_envelope``; the receipt itself is not secret.
+
+    This MUST be called only AFTER successful cryptographic verification of
+    ``signed_envelope``. It is not a generic authority grant.
+    """
+    store._answer_receipt_dir().mkdir(parents=True, exist_ok=True)
+    store._atomic_write(
+        answer_receipt_path(store, authorization_id),
+        {
+            "authorization_id": authorization_id,
+            "question_id": question_id,
+            "asking_agent_id": asking_agent_id,
+            "formatted_answer_hash": formatted_answer_hash,
+            "consumed_at_utc": consumed_at_utc,
+            "signed_envelope": signed_envelope,
+        },
+    )
+
+
+def load_answer_consumed_receipt(
+    store: FirstPairPersistenceStore, authorization_id: str
+) -> dict | None:
+    """Read the consumed answer-authorization receipt (best-effort)."""
+    path = answer_receipt_path(store, authorization_id)
+    if not path.exists():
+        return None
+    try:
+        return store._read_json(path)
+    except OSError:
+        return None
+
+
+def _load_public_keys() -> dict[str, bytes] | None:
+    """Load the trusted operator public key(s) from the ENV trust root ONLY.
+
+    Production trust = ``GENESIS_FIRST_PAIR_OPERATOR_PUBLIC_KEY_HEX``. This is
+    the sole authorized trust source. There is NO source-tree key-file fallback
+    and NO caller-supplied key accepted here.
+
+    Returns ``None`` when the env var is absent (absence fails closed).
+    Malformed material raises ``ValueError`` (a clean, explicit fail-closed
+    signal) — never silently yields an empty or bogus key.
+    """
+
+    keys: dict[str, bytes] = {}
+    env_hex = os.environ.get("GENESIS_FIRST_PAIR_OPERATOR_PUBLIC_KEY_HEX", "").strip()
+    if not env_hex:
+        return None
+    try:
+        raw = bytes.fromhex(env_hex)
+    except ValueError as exc:
+        raise ValueError("malformed_operator_public_key_env") from exc
+    if len(raw) != 32:
+        raise ValueError("malformed_operator_public_key_env")
+    keys["opk-" + hashlib.sha256(raw).hexdigest()[:16]] = raw
+    return keys
+
+
+def create_authorized_question(
+    store: FirstPairPersistenceStore,
+    *,
+    authorization: dict,
+) -> dict:
+    """Store-owned, locked recoverable transaction for signed question-creation.
+
+    Trust resolves ONLY from the process env ``GENESIS_FIRST_PAIR_OPERATOR_PUBLIC_KEY_HEX``.
+    No caller parameter or envelope field can select the verification key.
+
+    NOT atomic in the cross-file sense: the transaction builds durable evidence
+    in stages (intent receipt → canonical question → applied marker → provenance)
+    and recovers deterministically from any crash point via the intent/applied
+    receipts. This is a *locked recoverable transaction*.
+
+    Authority contract (explicit):
+      - signed authorization + intent + canonical matching question + applied
+        marker establish that the authorization was consumed and the canonical
+        creation was applied (the applied marker is the consumption gate).
+      - ``single_question_create_consumed`` provenance is derived audit evidence
+        and is recoverable/idempotent (never left stranded when applied exists).
+
+    Recovery cases (all under the shared store lock):
+
+      CASE 1  intent absent, applied absent, question absent → normal create
+      CASE 2  intent present, applied absent, question absent → resume same txn
+      CASE 3  intent present, applied absent, question present + exact material
+              match → finalize the SAME transaction (write applied + provenance)
+      CASE 4  intent present, applied absent, question present but MISMATCH →
+              fail closed (ambiguous/corrupt)
+      CASE 5  applied present → ensure provenance, then already-consumed result
+    """
+    from backend.world import local_single_question_create as _create
+
+    # --- Resolve trust from ENV only. No caller key, no envelope key. ---
+    try:
+        keys = _load_public_keys()
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not keys:
+        return {"ok": False, "error": "operator_public_key_unconfigured"}
+    verify_key: bytes = next(iter(keys.values()))
+
+    auth_id = _create.authorization_id(authorization)
+    question_id = authorization.get("question_id")
+    if not isinstance(question_id, str) or not question_id:
+        return {"ok": False, "error": "invalid_question_id"}
+    # Bound commitment of the authorized material, for recovery identity.
+    auth_material_hash = material_commitment(
+        pair_id=authorization.get("pair_id"),
+        asking_agent_id=authorization.get("asking_agent_id"),
+        question_id=question_id,
+        related_goal_id=authorization.get("related_goal_id"),
+        question=authorization.get("question"),
+        reason_for_asking=authorization.get("reason_for_asking"),
+        requested_human_capability=authorization.get("requested_human_capability"),
+        urgency=authorization.get("urgency"),
+    )
+
+    with store._store_lock():
+        intent_path = _receipt_path(store, auth_id, "intent")
+        applied_path = _receipt_path(store, auth_id, "applied")
+
+        # 1. expiry / timestamp enforcement (fail closed before any write).
+        expiry_ok, expiry_err = _create.validate_authorization_times(authorization)
+        if not expiry_ok:
+            return {"ok": False, "error": expiry_err}
+
+        # 2. verify signature BEFORE any receipt is created.
+        ok, err = _create.verify_question_creation_authorization(verify_key, authorization)
+        if not ok:
+            return {"ok": False, "error": err or "invalid_signature"}
+
+        # 5. already fully consumed? Under lock, repair any missing derived
+        #    provenance idempotently, then report consumed.
+        if applied_path.exists():
+            _ensure_create_provenance(store, auth_id, question_id)
+            return {
+                "ok": False,
+                "error": "authorization_already_consumed",
+                "recovered": True,
+            }
+
+        # Recovery inspection: load canonical question state + prior intent.
+        existing = load_questions(store)
+        existing_q = next((q for q in existing if q.question_id == question_id), None)
+        prior_intent = None
+        if intent_path.exists():
+            try:
+                prior_intent = store._read_json(intent_path)
+            except OSError:
+                prior_intent = None
+
+        # CASE 5 (already-consumed) handled above.
+        # CASE 2/3: an intent already exists for THIS authorization.
+        if prior_intent is not None:
+            # The intent must belong to THIS exact authorization.
+            if prior_intent.get("authorization_id") != auth_id:
+                return {"ok": False, "error": "intent_authorization_mismatch"}
+            if prior_intent.get("material_commitment") != auth_material_hash:
+                return {"ok": False, "error": "intent_authorization_mismatch"}
+
+        # CASE 1/2: question absent -> normal create or resume.
+        if existing_q is None:
+            record = _build_question_record(authorization, question_id, auth_id)
+            intent = {
+                "authorization_id": auth_id,
+                "public_key_id": _create.public_key_id(verify_key),
+                "question_id": question_id,
+                "material_commitment": auth_material_hash,
+                "consumed_at_utc": datetime.now(timezone.utc).isoformat(),
+                "signed_authorization": authorization,
+            }
+            store._receipt_dir().mkdir(parents=True, exist_ok=True)
+            store._atomic_write(intent_path, intent)
+            _save_questions_raw(store, existing + [record])
+            store._atomic_write(
+                applied_path,
+                {
+                    "authorization_id": auth_id,
+                    "question_id": question_id,
+                    "applied_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            _ensure_create_provenance(store, auth_id, question_id)
+            return {
+                "ok": True,
+                "authorization_id": auth_id,
+                "question_id": question_id,
+                "record": asdict(record),
+                "audit_trail_incomplete": False,
+            }
+
+        # Question already present canonically.
+        # CASE 3: present + prior intent + exact material match -> finalize same txn.
+        if prior_intent is not None and _question_material_matches(existing_q, authorization):
+            store._atomic_write(
+                applied_path,
+                {
+                    "authorization_id": auth_id,
+                    "question_id": question_id,
+                    "applied_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            _ensure_create_provenance(store, auth_id, question_id)
+            return {
+                "ok": True,
+                "authorization_id": auth_id,
+                "question_id": question_id,
+                "recovered": True,
+                "record": asdict(existing_q),
+                "audit_trail_incomplete": False,
+            }
+
+        # CASE 4: question present but no matching intent/material -> ambiguous.
+        if prior_intent is not None:
+            return {"ok": False, "error": "ambiguous_recovery_question_mismatch"}
+        # No prior intent but question already exists -> duplicate id.
+        return {"ok": False, "error": "question_id_already_exists"}
+
+
+def _build_question_record(
+    authorization: dict, question_id: str, auth_id: str
+) -> QuestionRecord:
+    material = canonicalize_proposal_material(
+        pair_id=authorization.get("pair_id"),
+        asking_agent_id=authorization.get("asking_agent_id"),
+        question_id=question_id,
+        related_goal_id=authorization.get("related_goal_id"),
+        question=authorization.get("question"),
+        reason_for_asking=authorization.get("reason_for_asking"),
+        requested_human_capability=authorization.get("requested_human_capability"),
+        urgency=authorization.get("urgency"),
+    )
+    return QuestionRecord(
+        question_id=material["question_id"],
+        asking_agent_id=material["asking_agent_id"],
+        heartbeat=0,
+        question=material["question"],
+        reason_for_asking=material["reason_for_asking"],
+        related_goal_id=material["related_goal_id"],
+        requested_human_capability=material["requested_human_capability"],
+        urgency=material["urgency"],
+        status="pending",
+        provenance={"creation_authorization_id": auth_id},
+    )
+
+
+def _question_material_matches(q: QuestionRecord, authorization: dict) -> bool:
+    return (
+        q.question_id == authorization.get("question_id")
+        and q.asking_agent_id == authorization.get("asking_agent_id")
+        and q.question == authorization.get("question")
+        and q.reason_for_asking == authorization.get("reason_for_asking")
+        and q.related_goal_id == authorization.get("related_goal_id")
+        and q.requested_human_capability == authorization.get("requested_human_capability")
+        and q.urgency == authorization.get("urgency")
+    )
+
+
+def _provenance_records(store: FirstPairPersistenceStore) -> list[dict]:
+    """Read the JSON-lines provenance ledger (best-effort, tolerant of torn lines)."""
+    path = store._path(_PROVENANCE_FILE)
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return records
+
+
+def _ensure_create_provenance(
+    store: FirstPairPersistenceStore, auth_id: str, question_id: str
+) -> None:
+    """Idempotently ensure EXACTLY ONE ``single_question_create_consumed`` event.
+
+    Stable identity = (action == "single_question_create_consumed") AND
+    (detail.authorization_id == auth_id) AND (detail.question_id == question_id).
+    Repeated calls do not append duplicate events.
+    """
+    action = "single_question_create_consumed"
+    for r in _provenance_records(store):
+        if r.get("action") == action and r.get("detail", {}).get("authorization_id") == auth_id and r.get("detail", {}).get("question_id") == question_id:
+            return  # already present exactly once
+    store._append_provenance(action, {"authorization_id": auth_id, "question_id": question_id})
 
 
 def load_heartbeat_history(store: FirstPairPersistenceStore) -> list[HeartbeatRecord]:
@@ -1476,20 +2020,150 @@ def mark_question_answered(
     answer: str,
     provenance: str = "",
 ) -> dict | None:
-    questions = load_questions(store)
-    for q in questions:
-        if q.question_id == question_id:
-            q.status = "answered"
-            q.provenance["answer"] = answer
-            q.provenance["answered_at_utc"] = datetime.now(timezone.utc).isoformat()
-            q.provenance["operator_provenance"] = provenance
-            save_questions(store, questions)
-            store._append_provenance("answer_question", {
-                "question_id": question_id,
-                "asking_agent_id": q.asking_agent_id,
-            })
-            return asdict(q)
-    return None
+    """LEGACY / DEPRECATED. No longer a production mutation path.
+
+    Retained only for import compatibility. It MUST NOT write status or answer,
+    MUST NOT call generic save, and MUST NOT mutate canonical question state.
+    The governed answer path is
+    ``local_single_question_answer.apply_question_answer`` (which itself uses the
+    narrow ``governed_answer_transaction``).
+    """
+    return {
+        "ok": False,
+        "error": "mark_question_answered_deprecated",
+        "question_id": question_id,
+        "detail": (
+            "Legacy answer mutation is disabled; use the governed answer seam "
+            "(local_single_question_answer.apply_question_answer)."
+        ),
+        "questions_mutated": 0,
+    }
+
+
+def governed_answer_transaction(
+    store: FirstPairPersistenceStore,
+    *,
+    question_id: str,
+    answer_material: str,
+    operator_provenance: str = "",
+    authorized_agent_id: str,
+    authorization_id: str,
+) -> dict:
+    """Narrow, locked, cryptographically-reverified answer mutation.
+
+    The ONLY existing-id mutation the store permits. Its authority predicate is
+    the VALID SIGNED answer envelope stored in the consumed receipt — never a
+    provenance line and never caller-asserted strings. Under the SAME store lock
+    as ``create_authorized_question`` it:
+
+      1. re-reads canonical questions and locates the exact question_id
+      2. requires status == pending
+      3. requires canonical asking_agent_id == authorized_agent_id
+      4. loads the consumed answer-authorization RECEIPT for authorization_id
+      5. obtains the env-only operator public key (fail-closed if absent)
+      6. cryptographically re-verifies the STORED signed envelope's Ed25519
+         signature against that trust root
+      7. recomputes authorization_id from the signed material and requires an
+         exact match (never trusts a mere label)
+      8. verifies answer-specific schema/domain/action and max_writes == 1
+      9. verifies issued/expires time validity (production "now" not caller-set)
+     10. verifies the signed question_id/asking_agent_id/formatted_answer_hash
+         match the canonical/requested question, agent, and the answer being
+         applied
+     11. only then performs pending -> answered
+
+    A forged provenance line grants ZERO authority (provenance is not consulted).
+    A forged receipt whose stored envelope has an invalid signature grants ZERO
+    authority. A replay of another question/agent/answer's authorization fails.
+    """
+    if not isinstance(question_id, str) or not question_id:
+        return {"ok": False, "error": "invalid_question_id"}
+    if not isinstance(answer_material, str) or not answer_material:
+        return {"ok": False, "error": "invalid_answer"}
+    if not isinstance(authorized_agent_id, str) or not authorized_agent_id:
+        return {"ok": False, "error": "missing_authorized_agent_id"}
+    if not isinstance(authorization_id, str) or not authorization_id:
+        return {"ok": False, "error": "missing_authorization_id"}
+
+    # The answer-material commitment MUST equal the answer module's binding hash
+    # (identical canonical JSON: sort_keys, compact separators, ensure_ascii=False).
+    answer_hash = _hash_canonical({"answer_material": answer_material})
+
+    with store._store_lock():
+        from backend.world import local_single_question_answer as _answer
+
+        # 4. Load the consumed answer-authorization RECEIPT (authority evidence).
+        receipt = load_answer_consumed_receipt(store, authorization_id)
+        if receipt is None:
+            return {"ok": False, "error": "answer_authorization_receipt_missing"}
+        signed_envelope = receipt.get("signed_envelope")
+        if not isinstance(signed_envelope, dict):
+            return {"ok": False, "error": "answer_authorization_receipt_corrupt"}
+
+        # 5. Obtain the env-only operator public key (fail closed).
+        try:
+            keys = _load_public_keys()
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not keys:
+            return {"ok": False, "error": "operator_public_key_unconfigured"}
+        verify_key: bytes = next(iter(keys.values()))
+
+        # 6. Cryptographically re-verify the STORED signed envelope.
+        sig_ok, sig_err = _answer.verify_question_answer_authorization(verify_key, signed_envelope)
+        if not sig_ok:
+            return {"ok": False, "error": sig_err or "invalid_answer_signature"}
+
+        # 9. Time validity (production "now" is internal, not caller-controlled).
+        time_ok, time_err = _answer.validate_authorization_times(signed_envelope)
+        if not time_ok:
+            return {"ok": False, "error": time_err}
+
+        # 7. Recompute authorization_id from the signed material (never trust a
+        #    label). Must equal both the caller arg and the receipt's own label.
+        recomputed_id = _answer.authorization_id(signed_envelope)
+        if recomputed_id != authorization_id:
+            return {"ok": False, "error": "answer_authorization_id_mismatch"}
+        if receipt.get("authorization_id") != authorization_id:
+            return {"ok": False, "error": "answer_authorization_id_mismatch"}
+
+        # 10. Signed bindings must match canonical/requested material EXACTLY.
+        if signed_envelope.get("question_id") != question_id:
+            return {"ok": False, "error": "answer_authorization_question_mismatch"}
+        if signed_envelope.get("asking_agent_id") != authorized_agent_id:
+            return {"ok": False, "error": "answer_authorization_agent_mismatch"}
+        if signed_envelope.get("formatted_answer_hash") != answer_hash:
+            return {"ok": False, "error": "answer_authorization_answer_mismatch"}
+
+        # 1/2/3. Canonical state checks, re-read AFTER the signature gate.
+        questions = load_questions(store)
+        target = next((q for q in questions if q.question_id == question_id), None)
+        if target is None:
+            return {"ok": False, "error": "question_not_found"}
+        # Owner binding is mandatory, never skippable.
+        if target.asking_agent_id != authorized_agent_id:
+            return {"ok": False, "error": "question_agent_mismatch"}
+        if target.status != "pending":
+            return {"ok": False, "error": "question_already_answered"}
+
+        # 11. Immutable-field spine is preserved by construction: we mutate only
+        # the transition fields below, never question text/owner/goal/capability/
+        # urgency/reason/asked_at/identity.
+        target.status = "answered"
+        target.provenance["answer"] = answer_material
+        target.provenance["answered_at_utc"] = datetime.now(timezone.utc).isoformat()
+        target.provenance["operator_provenance"] = operator_provenance
+        target.provenance["answer_authorization_id"] = authorization_id
+
+        _save_questions_raw(store, questions)
+
+    return {
+        "ok": True,
+        "question_id": question_id,
+        "asking_agent_id": target.asking_agent_id,
+        "status": "answered",
+        "record": asdict(target),
+    }
 
 
 def list_answered_questions_for_agent(
