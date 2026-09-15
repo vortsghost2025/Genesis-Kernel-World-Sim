@@ -251,7 +251,7 @@ backend = ModelCognitionBackend('east_adam')
 print('MODEL_BACKEND_PROVIDER=' + backend._config.provider_type)
 print('MODEL_BACKEND_BASE_URL=' + backend._config.base_url)
 print('MODEL_BACKEND_MODEL=' + backend._config.model)
-print('MODEL_BACKEND_API_KEY=' + str(backend._config.api_key))
+print('MODEL_BACKEND_API_KEY_SET=' + str(backend._config.api_key is not None))
 
 print('MAKING EXACTLY ONE REAL MODEL CALL VIA BACKEND.OBSERVE_AND_ORIENT...')
 try:
