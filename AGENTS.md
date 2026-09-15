@@ -33,7 +33,8 @@ Before producing output following a context reset:
 1. **"Am I alive / in the right repo?"** — confirm cwd = Genesis Kernel
    World Sim; read `git status`, `git log`.
 2. **"Is my authority valid?"** — docs-only phase or implementation phase?
-   Does this phase require GPT-5.6 Sol/Luna (implementation only)?
+   (The former GPT-5.6 Sol/Luna model-switch requirement is RETIRED — see
+   standing rule 3.)
 3. **"Are others' states current?"** — read `world-sim/docs/phase_index.md`,
    the last pushed commit, and the uncommitted working tree.
 4. **Re-read this file** — re-establish the relational calibration
@@ -49,11 +50,17 @@ Before producing output following a context reset:
    commit unless Sean explicitly says commit/push.
 2. **Metadata sync phases**: only after the target phase is pushed → record
    the real pushed hash → then do the hash-correction commit.
-3. **Implementation phases**: require GPT-5.6 Sol/Luna → TDD first → stop
-   before commit unless Sean explicitly authorizes commit/push.
+3. **Implementation phases**: TDD first → stop before commit unless Sean
+   explicitly authorizes commit/push. (GPT-5.6 Sol/Luna model-switch
+   requirement RETIRED 2026-09-14 by explicit Sean operator authorization,
+   confirmed by Sean on this date: the requirement existed only because he
+   was forced onto cheap free models in earlier phases and his paid model
+   then was GPT-5.6 Sol/Luna. The operator-selected current model is a paid,
+   top-capability model, so the switch requirement does not apply.)
 4. **Phase numbering**: spec **L** → sync **L+1** → implementation candidate
-   **L+2**. Examples: 10FF names 10FH; 10FG syncs 10FF metadata; 10FH
-   implementation later needs GPT-5.6.
+   **L+2**. Examples: 10FF names 10FH; 10FG syncs 10FF metadata. (Legacy
+   "implementation later needs GPT-5.6" example removed with the retired
+   model-switch requirement — see standing rule 3.)
 5. **For `phase_index.md` long rows**: use guarded targeted scripts if Edit
    exact-match is fragile; always write with `newline="\n"`; verify CRLF=0
    **once** at end of batch, not repeatedly.
