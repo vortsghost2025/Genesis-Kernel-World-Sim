@@ -638,57 +638,73 @@ class FirstPairRuntime:
     def _apply_cognition_output(
         self, agent_ref: str, output: Any, heartbeat_number: int
     ) -> None:
-        if output.goal_updates:
-            for gu in output.goal_updates:
-                existing = next(
-                    (g for g in self._goals if g.goal_id == gu.get("goal_id")), None
-                )
-                if existing:
-                    existing.status = gu.get("status", existing.status)
-                    existing.description = gu.get("description", existing.description)
-                else:
-                    self._goals.append(GoalRecord(
-                        goal_id=gu["goal_id"],
-                        agent_id=gu["agent_id"],
-                        description=gu["description"],
-                        status=gu.get("status", "active"),
-                        created_heartbeat=gu.get("created_heartbeat", heartbeat_number),
-                    ))
+        goal_updates = output.goal_updates if isinstance(output.goal_updates, list) else []
+        for gu in goal_updates:
+            if not isinstance(gu, dict):
+                continue
+            existing = next(
+                (g for g in self._goals if g.goal_id == gu.get("goal_id")), None
+            )
+            if existing:
+                existing.status = gu.get("status", existing.status)
+                existing.description = gu.get("description", existing.description)
+            else:
+                self._goals.append(GoalRecord(
+                    goal_id=gu["goal_id"],
+                    agent_id=gu["agent_id"],
+                    description=gu["description"],
+                    status=gu.get("status", "active"),
+                    created_heartbeat=gu.get("created_heartbeat", heartbeat_number),
+                ))
 
-        if output.memory_write:
+        memory_writes = output.memory_write if isinstance(output.memory_write, list) else []
+        for mw in memory_writes:
+            if not isinstance(mw, dict):
+                continue
             target_list = (
                 self._adam_memory if agent_ref == "east_adam" else self._eve_memory
             )
-            for mw in output.memory_write:
-                target_list.append({
-                    **mw,
-                    "heartbeat": heartbeat_number,
-                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                })
+            target_list.append({
+                **mw,
+                "heartbeat": heartbeat_number,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            })
 
-        if output.questions_raised:
-            for q in output.questions_raised:
-                qid = q["question_id"]
-                # Deduplicate against existing canonical questions AND proposals
-                if any(existing.question_id == qid for existing in self._questions):
-                    continue
-                if any(p.question_id == qid for p in self._question_proposals):
-                    continue
-                agent_id = (
-                    self._identity_record.adam_agent_id
-                    if agent_ref == "east_adam"
-                    else self._identity_record.eve_agent_id
-                )
-                proposal = QuestionProposal(
-                    question_id=qid,
-                    asking_agent_id=agent_id,
-                    related_goal_id=q.get("related_goal_id"),
-                    question=q["question"],
-                    reason_for_asking=q["reason_for_asking"],
-                    requested_human_capability=q.get("requested_human_capability", ""),
-                    urgency=q.get("urgency", "low"),
-                )
-                self._question_proposals.append(proposal)
+        questions = (
+            output.questions_raised if isinstance(output.questions_raised, list) else []
+        )
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            qid = q.get("question_id")
+            question_text = q.get("question")
+            reason_text = q.get("reason_for_asking")
+            if not isinstance(qid, str) or not qid:
+                continue
+            if not isinstance(question_text, str) or not question_text.strip():
+                continue
+            if not isinstance(reason_text, str) or not reason_text.strip():
+                continue
+            # Deduplicate against existing canonical questions AND proposals
+            if any(existing.question_id == qid for existing in self._questions):
+                continue
+            if any(p.question_id == qid for p in self._question_proposals):
+                continue
+            agent_id = (
+                self._identity_record.adam_agent_id
+                if agent_ref == "east_adam"
+                else self._identity_record.eve_agent_id
+            )
+            proposal = QuestionProposal(
+                question_id=qid,
+                asking_agent_id=agent_id,
+                related_goal_id=q.get("related_goal_id"),
+                question=question_text,
+                reason_for_asking=reason_text,
+                requested_human_capability=q.get("requested_human_capability", ""),
+                urgency=q.get("urgency", "low"),
+            )
+            self._question_proposals.append(proposal)
 
     # ------------------------------------------------------------------
     # Main loop
