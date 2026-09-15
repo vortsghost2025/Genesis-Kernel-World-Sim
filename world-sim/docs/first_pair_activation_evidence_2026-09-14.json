@@ -1,0 +1,75 @@
+{
+  "authorities": {
+    "capability_grant": {
+      "capability_id": "movement",
+      "grant_id": "grant-movement-001",
+      "status": "granted"
+    },
+    "runtime_policy": {
+      "movement_grant_ref": "grant-movement-001",
+      "policy_id": "runtime-policy-first-pair-001",
+      "status": "active"
+    }
+  },
+  "claim_scope": "operator_proof",
+  "exported_at_utc": "2026-09-15T01:07:33.445059+00:00",
+  "exporter": "scripts/export_first_pair_state_evidence.py",
+  "goals": [
+    {
+      "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+      "created_heartbeat": 1,
+      "description": "Contact with Eve established at public-shared-center. Next: initiate communication and establish cooperation with Eve.",
+      "goal_id": "explore-and-meet-eve",
+      "status": "in_progress"
+    },
+    {
+      "agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+      "created_heartbeat": 1,
+      "description": "Move to the shared center, make contact with Adam, and coordinate on exploring the world together.",
+      "goal_id": "goal-eve-001-establish-contact",
+      "status": "completed"
+    },
+    {
+      "agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+      "created_heartbeat": 2,
+      "description": "Maintain contact with Adam and execute a shared exploration plan: survey both start tiles, reconvene at public-shared-center to exchange findings, and cooperate on any objects or capabilities that emerge.",
+      "goal_id": "goal-eve-002-coordinate-exploration",
+      "status": "active"
+    }
+  ],
+  "heartbeat_history": [
+    {
+      "heartbeat_number": 1,
+      "timestamp_utc": "2026-09-15T00:45:24.712897+00:00",
+      "world_mutations_count": 2
+    },
+    {
+      "heartbeat_number": 2,
+      "timestamp_utc": "2026-09-15T00:50:16.914714+00:00",
+      "world_mutations_count": 2
+    }
+  ],
+  "identity": {
+    "adam_agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+    "eve_agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+    "pair_id": "genesis-first-pair"
+  },
+  "questions": [
+    {
+      "asking_agent_id": "genesis-agent-eb4439bd1b97c6baffc0c78956f1399789c9c598872527945372b65ce99e349d",
+      "heartbeat": 0,
+      "question_id": "q1-habitat-structure",
+      "status": "answered"
+    }
+  ],
+  "relationship_events_count": 1,
+  "world_state": {
+    "public_messages_count": 2,
+    "public_objects_count": 0,
+    "tick": 2,
+    "tile_occupancy": {
+      "east_adam": "public-shared-center",
+      "east_eve": "public-shared-center"
+    }
+  }
+}
