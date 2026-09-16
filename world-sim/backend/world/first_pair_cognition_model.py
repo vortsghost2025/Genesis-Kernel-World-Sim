@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +39,43 @@ _MAX_MESSAGE_CHARS = 2000
 _MAX_TARGET_CHARS = 128
 
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
+
+# ---------------------------------------------------------------------------
+# Transport retry (10IV) - NVIDIA lane only, transient failures only
+# ---------------------------------------------------------------------------
+
+_MAX_TRANSPORT_ATTEMPTS = 3
+_TRANSPORT_BACKOFF_SECONDS = (5.0, 10.0)
+_RETRYABLE_STATUS_MIN = 500
+_RETRYABLE_STATUS_MAX = 599
+
+
+def _is_retryable_transport_error(exc: Exception) -> bool:
+    """True only for transient transport failures: provider/header timeout,
+    connection timeout/reset, HTTP 429, HTTP 5xx. Authentication,
+    authorization, configuration, and model errors (4xx) are never retried."""
+    from openai import APIConnectionError, APIStatusError, APITimeoutError
+
+    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            return status == 429 or (
+                _RETRYABLE_STATUS_MIN <= status <= _RETRYABLE_STATUS_MAX
+            )
+    return False
+
+
+def _redact_secret_text(text: str, config: ProviderConfig) -> str:
+    """Strip any occurrence of the configured credential from error text so
+    recorded transport errors never expose secrets."""
+    if config.api_key and config.api_key in text:
+        return text.replace(config.api_key, "[REDACTED]")
+    return text
 
 # Contamination markers — casefolded for case-insensitive matching
 _FORBIDDEN_MARKERS = (
@@ -937,21 +975,75 @@ class ModelCognitionBackend(CognitionBackend):
             uncertainty=validated.uncertainty,
         )
 
+    def _call_with_transport_retry(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float,
+        max_tokens: int,
+        budget: list[int],
+    ) -> tuple[Any | None, str | None]:
+        """One logical model call with bounded transport retry (10IV).
+
+        Retries ONLY transient transport failures (provider/header timeout,
+        connection timeout/reset, HTTP 429, HTTP 5xx) and ONLY on the NVIDIA
+        lane. Authentication, authorization, configuration, and model errors
+        (4xx) fail immediately on the first attempt. ``budget`` is a
+        single-item list holding the remaining transport attempts for this
+        cognition request (max 3 total per request).
+
+        Returns (response, sanitized_error). The error records the attempt
+        count and never contains the configured credential. A valid response
+        is never re-requested; transport retry and JSON repair are separate
+        mechanisms.
+        """
+        is_nvidia = self._config.provider_type == "nvidia"
+        attempts_used = 0
+        while True:
+            attempts_used += 1
+            budget[0] -= 1
+            try:
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response, None
+            except Exception as e:
+                raw_message = _redact_secret_text(str(e), self._config)
+                safe_error = sanitize_provider_error(Exception(raw_message))
+                last_error = f"{safe_error} (transport attempts: {attempts_used})"
+                if (
+                    not is_nvidia
+                    or budget[0] <= 0
+                    or not _is_retryable_transport_error(e)
+                ):
+                    return None, last_error
+                backoff_index = min(
+                    attempts_used - 1, len(_TRANSPORT_BACKOFF_SECONDS) - 1
+                )
+                time.sleep(_TRANSPORT_BACKOFF_SECONDS[backoff_index])
+
     def _call_model_with_repair(
         self, system_prompt: str, context: AgentContext
     ) -> tuple[dict | None, str | None]:
-        # --- Original call ---
-        try:
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=2048,
-            )
-        except Exception as e:
-            return None, sanitize_provider_error(e)
+        # Shared transport-attempt budget: max 3 transport attempts per
+        # cognition request (10IV). Transport retry and JSON repair are
+        # separate mechanisms; the JSON repair below stays a single bounded
+        # round and a valid response is never re-requested.
+        budget = [_MAX_TRANSPORT_ATTEMPTS]
+
+        response, err = self._call_with_transport_retry(
+            [
+                {"role": "system", "content": system_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=2048,
+            budget=budget,
+        )
+        if response is None:
+            return None, err
 
         raw_text = response.choices[0].message.content if response.choices else None
         if not raw_text or not raw_text.strip():
@@ -965,24 +1057,23 @@ class ModelCognitionBackend(CognitionBackend):
         if validated.is_valid:
             return raw_json, None
 
-        # --- One bounded repair attempt ---
+        # --- One bounded repair attempt (JSON repair) ---
         repair_prompt = (
             f"Your previous response had validation errors: {'; '.join(validated.validation_errors)}\n"
             "Please correct and return only a valid JSON object with the exact required fields."
         )
-        try:
-            response2 = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "assistant", "content": raw_text},
-                    {"role": "user", "content": repair_prompt},
-                ],
-                temperature=0.2,
-                max_tokens=2048,
-            )
-        except Exception as e:
-            return None, sanitize_provider_error(e)
+        response2, err2 = self._call_with_transport_retry(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "assistant", "content": raw_text},
+                {"role": "user", "content": repair_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=2048,
+            budget=budget,
+        )
+        if response2 is None:
+            return None, err2
 
         raw_text2 = response2.choices[0].message.content if response2.choices else None
         if not raw_text2 or not raw_text2.strip():
