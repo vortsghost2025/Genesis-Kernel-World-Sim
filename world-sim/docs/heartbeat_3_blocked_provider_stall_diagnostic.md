@@ -1,7 +1,27 @@
-# Heartbeat 3 — Blocked by Provider Stall (Diagnostic)
+# Heartbeat 3 — Blocked by Provider Stall (Diagnostic) → RESOLVED as no-op
 
-Read-only diagnostic record. **Heartbeat 3 did NOT execute.** The canonical
-store remains at tick 2 (both agents at `public-shared-center`), last
+Read-only diagnostic record. **RESOLUTION: heartbeat 3 later executed as a
+NO-OP via the TokenRouter proxy lane** (`https://api.tokenrouter.com/v1`,
+model `z-ai/glm-5.3-flash`): tick advanced 2 → 3, both agents remained at
+`public-shared-center`, no actions taken, no goal/message/question changes,
+zero runtime errors. GLM returned valid `action=None` cognition for both
+agents. The TokenRouter lane is **PAID and RETIRED by operator decision**
+(Sean: glm 5.3 is no longer free on tokenrouter; do not swap the free-model
+runtime to a paid provider) — the lane was session-env only, never committed,
+and no paid configuration exists in the repo.
+
+The original stall findings below remain accurate for the DIRECT NVIDIA
+endpoint. Canonical free lanes going forward: local Ollama
+(`GENESIS_FIRST_PAIR_BASE_URL`/`OLLAMA_HOST` + `GENESIS_FIRST_PAIR_MODEL`,
+proven reachable) or the direct NVIDIA endpoint (`NVIDIA_API_KEY` +
+`GENESIS_FIRST_PAIR_MODEL`) if/when its stall clears.
+
+---
+
+Original blocked-state record (heartbeat 3 had not yet executed):
+
+The canonical
+store remained at tick 2 (both agents at `public-shared-center`), last
 heartbeat 2. The aborted run attempt only refreshed a derived read-model
 manifest; authoritative state (tick/heartbeat/goals/positions) is untouched
 and verified.

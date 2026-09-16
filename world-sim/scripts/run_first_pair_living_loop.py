@@ -114,14 +114,16 @@ def main() -> int:
         evidence_path = Path(args.evidence)
     elif args.scratch:
         evidence_path = Path(tempfile.gettempdir()) / "genesis-living-loop-scratch-evidence.json"
-    try:
-        exported = runtime.export_evidence(
-            evidence_path, run_id=f"living-loop-{config.provider_type}"
-        )
-        if evidence_path is not None:
+    if evidence_path is not None:
+        try:
+            exported = runtime.export_evidence(
+                evidence_path, run_id=f"living-loop-{config.provider_type}"
+            )
             print(f"EVIDENCE={evidence_path}")
-    except Exception as exc:
-        print(f"EVIDENCE_EXPORT_SKIPPED={_safe(exc)}")
+        except Exception as exc:
+            print(f"EVIDENCE_EXPORT_SKIPPED={_safe(exc)}")
+    else:
+        print("EVIDENCE=NONE (no path requested; use export_first_pair_state_evidence.py)")
 
     print(f"ADAM_COGNITION={_safe(runtime._current_run_cognition['east_adam']['decision_summary'])}")
     print(f"EVE_COGNITION={_safe(runtime._current_run_cognition['east_eve']['decision_summary'])}")
