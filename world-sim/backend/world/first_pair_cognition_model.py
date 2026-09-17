@@ -46,6 +46,7 @@ _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
 
 _MAX_TRANSPORT_ATTEMPTS = 3
 _TRANSPORT_BACKOFF_SECONDS = (5.0, 10.0)
+_MAX_COMPLETION_TOKENS = 4096
 _RETRYABLE_STATUS_MIN = 500
 _RETRYABLE_STATUS_MAX = 599
 
@@ -1039,14 +1040,21 @@ class ModelCognitionBackend(CognitionBackend):
                 {"role": "system", "content": system_prompt},
             ],
             temperature=0.3,
-            max_tokens=2048,
+            max_tokens=_MAX_COMPLETION_TOKENS,
             budget=budget,
         )
         if response is None:
             return None, err
 
         raw_text = response.choices[0].message.content if response.choices else None
+        finish_reason = (
+            getattr(response.choices[0], "finish_reason", None)
+            if response.choices
+            else None
+        )
         if not raw_text or not raw_text.strip():
+            if finish_reason == "length":
+                return None, "max_tokens_truncated_response"
             return None, "empty_response"
 
         raw_json = _extract_json(raw_text)
@@ -1069,14 +1077,21 @@ class ModelCognitionBackend(CognitionBackend):
                 {"role": "user", "content": repair_prompt},
             ],
             temperature=0.2,
-            max_tokens=2048,
+            max_tokens=_MAX_COMPLETION_TOKENS,
             budget=budget,
         )
         if response2 is None:
             return None, err2
 
         raw_text2 = response2.choices[0].message.content if response2.choices else None
+        finish_reason2 = (
+            getattr(response2.choices[0], "finish_reason", None)
+            if response2.choices
+            else None
+        )
         if not raw_text2 or not raw_text2.strip():
+            if finish_reason2 == "length":
+                return None, "repair_max_tokens_truncated_response"
             return None, "repair_empty_response"
 
         raw_json2 = _extract_json(raw_text2)
