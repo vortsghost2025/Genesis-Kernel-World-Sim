@@ -758,6 +758,25 @@ class FirstPairRuntime:
                 cycle = CognitiveCycle(backend)
                 ctx = self._build_context(agent_ref, hb)
                 output = cycle.run_cycle(ctx)
+                serving = getattr(backend, "serving_provider_type", "")
+                cycle_fallback_used = getattr(backend, "fallback_used", False)
+                cycle_primary_failure = getattr(
+                    backend, "primary_failure_reason", ""
+                )
+                if cycle_fallback_used and serving:
+                    # A fallback lane served this cycle: sticky for the run.
+                    self._fallback_used = True
+                    self._serving_provider_type = serving
+                elif not cycle_primary_failure and serving:
+                    # Primary served this cycle; recorded only while no
+                    # fallback has served any earlier cycle in this run.
+                    # A cycle that failed entirely never touches serving.
+                    if not getattr(self, "_fallback_used", False):
+                        self._serving_provider_type = serving
+                if cycle_primary_failure and not getattr(
+                    self, "_primary_failure_reason", ""
+                ):
+                    self._primary_failure_reason = cycle_primary_failure
                 outcome = self._execute_action(agent_ref, output.action, hb)
 
                 if agent_ref == "east_adam":
@@ -981,12 +1000,26 @@ class FirstPairRuntime:
         except Exception:
             pass
 
+        # Lane that actually served cognition during this run (equals
+        # provider_type when no fallback lane served), plus fallback
+        # provenance: the sanitized primary failure that triggered the
+        # fallback is preserved even when the fallback succeeded.
+        serving_provider_type = (
+            getattr(self, "_serving_provider_type", "") or provider_type
+        )
+        fallback_used = bool(getattr(self, "_fallback_used", False))
+        primary_failure_reason = getattr(self, "_primary_failure_reason", "")[:600]
+
         bundle: dict[str, Any] = {
             "evidence_schema_version": "10FN.2",
             "run_id": run_id,
             "backend_label": backend_label,
             "provider_type": provider_type,
+            "primary_provider_type": provider_type,
             "model_name": model_name,
+            "serving_provider_type": serving_provider_type,
+            "fallback_used": fallback_used,
+            "primary_failure_reason": primary_failure_reason,
             "root": str(self._store.root) if self._store else "",
             "process_started_at_utc": pre["started_at_utc"] if pre else "",
             "process_finished_at_utc": process_start.isoformat(),

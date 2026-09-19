@@ -1224,3 +1224,701 @@ class TestOllamaClientConstruction:
         after = set(p for p in scratch.rglob("*") if p.is_file())
         assert before == after
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Fallback lane — graceful degradation when a second credentialled provider
+# is configured. NVIDIA primary falls back to OpenRouter (and vice versa)
+# only after the primary request fails; the lane that actually served is
+# exposed via ``serving_provider_type`` for runtime evidence.
+# ---------------------------------------------------------------------------
+
+_FALLBACK_ENV_KEYS = (
+    "GENESIS_FIRST_PAIR_BASE_URL",
+    "GENESIS_FIRST_PAIR_API_KEY",
+    "GENESIS_FIRST_PAIR_MODEL",
+    "GENESIS_FIRST_PAIR_FALLBACK_MODEL",
+    "NVIDIA_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OLLAMA_HOST",
+)
+
+
+def _clear_fallback_env(monkeypatch):
+    for name in _FALLBACK_ENV_KEYS:
+        monkeypatch.delenv(name, raising=False)
+
+
+class _FailingTransport:
+    """Fake transport whose create() always raises a non-retryable error."""
+
+    def __init__(self, message: str = "lane down"):
+        self.message = message
+        self.call_count = 0
+
+    @property
+    def chat(self):
+        return self
+
+    @property
+    def completions(self):
+        return self
+
+    def create(self, **kwargs):
+        self.call_count += 1
+        raise Exception(self.message)
+
+
+class TestFallbackResolution:
+    def test_nvidia_primary_gets_openrouter_fallback(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "primary/m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "fb/m:free")
+        primary = resolve_provider()
+        fb = cmod.resolve_fallback_provider(primary)
+        assert primary.provider_type == "nvidia"
+        assert fb is not None
+        assert fb.provider_type == "openrouter"
+        assert fb.model == "fb/m:free"
+        assert fb.api_key == "or-key"
+        assert "openrouter" in fb.base_url
+
+    def test_openrouter_primary_gets_nvidia_fallback(self, monkeypatch):
+        # OpenRouter-primary arises from an explicitly injected config
+        # (from_provider_config): resolve_provider() with BOTH keys set
+        # always picks NVIDIA, so the reverse chain is only reachable with
+        # an explicit OpenRouter config plus NVIDIA_API_KEY in env.
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "fb/m")
+        primary = ProviderConfig(
+            provider_type="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            model="primary/m",
+            api_key="or-key",
+        )
+        fb = cmod.resolve_fallback_provider(primary)
+        assert fb is not None
+        assert fb.provider_type == "nvidia"
+        assert "nvidia.com" in fb.base_url
+        assert fb.model == "fb/m"
+        assert fb.api_key == "nv-key"
+
+    def test_no_fallback_model_returns_none(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        primary = resolve_provider()
+        assert cmod.resolve_fallback_provider(primary) is None
+
+    def test_blank_fallback_model_returns_none(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "   ")
+        primary = resolve_provider()
+        assert cmod.resolve_fallback_provider(primary) is None
+
+    def test_fallback_without_second_lane_credentials_returns_none(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "fb/m")
+        primary = resolve_provider()
+        assert cmod.resolve_fallback_provider(primary) is None
+
+    def test_env_driven_init_resolves_fallback_config(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "fb/m:free")
+        backend = ModelCognitionBackend("east_adam")
+        assert backend.provider_type == "nvidia"
+        assert backend._fallback_config is not None
+        assert backend._fallback_config.provider_type == "openrouter"
+        # Fallback client is lazy: only the primary client is constructed eagerly.
+        assert len(_CapturingOpenAIClient.instances) == 1
+
+    def test_from_provider_config_resolves_env_fallback(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setattr(cmod, "OpenAI", _CapturingOpenAIClient)
+        _CapturingOpenAIClient.instances = []
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "fb/m:free")
+        config = ProviderConfig(
+            provider_type="nvidia",
+            base_url="https://n.example/v1",
+            model="m",
+            api_key="k",
+        )
+        backend = ModelCognitionBackend.from_provider_config("east_adam", config)
+        assert backend._fallback_config is not None
+        assert backend._fallback_config.provider_type == "openrouter"
+
+
+class TestFallbackTransport:
+    _PRIMARY = ProviderConfig("nvidia", "https://n.example/v1", "p-m", "pk")
+    _FALLBACK = ProviderConfig("openrouter", "https://o.example/v1", "f-m:free", "ok")
+
+    def _make_backend(self, primary_client, fallback_client=None, fallback_config=None):
+        kwargs = {}
+        if fallback_config is not None:
+            kwargs["fallback_config"] = fallback_config
+        if fallback_client is not None:
+            kwargs["fallback_client"] = fallback_client
+        return ModelCognitionBackend.with_client(
+            "east_adam", primary_client, self._PRIMARY, **kwargs
+        )
+
+    def test_primary_failure_fallback_serves(self, sample_context):
+        primary = _FailingTransport("primary down")
+        fb = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert result.action is None
+        assert backend.serving_provider_type == "openrouter"
+        assert fb.call_count == 1
+        assert primary.call_count == 1
+
+    def test_primary_success_never_calls_fallback(self, sample_context):
+        primary = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        fb = _FailingTransport("fallback must not be called")
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert backend.serving_provider_type == "nvidia"
+        assert fb.call_count == 0
+
+    def test_both_lanes_fail_reports_combined_error(self, sample_context):
+        primary = _FailingTransport("primary down")
+        fb = _FailingTransport("fallback down")
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.action is None
+        assert result.confidence == 0.0
+        assert "error" in result.memory_write[0]["type"]
+        combined = str(result.memory_write) + result.internal_reasoning + result.uncertainty
+        assert "primary down" in combined
+        assert "fallback down" in combined
+        assert backend.serving_provider_type == "nvidia"
+
+    def test_repair_round_uses_serving_lane(self, sample_context):
+        primary = _FailingTransport("primary down")
+        fb = _FakeClient([
+            _make_mock_response('{"bad": "first"}'),
+            _make_mock_response(json.dumps(_valid_response)),
+        ])
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert fb.call_count == 2
+        assert backend.serving_provider_type == "openrouter"
+
+    def test_no_fallback_config_preserves_single_lane_failure(self, sample_context):
+        primary = _FailingTransport("only lane down")
+        backend = self._make_backend(primary)
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.0
+        assert primary.call_count == 1
+        assert backend.serving_provider_type == "nvidia"
+
+
+class TestRuntimeServingProviderEvidence:
+    def test_stub_evidence_has_serving_provider_type_key(self):
+        import tempfile
+        from backend.world.first_pair_runtime import FirstPairRuntime
+
+        runtime = FirstPairRuntime(
+            persistence_root=Path(tempfile.mkdtemp()),
+            heartbeat_limit=1,
+            backend="deterministic_stub",
+        )
+        runtime.run()
+        bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_serving.json")
+        assert "serving_provider_type" in bundle
+
+    def test_model_backend_serving_provider_type_in_evidence(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_backend = MagicMock()
+            mock_backend.serving_provider_type = "openrouter"
+            mock_backend.observe_and_orient.return_value = CognitionOutput(
+                action=None,
+                memory_write=[{"type": "observation", "content": "Nothing to report."}],
+                goal_updates=None,
+                questions_raised=None,
+                internal_reasoning="Test cognition cycle.",
+                confidence=0.5,
+            )
+            mock_backend.reflect_on_outcome.return_value = "Mock reflection: no action."
+            mock_cls.return_value = mock_backend
+
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_fb.json")
+            assert bundle.get("serving_provider_type") == "openrouter"
+
+
+# ---------------------------------------------------------------------------
+# Free-lane guard — an OpenRouter fallback must be an explicitly free model
+# (id ending in ":free"). A paid OpenRouter fallback fails closed during
+# fallback resolution. The NVIDIA fallback lane carries no such guard.
+# ---------------------------------------------------------------------------
+
+
+class TestFreeLaneGuard:
+    def test_openrouter_fallback_free_model_accepted(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "z-ai/glm-5.2:free")
+        primary = resolve_provider()
+        fb = cmod.resolve_fallback_provider(primary)
+        assert fb is not None
+        assert fb.provider_type == "openrouter"
+        assert fb.model == "z-ai/glm-5.2:free"
+
+    def test_openrouter_fallback_paid_model_fails_closed(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret-key-1234567890")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "z-ai/glm-5.2")
+        primary = resolve_provider()
+        with pytest.raises(ProviderError) as exc:
+            cmod.resolve_fallback_provider(primary)
+        msg = str(exc.value)
+        assert ":free" in msg
+        assert "z-ai/glm-5.2" in msg
+        assert "or-secret-key-1234567890" not in msg
+
+    def test_openrouter_fallback_nonfree_variant_fails_closed(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "deepseek/deepseek-v4-pro")
+        primary = resolve_provider()
+        with pytest.raises(ProviderError) as exc:
+            cmod.resolve_fallback_provider(primary)
+        assert ":free" in str(exc.value)
+
+    def test_nvidia_fallback_has_no_free_model_guard(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "meta/llama-3.3-70b-instruct")
+        primary = ProviderConfig(
+            provider_type="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            model="primary/m",
+            api_key="or-key",
+        )
+        fb = cmod.resolve_fallback_provider(primary)
+        assert fb is not None
+        assert fb.provider_type == "nvidia"
+        assert fb.model == "meta/llama-3.3-70b-instruct"
+
+    def test_env_driven_init_with_paid_openrouter_fallback_fails_closed(self, monkeypatch):
+        _clear_fallback_env(monkeypatch)
+        monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_MODEL", "m")
+        monkeypatch.setenv("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "z-ai/glm-5.2")
+        with pytest.raises(ProviderError):
+            ModelCognitionBackend("east_adam")
+
+
+# ---------------------------------------------------------------------------
+# Fallback provenance — when the primary fails, the failure reason must be
+# preserved alongside the identity of the lane that served. No fake
+# failure when the primary succeeds; no fallback_used when the fallback
+# itself failed.
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackProvenance:
+    _PRIMARY = ProviderConfig("nvidia", "https://n.example/v1", "p-m", "pk")
+    _FALLBACK = ProviderConfig("openrouter", "https://o.example/v1", "f-m:free", "ok")
+
+    def _make_backend(self, primary_client, fallback_client=None, fallback_config=None,
+                      primary_config=None):
+        kwargs = {}
+        if fallback_config is not None:
+            kwargs["fallback_config"] = fallback_config
+        if fallback_client is not None:
+            kwargs["fallback_client"] = fallback_client
+        return ModelCognitionBackend.with_client(
+            "east_adam", primary_client, primary_config or self._PRIMARY, **kwargs
+        )
+
+    def test_fallback_serving_records_provenance(self, sample_context):
+        primary = _FailingTransport("primary down")
+        fb = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert backend.fallback_used is True
+        assert backend.serving_provider_type == "openrouter"
+        assert "primary down" in backend.primary_failure_reason
+        assert "transport attempts: 1" in backend.primary_failure_reason
+
+    def test_primary_success_records_no_failure(self, sample_context):
+        primary = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        backend = self._make_backend(primary)
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert backend.fallback_used is False
+        assert backend.primary_failure_reason == ""
+        assert backend.serving_provider_type == "nvidia"
+
+    def test_both_lanes_fail_records_primary_failure_without_fallback_served(
+        self, sample_context
+    ):
+        primary = _FailingTransport("primary down")
+        fb = _FailingTransport("fallback down")
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.0
+        assert backend.fallback_used is False
+        assert "primary down" in backend.primary_failure_reason
+
+    def test_provenance_never_leaks_primary_credential(self, sample_context):
+        secret = "nvapi-primarysecretkey0987654321"
+        primary_cfg = ProviderConfig("nvidia", "https://n.example/v1", "p-m", secret)
+        primary = _FailingTransport(f"primary failed with {secret}")
+        fb = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        backend = self._make_backend(
+            primary, fallback_client=fb, fallback_config=self._FALLBACK,
+            primary_config=primary_cfg,
+        )
+        backend.observe_and_orient(sample_context)
+        assert backend.fallback_used is True
+        assert secret not in backend.primary_failure_reason
+        assert "[REDACTED]" in backend.primary_failure_reason
+        assert "transport attempts: 1" in backend.primary_failure_reason
+
+
+class TestRuntimeFallbackProvenanceEvidence:
+    def _make_cognition_output(self):
+        return CognitionOutput(
+            action=None,
+            memory_write=[{"type": "observation", "content": "Nothing to report."}],
+            goal_updates=None,
+            questions_raised=None,
+            internal_reasoning="Test cognition cycle.",
+            confidence=0.5,
+        )
+
+    def test_fallback_serving_evidence_preserves_primary_failure(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_backend = MagicMock()
+            mock_backend.provider_type = "nvidia"
+            mock_backend.model_name = "z-ai/glm-5.3-flash"
+            mock_backend.serving_provider_type = "openrouter"
+            mock_backend.fallback_used = True
+            mock_backend.primary_failure_reason = (
+                "Error code: 404 (transport attempts: 1)"
+            )
+            mock_backend.observe_and_orient.return_value = self._make_cognition_output()
+            mock_backend.reflect_on_outcome.return_value = "Mock reflection."
+            mock_cls.return_value = mock_backend
+
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_prov.json")
+            assert bundle.get("primary_provider_type") == "nvidia"
+            assert bundle.get("serving_provider_type") == "openrouter"
+            assert bundle.get("fallback_used") is True
+            assert "404" in bundle.get("primary_failure_reason", "")
+
+    def test_primary_success_evidence_records_no_fake_failure(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_backend = MagicMock()
+            mock_backend.provider_type = "nvidia"
+            mock_backend.model_name = "z-ai/glm-5.3-flash"
+            mock_backend.serving_provider_type = "nvidia"
+            mock_backend.fallback_used = False
+            mock_backend.primary_failure_reason = ""
+            mock_backend.observe_and_orient.return_value = self._make_cognition_output()
+            mock_backend.reflect_on_outcome.return_value = "Mock reflection."
+            mock_cls.return_value = mock_backend
+
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_nofail.json")
+            assert bundle.get("fallback_used") is False
+            assert bundle.get("primary_failure_reason") == ""
+            assert bundle.get("serving_provider_type") == "nvidia"
+            assert bundle.get("primary_provider_type") == "nvidia"
+
+    def test_stub_evidence_fallback_defaults(self):
+        import tempfile
+        from backend.world.first_pair_runtime import FirstPairRuntime
+
+        runtime = FirstPairRuntime(
+            persistence_root=Path(tempfile.mkdtemp()),
+            heartbeat_limit=1,
+            backend="deterministic_stub",
+        )
+        runtime.run()
+        bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_stubdef.json")
+        assert bundle.get("fallback_used") is False
+        assert bundle.get("primary_failure_reason") == ""
+        assert "primary_provider_type" in bundle
+        assert "serving_provider_type" in bundle
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter lane transient retry — a 429/timeout on the free fallback lane
+# must slow the request down (bounded transient retry, 10IV semantics), not
+# kill the cycle on the first hit. Non-retryable errors still fail fast.
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackLaneTransientRetry:
+    _PRIMARY = ProviderConfig("nvidia", "https://n.example/v1", "p-m", "pk")
+    _FALLBACK = ProviderConfig("openrouter", "https://o.example/v1", "f-m:free", "ok")
+
+    def _make_backend(self, primary_client, fallback_client):
+        return ModelCognitionBackend.with_client(
+            "east_adam",
+            primary_client,
+            self._PRIMARY,
+            fallback_config=self._FALLBACK,
+            fallback_client=fallback_client,
+        )
+
+    def test_openrouter_fallback_retries_transient_then_serves(
+        self, sample_context, monkeypatch
+    ):
+        import httpx
+        import openai as openai_mod
+
+        monkeypatch.setattr(cmod.time, "sleep", lambda s: None)
+        req = httpx.Request("POST", "https://o.example/v1/chat/completions")
+        good = _FakeClient([_make_mock_response(json.dumps(_valid_response))])
+        calls = {"n": 0}
+
+        class _TransientThenGood:
+            @property
+            def chat(self):
+                return self
+
+            @property
+            def completions(self):
+                return self
+
+            def create(self, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise openai_mod.APITimeoutError(request=req)
+                return good.create(**kwargs)
+
+        backend = self._make_backend(
+            _FailingTransport("primary down"), _TransientThenGood()
+        )
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.6
+        assert backend.fallback_used is True
+        assert backend.serving_provider_type == "openrouter"
+        assert calls["n"] == 2  # one transient failure retried, then served
+
+    def test_openrouter_fallback_nonretryable_fails_fast(
+        self, sample_context, monkeypatch
+    ):
+        monkeypatch.setattr(cmod.time, "sleep", lambda s: None)
+        fb = _FailingTransport("fallback down")
+        backend = self._make_backend(_FailingTransport("primary down"), fb)
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.0
+        assert backend.fallback_used is False
+        assert fb.call_count == 1  # non-retryable: single fallback attempt
+
+    def test_openrouter_fallback_exhausts_transient_budget(
+        self, sample_context, monkeypatch
+    ):
+        import httpx
+        import openai as openai_mod
+
+        monkeypatch.setattr(cmod.time, "sleep", lambda s: None)
+        req = httpx.Request("POST", "https://o.example/v1/chat/completions")
+        fb = _FailingTransport("boom")
+        fb_retryable_calls = {"n": 0}
+
+        class _AlwaysTransient:
+            @property
+            def chat(self):
+                return self
+
+            @property
+            def completions(self):
+                return self
+
+            def create(self, **kwargs):
+                fb_retryable_calls["n"] += 1
+                raise openai_mod.APITimeoutError(request=req)
+
+        backend = self._make_backend(_FailingTransport("primary down"), _AlwaysTransient())
+        result = backend.observe_and_orient(sample_context)
+        assert result.confidence == 0.0
+        assert backend.fallback_used is False
+        assert fb_retryable_calls["n"] == 3  # bounded: max 3 transient attempts
+
+
+# ---------------------------------------------------------------------------
+# Run-level serving aggregation across agents — a later cycle that fails
+# entirely must not clobber the serving lane recorded when a fallback
+# served an earlier cycle in the same run.
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeMixedAgentServingEvidence:
+    def _make_output(self):
+        return CognitionOutput(
+            action=None,
+            memory_write=[{"type": "observation", "content": "Nothing to report."}],
+            goal_updates=None,
+            questions_raised=None,
+            internal_reasoning="Test cognition cycle.",
+            confidence=0.5,
+        )
+
+    def _make_backend_mock(self, *, serving, fallback_used, primary_failure):
+        mb = MagicMock()
+        mb.provider_type = "nvidia"
+        mb.model_name = "z-ai/glm-5.3-flash"
+        mb.serving_provider_type = serving
+        mb.fallback_used = fallback_used
+        mb.primary_failure_reason = primary_failure
+        mb.observe_and_orient.return_value = self._make_output()
+        mb.reflect_on_outcome.return_value = "Mock reflection."
+        return mb
+
+    def test_later_failed_cycle_does_not_clobber_fallback_serving(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        adam = self._make_backend_mock(
+            serving="openrouter", fallback_used=True, primary_failure="404 (transport attempts: 1)"
+        )
+        eve = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure="429 upstream"
+        )
+        fresh = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_cls.side_effect = [adam, eve, fresh]
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_mixed.json")
+            assert bundle.get("serving_provider_type") == "openrouter"
+            assert bundle.get("fallback_used") is True
+            assert bundle.get("primary_provider_type") == "nvidia"
+            assert "404" in bundle.get("primary_failure_reason", "")
+
+    def test_fallback_serving_in_second_cycle_is_sticky(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        adam = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+        eve = self._make_backend_mock(
+            serving="openrouter", fallback_used=True, primary_failure="404 (transport attempts: 1)"
+        )
+        fresh = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_cls.side_effect = [adam, eve, fresh]
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_mixed2.json")
+            assert bundle.get("serving_provider_type") == "openrouter"
+            assert bundle.get("fallback_used") is True
+            assert "404" in bundle.get("primary_failure_reason", "")
+
+    def test_all_primary_cycles_keep_primary_serving(self):
+        from unittest.mock import patch
+        from backend.world.first_pair_runtime import FirstPairRuntime
+        import tempfile
+
+        adam = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+        eve = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+        fresh = self._make_backend_mock(
+            serving="nvidia", fallback_used=False, primary_failure=""
+        )
+
+        with patch("backend.world.first_pair_runtime.ModelCognitionBackend") as mock_cls:
+            mock_cls.side_effect = [adam, eve, fresh]
+            runtime = FirstPairRuntime(
+                persistence_root=Path(tempfile.mkdtemp()),
+                heartbeat_limit=1,
+                backend="model",
+            )
+            runtime.run()
+            bundle = runtime.export_evidence(Path(tempfile.mkdtemp()) / "ev_allp.json")
+            assert bundle.get("serving_provider_type") == "nvidia"
+            assert bundle.get("fallback_used") is False
+            assert bundle.get("primary_failure_reason") == ""

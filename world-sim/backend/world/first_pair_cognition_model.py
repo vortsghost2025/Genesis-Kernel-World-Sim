@@ -218,6 +218,44 @@ def resolve_provider() -> ProviderConfig:
     )
 
 
+def resolve_fallback_provider(primary: ProviderConfig) -> ProviderConfig | None:
+    """Resolve an optional single fallback lane for graceful degradation.
+
+    Reads ``GENESIS_FIRST_PAIR_FALLBACK_MODEL``. The fallback lane is the
+    OTHER credentialled provider when both are configured: an NVIDIA primary
+    falls back to OpenRouter (``OPENROUTER_API_KEY``), an OpenRouter primary
+    falls back to NVIDIA (``NVIDIA_API_KEY``). Any other primary lane falls
+    back to NVIDIA first, then OpenRouter.
+
+    FREE-ONLY GUARD: an OpenRouter fallback model must be explicitly free
+    (model id ending in ``:free``). A paid OpenRouter fallback fails closed
+    here with ``ProviderError`` — it is never silently accepted. The NVIDIA
+    fallback lane carries no such guard.
+
+    Returns ``None`` when no fallback model is set or no second-lane
+    credential exists. Credentials are never logged or persisted.
+    """
+    model = os.environ.get("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "").strip()
+    if not model:
+        return None
+    nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
+    or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if primary.provider_type != "nvidia" and nv_key:
+        return ProviderConfig(
+            "nvidia", "https://integrate.api.nvidia.com/v1", model, nv_key
+        )
+    if primary.provider_type != "openrouter" and or_key:
+        if not model.endswith(":free"):
+            raise ProviderError(
+                "OpenRouter fallback model must end with ':free' "
+                "(free-only fallback policy): " + model[:60]
+            )
+        return ProviderConfig(
+            "openrouter", "https://openrouter.ai/api/v1", model, or_key
+        )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Sanitise provider exceptions
 # ---------------------------------------------------------------------------
@@ -848,37 +886,65 @@ class ModelCognitionBackend(CognitionBackend):
     ) -> None:
         self._agent_ref = agent_ref
         self._config = resolve_provider()
+        self._fallback_config = resolve_fallback_provider(self._config)
+        self._fallback_client = None
         self._client = client or OpenAI(
             base_url=self._config.base_url,
             api_key=_client_api_key(self._config),
             timeout=300.0,
         )
         self._model = self._config.model
+        self._last_serving_provider_type = self._config.provider_type
+        self._last_fallback_used = False
+        self._last_primary_failure = ""
 
     @classmethod
     def from_provider_config(
         cls,
         agent_ref: str,
         config: ProviderConfig,
+        fallback_config: ProviderConfig | None = None,
+        fallback_client: Any = None,
     ) -> ModelCognitionBackend:
         self = cls.__new__(cls)
         self._agent_ref = agent_ref
         self._config = config
+        self._fallback_config = (
+            fallback_config
+            if fallback_config is not None
+            else resolve_fallback_provider(config)
+        )
+        self._fallback_client = fallback_client
         self._client = OpenAI(
             base_url=config.base_url,
             api_key=_client_api_key(config),
             timeout=300.0,
         )
         self._model = config.model
+        self._last_serving_provider_type = config.provider_type
+        self._last_fallback_used = False
+        self._last_primary_failure = ""
         return self
 
     @classmethod
-    def with_client(cls, agent_ref: str, client: Any, config: ProviderConfig) -> ModelCognitionBackend:
+    def with_client(
+        cls,
+        agent_ref: str,
+        client: Any,
+        config: ProviderConfig,
+        fallback_config: ProviderConfig | None = None,
+        fallback_client: Any = None,
+    ) -> ModelCognitionBackend:
         self = cls.__new__(cls)
         self._agent_ref = agent_ref
         self._config = config
+        self._fallback_config = fallback_config
+        self._fallback_client = fallback_client
         self._client = client
         self._model = config.model
+        self._last_serving_provider_type = config.provider_type
+        self._last_fallback_used = False
+        self._last_primary_failure = ""
         return self
 
     @property
@@ -888,6 +954,23 @@ class ModelCognitionBackend(CognitionBackend):
     @property
     def model_name(self) -> str:
         return self._model
+
+    @property
+    def serving_provider_type(self) -> str:
+        """Provider type of the lane that served the last request (the
+        primary by default; the fallback lane once it has served)."""
+        return self._last_serving_provider_type
+
+    @property
+    def fallback_used(self) -> bool:
+        """True when the fallback lane served the last cognition request."""
+        return getattr(self, "_last_fallback_used", False)
+
+    @property
+    def primary_failure_reason(self) -> str:
+        """Sanitized primary-lane failure reason for the last request;
+        empty when the primary lane succeeded."""
+        return getattr(self, "_last_primary_failure", "")
 
     def observe_and_orient(self, context: AgentContext) -> CognitionOutput:
         system_prompt = build_system_prompt(context)
@@ -983,40 +1066,51 @@ class ModelCognitionBackend(CognitionBackend):
         temperature: float,
         max_tokens: int,
         budget: list[int],
+        client: Any = None,
+        model: str | None = None,
+        config: ProviderConfig | None = None,
     ) -> tuple[Any | None, str | None]:
         """One logical model call with bounded transport retry (10IV).
 
         Retries ONLY transient transport failures (provider/header timeout,
         connection timeout/reset, HTTP 429, HTTP 5xx) and ONLY on the NVIDIA
-        lane. Authentication, authorization, configuration, and model errors
-        (4xx) fail immediately on the first attempt. ``budget`` is a
-        single-item list holding the remaining transport attempts for this
-        cognition request (max 3 total per request).
+        and OpenRouter lanes — a transient 429/timeout slows the request
+        down (bounded attempts, bounded backoff) instead of failing the
+        cycle on the first hit. Authentication, authorization,
+        configuration, and model errors (other 4xx) fail immediately on
+        the first attempt. ``budget`` is a single-item list holding the
+        remaining transport attempts for this cognition request (max 3
+        total per request per lane). ``client``/``model``/``config`` select
+        the lane for this call (primary by default, or the fallback lane);
+        each lane keeps its own retry policy.
 
         Returns (response, sanitized_error). The error records the attempt
         count and never contains the configured credential. A valid response
         is never re-requested; transport retry and JSON repair are separate
         mechanisms.
         """
-        is_nvidia = self._config.provider_type == "nvidia"
+        use_client = client if client is not None else self._client
+        use_model = model if model is not None else self._model
+        use_config = config if config is not None else self._config
+        retryable_lane = use_config.provider_type in ("nvidia", "openrouter")
         attempts_used = 0
         while True:
             attempts_used += 1
             budget[0] -= 1
             try:
-                response = self._client.chat.completions.create(
-                    model=self._model,
+                response = use_client.chat.completions.create(
+                    model=use_model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
                 return response, None
             except Exception as e:
-                raw_message = _redact_secret_text(str(e), self._config)
+                raw_message = _redact_secret_text(str(e), use_config)
                 safe_error = sanitize_provider_error(Exception(raw_message))
                 last_error = f"{safe_error} (transport attempts: {attempts_used})"
                 if (
-                    not is_nvidia
+                    not retryable_lane
                     or budget[0] <= 0
                     or not _is_retryable_transport_error(e)
                 ):
@@ -1026,13 +1120,49 @@ class ModelCognitionBackend(CognitionBackend):
                 )
                 time.sleep(_TRANSPORT_BACKOFF_SECONDS[backoff_index])
 
+    def _fallback_transport(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float,
+        max_tokens: int,
+        budget: list[int],
+    ) -> tuple[Any | None, str | None]:
+        """One logical model call on the fallback lane. The fallback client
+        is constructed lazily on first use. Retry policy follows the lane's
+        own 10IV rule (transient-only retry on the NVIDIA lane; single
+        attempt on any other lane)."""
+        if self._fallback_client is None:
+            self._fallback_client = OpenAI(
+                base_url=self._fallback_config.base_url,
+                api_key=_client_api_key(self._fallback_config),
+                timeout=300.0,
+            )
+        return self._call_with_transport_retry(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            budget=budget,
+            client=self._fallback_client,
+            model=self._fallback_config.model,
+            config=self._fallback_config,
+        )
+
     def _call_model_with_repair(
         self, system_prompt: str, context: AgentContext
     ) -> tuple[dict | None, str | None]:
         # Shared transport-attempt budget: max 3 transport attempts per
         # cognition request (10IV). Transport retry and JSON repair are
         # separate mechanisms; the JSON repair below stays a single bounded
-        # round and a valid response is never re-requested.
+        # round and a valid response is never re-requested. When a fallback
+        # lane is configured, it is attempted once after the primary lane
+        # fails, with its own bounded budget; the repair round runs on the
+        # lane that served. Provenance: the sanitized primary failure that
+        # triggered the fallback is retained even when the fallback
+        # succeeds, and ``fallback_used`` marks the lane that actually
+        # served.
+        self._last_fallback_used = False
+        self._last_primary_failure = ""
         budget = [_MAX_TRANSPORT_ATTEMPTS]
 
         response, err = self._call_with_transport_retry(
@@ -1043,7 +1173,30 @@ class ModelCognitionBackend(CognitionBackend):
             max_tokens=_MAX_COMPLETION_TOKENS,
             budget=budget,
         )
-        if response is None:
+        serving_config = self._config
+        serving_client = self._client
+        serving_budget = budget
+        if response is None and self._fallback_config is not None:
+            self._last_primary_failure = err or "primary_failed"
+            fb_budget = [_MAX_TRANSPORT_ATTEMPTS]
+            response, fb_err = self._fallback_transport(
+                [
+                    {"role": "system", "content": system_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=_MAX_COMPLETION_TOKENS,
+                budget=fb_budget,
+            )
+            if response is None:
+                return None, f"{err} | fallback: {fb_err}"
+            err = None
+            serving_config = self._fallback_config
+            serving_client = self._fallback_client
+            serving_budget = fb_budget
+            self._last_fallback_used = True
+            self._last_serving_provider_type = self._fallback_config.provider_type
+        elif response is None:
+            self._last_primary_failure = err or "primary_failed"
             return None, err
 
         raw_text = response.choices[0].message.content if response.choices else None
@@ -1078,7 +1231,10 @@ class ModelCognitionBackend(CognitionBackend):
             ],
             temperature=0.2,
             max_tokens=_MAX_COMPLETION_TOKENS,
-            budget=budget,
+            budget=serving_budget,
+            client=serving_client,
+            model=serving_config.model,
+            config=serving_config,
         )
         if response2 is None:
             return None, err2
