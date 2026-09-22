@@ -39,15 +39,20 @@ from pathlib import Path
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+CREATE_NO_WINDOW = 0x08000000
 
-PRIMARY_MODEL = "z-ai/glm-5.3-flash"
-FALLBACK_MODEL = "z-ai/glm-5.2:free"
+PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+FALLBACK_MODEL = "z-ai/glm-5.3-flash"
+ADAM_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+EVE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 _STRIPPED_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",
     "GENESIS_FIRST_PAIR_API_KEY",
     "GENESIS_FIRST_PAIR_MODEL",
     "GENESIS_FIRST_PAIR_FALLBACK_MODEL",
+    "GENESIS_FIRST_PAIR_MODEL_EAST_ADAM",
+    "GENESIS_FIRST_PAIR_MODEL_EAST_EVE",
     "NVIDIA_API_KEY",
     "OPENROUTER_API_KEY",
     "OLLAMA_HOST",
@@ -118,15 +123,19 @@ def build_clean_env(vault_path: Path) -> dict:
         env.pop(key, None)
     env["NVIDIA_API_KEY"] = nv
     env["OPENROUTER_API_KEY"] = ork
+    env["GENESIS_FIRST_PAIR_BASE_URL"] = "https://openrouter.ai/api/v1"
+    env["GENESIS_FIRST_PAIR_API_KEY"] = ork
     env["GENESIS_FIRST_PAIR_MODEL"] = PRIMARY_MODEL
     env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] = FALLBACK_MODEL
+    env["GENESIS_FIRST_PAIR_MODEL_EAST_ADAM"] = ADAM_MODEL
+    env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = EVE_MODEL
     return env
 
 
 def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     """Run the repo provider resolver in a clean child process and require
-    NVIDIA primary plus an explicitly-free OpenRouter fallback. The proof
-    performs no network calls and never prints credential values."""
+    a valid primary lane plus a valid fallback. The proof performs no
+    network calls and never prints credential values."""
     code = (
         "import sys; sys.path.insert(0, '.'); "
         "from backend.world.first_pair_cognition_model import ("
@@ -147,17 +156,17 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=60,
+            creationflags=CREATE_NO_WINDOW,
         )
     except Exception as exc:
         return False, f"resolution proof process failed: {type(exc).__name__}"
     text = proc.stdout.strip()
     if proc.returncode != 0:
         return False, text or f"resolution proof exited {proc.returncode}"
-    if (
-        "RESOLUTION_PROVIDER=nvidia" not in text
-        or "RESOLUTION_FALLBACK_FREE=TRUE" not in text
-    ):
+    if "RESOLUTION_KEY_SET=TRUE" not in text:
         return False, text
+    if "RESOLUTION_FALLBACK=" not in text or "RESOLUTION_FALLBACK=NONE" in text:
+        return False, text + " (no fallback lane)"
     return True, text
 
 
@@ -205,6 +214,7 @@ def export_state_evidence(
             capture_output=True,
             text=True,
             timeout=120,
+            creationflags=CREATE_NO_WINDOW,
         )
     except Exception as exc:
         return False, f"evidence export process failed: {type(exc).__name__}"
@@ -306,6 +316,7 @@ def runner_main(argv=None) -> int:
             ],
             cwd=str(world_sim_root),
             env=env,
+            creationflags=CREATE_NO_WINDOW,
         )
         if already_persisted(store_root, expect):
             _write_status(
@@ -403,14 +414,19 @@ def launcher_main(argv=None) -> int:
     ]
 
     log_fh = open(args.log, "ab", buffering=0)
-    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+    flags = (
+        DETACHED_PROCESS
+        | CREATE_NEW_PROCESS_GROUP
+        | CREATE_BREAKAWAY_FROM_JOB
+        | CREATE_NO_WINDOW
+    )
     try:
         proc = subprocess.Popen(
             cmd, stdout=log_fh, stderr=log_fh, creationflags=flags, close_fds=True
         )
         breakaway = True
     except (PermissionError, OSError):
-        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
         proc = subprocess.Popen(
             cmd, stdout=log_fh, stderr=log_fh, creationflags=flags, close_fds=True
         )

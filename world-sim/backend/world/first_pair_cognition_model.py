@@ -886,6 +886,21 @@ class ModelCognitionBackend(CognitionBackend):
     ) -> None:
         self._agent_ref = agent_ref
         self._config = resolve_provider()
+
+        # Per-agent model override (10JB): if GENESIS_FIRST_PAIR_MODEL_<REF>
+        # is set, use it as this agent's primary model on the resolved
+        # provider lane. The fallback model remains shared.
+        agent_model = os.environ.get(
+            f"GENESIS_FIRST_PAIR_MODEL_{agent_ref.upper()}", ""
+        ).strip()
+        if agent_model:
+            self._config = ProviderConfig(
+                provider_type=self._config.provider_type,
+                base_url=self._config.base_url,
+                model=agent_model,
+                api_key=self._config.api_key,
+            )
+
         self._fallback_config = resolve_fallback_provider(self._config)
         self._fallback_client = None
         self._client = client or OpenAI(

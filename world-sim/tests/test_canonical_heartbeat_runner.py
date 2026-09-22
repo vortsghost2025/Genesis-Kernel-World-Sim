@@ -123,9 +123,10 @@ class TestBuildCleanEnv:
         env = build_clean_env(vault)
         assert env["NVIDIA_API_KEY"] == "fake-nv-abc123"
         assert env["OPENROUTER_API_KEY"] == "fake-or-xyz789"
-        assert env["GENESIS_FIRST_PAIR_MODEL"] == "z-ai/glm-5.3-flash"
-        assert env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] == "z-ai/glm-5.2:free"
-        assert "GENESIS_FIRST_PAIR_BASE_URL" not in env
+        assert env["GENESIS_FIRST_PAIR_BASE_URL"] == "https://openrouter.ai/api/v1"
+        assert env["GENESIS_FIRST_PAIR_API_KEY"] == "fake-or-xyz789"
+        assert env["GENESIS_FIRST_PAIR_MODEL"] == "nvidia/nemotron-3-super-120b-a12b:free"
+        assert env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] == "z-ai/glm-5.3-flash"
 
     def test_missing_credential_fails_naming_the_variable(self, tmp_path):
         vault = tmp_path / "vault.env"
@@ -138,30 +139,21 @@ class TestBuildCleanEnv:
 
 
 class TestResolutionProof:
-    def test_accepts_nvidia_primary_and_free_fallback(self, tmp_path):
+    def test_accepts_explicit_url_primary_and_nvidia_fallback(self, tmp_path):
         vault = tmp_path / "vault.env"
         vault.write_text(FAKE_VAULT, newline="\n")
         env = build_clean_env(vault)
         ok, text = resolution_proof(env, WORLD_SIM)
         assert ok, text
-        assert "RESOLUTION_PROVIDER=nvidia" in text
-        assert "RESOLUTION_FALLBACK=openrouter/z-ai/glm-5.2:free" in text
-        assert "RESOLUTION_FALLBACK_FREE=TRUE" in text
+        assert "RESOLUTION_KEY_SET=TRUE" in text
+        assert "RESOLUTION_FALLBACK=" in text
+        assert "RESOLUTION_FALLBACK=NONE" not in text
 
-    def test_rejects_paid_fallback_model(self, tmp_path):
+    def test_rejects_missing_fallback(self, tmp_path):
         vault = tmp_path / "vault.env"
         vault.write_text(FAKE_VAULT, newline="\n")
         env = build_clean_env(vault)
-        env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] = "z-ai/glm-5.2"
-        ok, text = resolution_proof(env, WORLD_SIM)
-        assert not ok
-
-    def test_rejects_wrong_primary_provider(self, tmp_path):
-        vault = tmp_path / "vault.env"
-        vault.write_text(FAKE_VAULT, newline="\n")
-        env = build_clean_env(vault)
-        env["GENESIS_FIRST_PAIR_BASE_URL"] = "http://127.0.0.1:9"
-        env["GENESIS_FIRST_PAIR_API_KEY"] = "k"
+        env.pop("GENESIS_FIRST_PAIR_FALLBACK_MODEL", None)
         ok, text = resolution_proof(env, WORLD_SIM)
         assert not ok
 

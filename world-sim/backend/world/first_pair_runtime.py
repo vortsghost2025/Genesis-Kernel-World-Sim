@@ -67,6 +67,16 @@ from backend.world.first_pair_persistence import (
 )
 from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
+from backend.world.first_pair_fog_adapter import (
+    FogAdapterError,
+    cognition_safe_observation,
+    derive_topology,
+    fog_gate_active,
+    load_known_map,
+    load_true_map,
+    merge_observation,
+    persist_known_map,
+)
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
 _SAFE_OBJECT_ID_CHARS = frozenset(
@@ -212,6 +222,66 @@ class FirstPairRuntime:
         )
 
     # ------------------------------------------------------------------
+    # Fog integration (10JB-2): inert gate helpers
+    # ------------------------------------------------------------------
+
+    def _fog_active(self) -> bool:
+        """True when per-agent known-map files exist (the fog gate)."""
+        if self._store is None:
+            return False
+        return fog_gate_active(self._store.root)
+
+    def _get_data_root(self) -> Path:
+        return Path(__file__).resolve().parents[2] / "data"
+
+    def _get_fog_observation(
+        self, agent_ref: str, position: str, objects_here: list
+    ) -> dict[str, Any]:
+        """Build a cognition-safe fog observation. Raises on fog failure."""
+        true_map = load_true_map(self._get_data_root())
+        known_map = load_known_map(self._store.root, agent_ref)
+        return cognition_safe_observation(
+            true_map, position, known_map, None, objects_here, agent_ref
+        )
+
+    def _get_effective_adjacency(self, current_pos: str) -> list[str]:
+        """Adjacent tiles from fog-derived topology or legacy policy."""
+        if self._fog_active():
+            true_map = load_true_map(self._get_data_root())
+            known_maps = [
+                load_known_map(self._store.root, ref)
+                for ref in ("east_adam", "east_eve")
+            ]
+            topology = derive_topology(true_map, known_maps)
+            for tile in topology["tiles"]:
+                if tile["tile_id"] == current_pos:
+                    return tile["adjacent"]
+            return []
+        return get_adjacent_tiles(self._runtime_policy, current_pos)
+
+    def _get_effective_allowed_tiles(self) -> list[str]:
+        """Allowed tile IDs from fog-derived topology or legacy policy."""
+        if self._fog_active():
+            true_map = load_true_map(self._get_data_root())
+            known_maps = [
+                load_known_map(self._store.root, ref)
+                for ref in ("east_adam", "east_eve")
+            ]
+            topology = derive_topology(true_map, known_maps)
+            return topology["allowed_tile_ids"]
+        return self._runtime_policy.topology.get("allowed_tile_ids", [])
+
+    def _merge_and_persist_known_map(
+        self, agent_ref: str, observation: dict[str, Any], tick: int
+    ) -> None:
+        """Merge observation into the agent's known map and persist it."""
+        if not self._fog_active():
+            return
+        known_map = load_known_map(self._store.root, agent_ref)
+        updated = merge_observation(known_map, observation, tick)
+        persist_known_map(self._store.root, agent_ref, updated)
+
+    # ------------------------------------------------------------------
     # Context builder
     # ------------------------------------------------------------------
 
@@ -249,12 +319,39 @@ class FirstPairRuntime:
             if isinstance(obj, dict) and obj.get("tile_id") == position
         ]
 
-        # Visible tiles: use runtime policy topology if grant active, else habitat
-        if self._movement_grant_active():
+        # Fog observation when the gate is active; legacy otherwise (10JB-2)
+        fog_obs_error = False
+        if self._fog_active():
+            try:
+                observation = self._get_fog_observation(
+                    agent_ref, position, current_tile_objects
+                )
+                visible_tiles = observation["visible_tiles"]
+                available_moves = [t for t in visible_tiles if t != position]
+                policy_allowed = self._get_effective_allowed_tiles()
+                movement_allowed_flag = True
+            except FogAdapterError:
+                # Fail-closed: no fabricated observation, no legacy fallback
+                fog_obs_error = True
+                observation = {
+                    "tile_id": position,
+                    "visible_tiles": [position],
+                    "objects_here": current_tile_objects,
+                }
+                visible_tiles = [position]
+                available_moves = []
+                policy_allowed = [position]
+                movement_allowed_flag = False
+        elif self._movement_grant_active():
             available_moves = get_adjacent_tiles(self._runtime_policy, position)
             visible_tiles = [position] + available_moves
             policy_allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
             movement_allowed_flag = True
+            observation = {
+                "tile_id": position,
+                "visible_tiles": visible_tiles,
+                "objects_here": current_tile_objects,
+            }
         else:
             available_moves = []
             visible_tiles = self._habitat.get("observation_boundaries", {}).get(
@@ -262,6 +359,13 @@ class FirstPairRuntime:
             )
             policy_allowed = self._habitat.get("allowed_tile_ids", [])
             movement_allowed_flag = self._habitat.get("movement_allowed", False)
+            observation = {
+                "tile_id": position,
+                "visible_tiles": visible_tiles,
+                "objects_here": current_tile_objects,
+            }
+        if fog_obs_error:
+            observation["fog_error"] = "geography observation unavailable"
 
         # Visible public messages (addressed to this agent or public "all")
         visible_msgs = [
@@ -287,12 +391,6 @@ class FirstPairRuntime:
         caps = []
         if self._movement_grant_active():
             caps.append(self._capability_grant.capability_id)
-
-        observation = {
-            "tile_id": position,
-            "visible_tiles": visible_tiles,
-            "objects_here": current_tile_objects,
-        }
 
         # --- Bounded memory selection ---
         history = load_heartbeat_history(self._store)
@@ -433,7 +531,7 @@ class FirstPairRuntime:
             return {"status": "blocked", "reason": "No active movement grant. Request capability from human operator."}
 
         target = action.get("target_tile")
-        allowed = self._runtime_policy.topology.get("allowed_tile_ids", [])
+        allowed = self._get_effective_allowed_tiles()
         if target not in allowed:
             return {"status": "blocked", "reason": f"Tile {target} not in runtime policy allowed tiles"}
 
@@ -441,16 +539,15 @@ class FirstPairRuntime:
         if current_pos is None:
             current_pos = self._habitat["starting_tile_ids"].get(agent_ref)
 
-        # Adjacent-only movement
-        adjacent = get_adjacent_tiles(self._runtime_policy, current_pos)
+        # Adjacent-only movement (fog-derived or legacy policy)
+        adjacent = self._get_effective_adjacency(current_pos)
         if target not in adjacent:
             return {"status": "blocked", "reason": f"Cannot move from {current_pos} to {target}: not adjacent (adjacent: {adjacent})"}
 
-        # Co-location allowed only in shared-center
-        other_ref = "east_eve" if agent_ref == "east_adam" else "east_adam"
-        other_pos = self._world_state.tile_occupancy.get(other_ref)
-        if target == other_pos and target != "public-shared-center":
-            return {"status": "blocked", "reason": f"Tile {target} already occupied by the other agent (co-location only allowed in public-shared-center)"}
+        # Co-location is permitted on any valid traversable tile
+        # (the old shared-center-only restriction was removed for the
+        # expanded world; 10IZ §2.7 documented this as a near-term
+        # design decision and the operator approved the generalization)
 
         self._world_state.tile_occupancy[agent_ref] = target
         return {"status": "success", "from": current_pos, "to": target}
@@ -778,6 +875,15 @@ class FirstPairRuntime:
                 ):
                     self._primary_failure_reason = cycle_primary_failure
                 outcome = self._execute_action(agent_ref, output.action, hb)
+
+                # Fog: merge observation into known map and persist (10JB-2)
+                if self._fog_active():
+                    try:
+                        self._merge_and_persist_known_map(
+                            agent_ref, ctx.observation, hb
+                        )
+                    except FogAdapterError:
+                        pass  # Known-map persist failure noted; don't crash the cycle
 
                 if agent_ref == "east_adam":
                     adam_action = output.action
