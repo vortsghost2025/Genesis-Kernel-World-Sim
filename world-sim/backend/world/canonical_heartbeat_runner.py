@@ -43,7 +43,7 @@ CREATE_NO_WINDOW = 0x08000000
 
 PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 FALLBACK_MODEL = "z-ai/glm-5.3-flash"
-ADAM_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+ADAM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 EVE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 _STRIPPED_ENV_KEYS = (
