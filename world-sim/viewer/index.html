@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genesis — First Pair World Viewer</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --text: #f0f3f6; --dim: #9da7b3;
+    --adam: #58a6ff; --eve: #f778ba;
+    --grass: #2d5016; --forest: #1b3a24; --hill: #4d4226;
+    --mount: #4a4f57; --coast: #194a5e;
+    --accent: #ffd76d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif; font-size: 18px;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 2px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 1.5rem; margin: 0; }
+  header .tick { color: var(--accent); font-weight: 700; }
+  main { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 0; height: calc(100vh - 61px); }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; height: auto; } }
+
+  #mapwrap { overflow: auto; padding: 16px; }
+  svg { display: block; margin: 0 auto; }
+  .tile { stroke: var(--line); stroke-width: 1.5; rx: 10; cursor: pointer; }
+  .tile:focus { outline: 3px solid var(--accent); }
+  .tile.fogged { opacity: 0.13; }
+  .tile-label { fill: #fff; font-size: 13px; font-weight: 600; pointer-events: none; text-anchor: middle; }
+  .tile-label.small { font-size: 10px; fill: var(--dim); font-weight: 400; }
+  .agent-dot { stroke: #000; stroke-width: 3; }
+  .agent-tag { font-size: 15px; font-weight: 800; text-anchor: middle; fill: #000; }
+  .landmark-icon { font-size: 22px; text-anchor: middle; }
+  .meeting-stone { font-size: 30px; text-anchor: middle; }
+
+  #side { border-left: 2px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  #controls { padding: 12px 16px; border-bottom: 2px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, select {
+    background: #21262d; color: var(--text); border: 2px solid var(--line);
+    border-radius: 8px; padding: 8px 14px; font-size: 16px; cursor: pointer;
+  }
+  button:hover, button:focus { border-color: var(--accent); }
+  button.on { background: #1f3a5f; border-color: var(--adam); }
+  #scrubber { width: 100%; accent-color: var(--accent); height: 28px; }
+  #hblabel { font-weight: 700; color: var(--accent); }
+
+  #feed { overflow-y: auto; padding: 12px 16px; flex: 1; }
+  .msg { border: 2px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  .msg .who { font-weight: 800; margin-bottom: 4px; font-size: 1.05rem; }
+  .msg.adam { border-left: 8px solid var(--adam); }
+  .msg.adam .who { color: var(--adam); }
+  .msg.eve { border-left: 8px solid var(--eve); }
+  .msg.eve .who { color: var(--eve); }
+  .msg .body { line-height: 1.45; }
+  .msg .when { color: var(--dim); font-size: 0.85rem; margin-top: 6px; }
+  .event { color: var(--dim); font-style: italic; padding: 4px 8px; border-left: 3px solid var(--line); margin-bottom: 10px; }
+
+  .section { padding: 10px 16px; border-bottom: 2px solid var(--line); }
+  .section h2 { font-size: 1.1rem; margin: 4px 0 8px; color: var(--accent); }
+  .agentline { display: flex; justify-content: space-between; padding: 6px 0; font-size: 1.05rem; }
+  .badge { padding: 2px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 700; }
+  .badge.done { background: #1d4428; color: #7ee2a0; }
+  .badge.active { background: #4a3d12; color: var(--accent); }
+  .q { padding: 8px 0; border-top: 1px dashed var(--line); }
+  .q .qt { font-weight: 600; }
+  .q .ans { color: #a5d6a7; margin-top: 4px; font-size: 0.95rem; }
+  #tileinfo { padding: 12px 16px; border-top: 2px solid var(--line); min-height: 90px; }
+  #tileinfo h3 { margin: 0 0 6px; color: var(--accent); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 0.9rem; color: var(--dim); padding: 8px 16px 14px; }
+  .sw { display: inline-block; width: 18px; height: 18px; border-radius: 4px; vertical-align: -4px; margin-right: 5px; border: 2px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Genesis · First Pair</h1>
+  <span class="tick" id="ticklabel">tick ?</span>
+  <span id="snaptime" style="color:var(--dim)"></span>
+</header>
+<main>
+  <section id="mapwrap" aria-label="World map"></section>
+  <aside id="side">
+    <div id="controls">
+      <label for="scrubber"><strong>Heartbeat</strong></label>
+      <input type="range" id="scrubber" min="1" max="1" value="1" step="1" aria-label="Heartbeat timeline">
+      <span id="hblabel">hb ?</span>
+      <button id="play" aria-label="Play timeline">▶ Play</button>
+      <button id="viewCombined" class="on">Both</button>
+      <button id="viewAdam" style="border-color:var(--adam)">Adam sees</button>
+      <button id="viewEve" style="border-color:var(--eve)">Eve sees</button>
+    </div>
+    <div class="section" id="agents"></div>
+    <div id="feed" aria-live="polite"></div>
+    <div id="tileinfo" aria-live="polite"><em>Click a tile to inspect it.</em></div>
+    <div class="legend" id="legend"></div>
+  </aside>
+</main>
+
+<script src="viewer_data.js"></script>
+<script>
+(function () {
+  "use strict";
+  if (!window.VIEWER_DATA) {
+    document.getElementById("mapwrap").innerHTML =
+      "<p style='padding:2em'>No data. Run scripts/export_viewer_snapshot.py first.</p>";
+    return;
+  }
+  var D = window.VIEWER_DATA;
+
+  // ---------- basic lookups ----------
+  var tiles = {}, landmarksByTile = {}, i;
+  D.true_map.tiles.forEach(function (t) { tiles[t.tile_id] = t; });
+  D.true_map.landmarks.forEach(function (lm) {
+    (landmarksByTile[lm.tile_id] = landmarksByTile[lm.tile_id] || []).push(lm);
+  });
+
+  var TERRAIN = {
+    grassland: { fill: "#2d5016", icon: "🌱", name: "Grassland" },
+    forest:    { fill: "#1b3a24", icon: "🌲", name: "Forest" },
+    hill:      { fill: "#4d4226", icon: "⛰", name: "Hills" },
+    mountain:  { fill: "#4a4f57", icon: "🗻", name: "Mountain" },
+    coast:     { fill: "#194a5e", icon: "🌊", name: "Coast" }
+  };
+  var AGENTS = {
+    east_adam: { name: "Adam", color: "#58a6ff" },
+    east_eve:  { name: "Eve",  color: "#f778ba" }
+  };
+  var LM_ICON = { river: "〰️", tree: "🌳", mountain_peak: "🏔", cove: "⚓",
+                  rock_formation: "🪨", cliff_ledge: "🪨", meeting_stone: "🪦" };
+
+  var maxHb = 0;
+  D.heartbeats.forEach(function (h) { if (h.heartbeat > maxHb) maxHb = h.heartbeat; });
+  var scrub = document.getElementById("scrubber");
+  scrub.max = maxHb; scrub.value = maxHb;
+
+  document.getElementById("ticklabel").textContent = "tick " + D.exported_tick;
+  document.getElementById("snaptime").textContent =
+    "snapshot " + (D.exported_at_utc || "").replace("T", " ").slice(0, 19);
+
+  // ---------- layout: only continent A matters right now, B is far away ----------
+  var CELL = 170, GAP = 14, PAD = 40;
+  var xs = D.true_map.tiles.map(function (t) { return t.coordinates.x; });
+  var ys = D.true_map.tiles.map(function (t) { return t.coordinates.y; });
+  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+  var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+  // Two clusters: home (x<20) and the far continent (x>=20). Lay them side by side.
+  function plotX(x) { return x < 20 ? x - minX : (x - 20 - minFarX()) + (maxHomeX() - minX + 1) + 1; }
+  function minFarX() { return 48; }
+  function maxHomeX() { return 3; }
+  var W = (plotX(maxX) + 1) * (CELL + GAP) + PAD * 2;
+  var H = (maxY - minY + 1) * (CELL + GAP) + PAD * 2;
+
+  function px(x) { return PAD + plotX(x) * (CELL + GAP); }
+  function py(y) { return PAD + (y - minY) * (CELL + GAP); }
+
+  var svgNS = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Map of the known world");
+  document.getElementById("mapwrap").appendChild(svg);
+
+  var tileEls = {};
+  D.true_map.tiles.forEach(function (t) {
+    var g = document.createElementNS(svgNS, "g");
+    var terr = TERRAIN[t.terrain] || { fill: "#333", icon: "?", name: t.terrain };
+    var r = document.createElementNS(svgNS, "rect");
+    r.setAttribute("x", px(t.coordinates.x)); r.setAttribute("y", py(t.coordinates.y));
+    r.setAttribute("width", CELL); r.setAttribute("height", CELL);
+    r.setAttribute("class", "tile"); r.setAttribute("fill", terr.fill);
+    r.setAttribute("tabindex", "0");
+    r.setAttribute("aria-label", t.tile_id);
+    g.appendChild(r);
+
+    var name = document.createElementNS(svgNS, "text");
+    name.setAttribute("x", px(t.coordinates.x) + CELL / 2);
+    name.setAttribute("y", py(t.coordinates.y) + 22);
+    name.setAttribute("class", "tile-label");
+    name.textContent = shortName(t.tile_id);
+    g.appendChild(name);
+
+    var sub = document.createElementNS(svgNS, "text");
+    sub.setAttribute("x", px(t.coordinates.x) + CELL / 2);
+    sub.setAttribute("y", py(t.coordinates.y) + 40);
+    sub.setAttribute("class", "tile-label small");
+    sub.textContent = t.terrain + " · " + t.biome;
+    g.appendChild(sub);
+
+    var lms = landmarksByTile[t.tile_id] || [];
+    if (lms.length) {
+      var ic = document.createElementNS(svgNS, "text");
+      ic.setAttribute("x", px(t.coordinates.x) + CELL / 2);
+      ic.setAttribute("y", py(t.coordinates.y) + CELL - 26);
+      ic.setAttribute("class", lms.some(function(l){return l.kind==="meeting_stone";}) ? "meeting-stone" : "landmark-icon");
+      ic.textContent = lms.map(function (l) { return LM_ICON[l.kind] || "★"; }).join(" ");
+      g.appendChild(ic);
+    }
+
+    r.addEventListener("click", function () { showTile(t.tile_id); });
+    r.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showTile(t.tile_id); } });
+    svg.appendChild(g);
+    tileEls[t.tile_id] = r;
+  });
+
+  // travel edges as faint lines
+  D.true_map.travel_edges.forEach(function (e) {
+    var a = tiles[e.from_tile_id], b = tiles[e.to_tile_id];
+    if (!a || !b) return;
+    var ln = document.createElementNS(svgNS, "line");
+    ln.setAttribute("x1", px(a.coordinates.x) + CELL / 2); ln.setAttribute("y1", py(a.coordinates.y) + CELL / 2);
+    ln.setAttribute("x2", px(b.coordinates.x) + CELL / 2); ln.setAttribute("y2", py(b.coordinates.y) + CELL / 2);
+    ln.setAttribute("stroke", "#8b949e"); ln.setAttribute("stroke-width", "2");
+    ln.setAttribute("stroke-dasharray", "6 6"); ln.setAttribute("opacity", "0.35");
+    svg.insertBefore(ln, svg.firstChild);
+  });
+
+  // continent divider label
+  var divLbl = document.createElementNS(svgNS, "text");
+  divLbl.setAttribute("x", px(20));
+  divLbl.setAttribute("y", PAD / 2 + 10);
+  divLbl.setAttribute("class", "tile-label small");
+  divLbl.textContent = "⟵ home continent · far continent (unreached) ⟶";
+  svg.appendChild(divLbl);
+
+  // agent tokens
+  var tokens = {};
+  Object.keys(AGENTS).forEach(function (id) {
+    var g = document.createElementNS(svgNS, "g");
+    var c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("r", 22); c.setAttribute("fill", AGENTS[id].color);
+    c.setAttribute("class", "agent-dot");
+    var t = document.createElementNS(svgNS, "text");
+    t.setAttribute("class", "agent-tag");
+    t.setAttribute("dy", "0.35em");
+    t.textContent = AGENTS[id].name[0];
+    g.appendChild(c); g.appendChild(t);
+    svg.appendChild(g);
+    tokens[id] = g;
+  });
+
+  function shortName(id) {
+    return id.replace("public-", "").replace("cont_a_", "A·").replace("cont_b_", "B·")
+             .replace("origin_", "origin ").replace("east_", "east ").replace("north_", "north ");
+  }
+
+  // ---------- state per heartbeat ----------
+  var mode = "combined"; // combined | adam | eve
+  function knownSet(agentId) {
+    var km = D.known_maps[agentId === "adam" ? "east_adam" : "east_eve"];
+    var s = {};
+    Object.keys(km.known_tiles || {}).forEach(function (k) { s[k] = true; });
+    return s;
+  }
+  var knownAdam = knownSet("adam"), knownEve = knownSet("eve");
+
+  function positionsAt(hb) {
+    var tl = D.position_timeline[String(hb)];
+    if (tl) return tl;
+    // fall back to latest earlier entry
+    for (var h = hb - 1; h >= 1; h--) { if (D.position_timeline[String(h)]) return D.position_timeline[String(h)]; }
+    return { east_adam: "public-start-adam", east_eve: "public-start-eve" };
+  }
+
+  function render(hb) {
+    document.getElementById("hblabel").textContent = "hb " + hb + " / " + maxHb;
+    var pos = positionsAt(hb);
+    var counts = {};
+    Object.keys(pos).forEach(function (a) { counts[pos[a]] = (counts[pos[a]] || 0) + 1; });
+    Object.keys(pos).forEach(function (a, idx) {
+      var t = tiles[pos[a]];
+      if (!t) { tokens[a].setAttribute("display", "none"); return; }
+      tokens[a].removeAttribute("display");
+      var n = counts[pos[a]], k = (pos.east_adam === pos.east_eve && a === "east_eve") ? 1 : 0;
+      var offX = n === 2 ? (k === 0 ? -34 : 34) : 0;
+      tokens[a].setAttribute("transform",
+        "translate(" + (px(t.coordinates.x) + CELL / 2 + offX) + "," + (py(t.coordinates.y) + CELL / 2) + ")");
+    });
+
+    // fog
+    D.true_map.tiles.forEach(function (t) {
+      var visible = true;
+      if (mode === "adam") visible = !!knownAdam[t.tile_id];
+      else if (mode === "eve") visible = !!knownEve[t.tile_id];
+      tileEls[t.tile_id].classList.toggle("fogged", !visible);
+      tileEls[t.tile_id].parentNode.style.opacity = visible ? 1 : 0.25;
+    });
+
+    renderAgentsPanel(pos);
+    renderFeed(hb);
+  }
+
+  function renderAgentsPanel(pos) {
+    var el = document.getElementById("agents");
+    var html = "<h2 style='font-size:1.1rem;margin:4px 0 8px;color:var(--accent)'>Where they are</h2>";
+    Object.keys(AGENTS).forEach(function (id) {
+      html += "<div class='agentline'><span style='color:" + AGENTS[id].color + ";font-weight:800'>" +
+        AGENTS[id].name + "</span><span>" + shortName(pos[id] || "?") + "</span></div>";
+    });
+    var done = D.goals.filter(function (g) { return g.status === "completed"; }).length;
+    html += "<div style='color:var(--dim);margin-top:6px;font-size:0.95rem'>Goals: " + done + " completed of " + D.goals.length + "</div>";
+    el.innerHTML = html;
+  }
+
+  function renderFeed(hb) {
+    var feed = document.getElementById("feed");
+    var html = "";
+    // heartbeats up to current, newest first
+    for (var h = Math.min(hb, maxHb); h >= 1; h--) {
+      var rec = null;
+      for (var j = 0; j < D.heartbeats.length; j++) if (D.heartbeats[j].heartbeat === h) rec = D.heartbeats[j];
+      if (!rec) continue;
+      var evs = [];
+      Object.keys(rec.actions || {}).forEach(function (a) {
+        var act = rec.actions[a];
+        var color = AGENTS[a] ? AGENTS[a].color : "#fff";
+        var who = AGENTS[a] ? AGENTS[a].name : a;
+        if (act.type === "move")
+          evs.push("<div class='event'><b style='color:" + color + "'>" + who + "</b> moved → " + shortName(act.target_tile) + "</div>");
+      });
+      var msgs = D.public_messages.filter(function (m) { return m.heartbeat === h; });
+      if (!evs.length && !msgs.length) continue;
+      html += "<div style='margin:14px 0 4px;color:var(--accent);font-weight:800'>Heartbeat " + h + "</div>";
+      html += evs.join("");
+      msgs.forEach(function (m) {
+        var isAdam = /4327298502de/.test(m.sender_agent_id);
+        html += "<div class='msg " + (isAdam ? "adam" : "eve") + "'>" +
+          "<div class='who'>" + (isAdam ? "Adam" : "Eve") + " → " + (m.recipient === "east_adam" ? "Adam" : "Eve") + "</div>" +
+          "<div class='body'>" + escapeHtml(m.message) + "</div></div>";
+      });
+    }
+    feed.innerHTML = html || "<em>No activity yet.</em>";
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function showTile(id) {
+    var t = tiles[id];
+    var el = document.getElementById("tileinfo");
+    var lms = (landmarksByTile[id] || []).map(function (l) { return (LM_ICON[l.kind] || "★") + " " + (l.description || l.kind); });
+    var visits = [];
+    var ka = D.known_maps.east_adam.known_tiles[id], ke = D.known_maps.east_eve.known_tiles[id];
+    if (ka) visits.push("Adam visited ×" + ka.visit_count);
+    if (ke) visits.push("Eve visited ×" + ke.visit_count);
+    el.innerHTML = "<h3>" + shortName(id) + "</h3>" +
+      "<div>" + t.terrain + " · " + t.biome + (t.water ? " · water: " + t.water.type : "") + "</div>" +
+      (lms.length ? "<div style='margin-top:6px'>" + lms.join("<br>") + "</div>" : "") +
+      (visits.length ? "<div style='margin-top:6px;color:var(--dim)'>" + visits.join(" · ") + "</div>"
+                     : "<div style='margin-top:6px;color:var(--dim)'>Neither has been here.</div>");
+  }
+
+  // legend
+  document.getElementById("legend").innerHTML = Object.keys(TERRAIN).map(function (k) {
+    return "<span><span class='sw' style='background:" + TERRAIN[k].fill + "'></span>" + TERRAIN[k].icon + " " + TERRAIN[k].name + "</span>";
+  }).join("") + "<span><span class='sw' style='background:#0d1117'></span>🪦 meeting stone</span>";
+
+  // ---------- wiring ----------
+  scrub.addEventListener("input", function () { render(+scrub.value); });
+  function setMode(m) {
+    mode = m;
+    document.getElementById("viewCombined").classList.toggle("on", m === "combined");
+    document.getElementById("viewAdam").classList.toggle("on", m === "adam");
+    document.getElementById("viewEve").classList.toggle("on", m === "eve");
+    render(+scrub.value);
+  }
+  document.getElementById("viewCombined").addEventListener("click", function () { setMode("combined"); });
+  document.getElementById("viewAdam").addEventListener("click", function () { setMode("adam"); });
+  document.getElementById("viewEve").addEventListener("click", function () { setMode("eve"); });
+
+  var playing = null;
+  document.getElementById("play").addEventListener("click", function () {
+    var btn = this;
+    if (playing) { clearInterval(playing); playing = null; btn.textContent = "▶ Play"; return; }
+    if (+scrub.value >= maxHb) scrub.value = 1;
+    btn.textContent = "⏸ Pause";
+    playing = setInterval(function () {
+      var v = +scrub.value + 1;
+      if (v > maxHb) { clearInterval(playing); playing = null; btn.textContent = "▶ Play"; return; }
+      scrub.value = v; render(v);
+    }, 900);
+  });
+
+  render(maxHb);
+})();
+</script>
+</body>
+</html>
