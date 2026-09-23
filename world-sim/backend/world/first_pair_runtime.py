@@ -281,6 +281,27 @@ class FirstPairRuntime:
         updated = merge_observation(known_map, observation, tick)
         persist_known_map(self._store.root, agent_ref, updated)
 
+    def _load_tile_resources(self) -> None:
+        """Load gatherable resources from the true map, indexed by tile."""
+        self._current_tile_resources = {}
+        if not self._fog_active():
+            return
+        try:
+            true_map = load_true_map(self._get_data_root())
+            for res in true_map.get("resources", []):
+                tile_id = res.get("tile_id", "")
+                if not tile_id:
+                    continue
+                self._current_tile_resources.setdefault(tile_id, []).append(res)
+        except FogAdapterError:
+            self._current_tile_resources = {}
+
+    def _get_agent_inventory(self, agent_ref: str) -> dict:
+        """Return the agent's gathered-resource inventory."""
+        if not hasattr(self, "_inventory"):
+            self._inventory = {"east_adam": {}, "east_eve": {}}
+        return self._inventory.get(agent_ref, {})
+
     # ------------------------------------------------------------------
     # Context builder
     # ------------------------------------------------------------------
@@ -520,7 +541,46 @@ class FirstPairRuntime:
             return self._execute_ask_human(agent_ref, action, heartbeat_number)
         if action_type == "request_capability":
             return self._execute_request_capability(agent_ref, action, heartbeat_number)
+        if action_type == "gather":
+            return self._execute_gather(agent_ref, action, heartbeat_number)
         return {"status": "unknown_action", "action": action}
+
+    def _execute_gather(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Collect a resource from the current tile."""
+        resource_kind = action.get("resource_kind", "")
+        if not resource_kind:
+            return {"status": "rejected", "reason": "Missing resource_kind"}
+
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        if not position:
+            return {"status": "rejected", "reason": "No current position"}
+
+        # Find the resource on this tile
+        tile_resources = [
+            r for r in self._current_tile_resources.get(position, [])
+            if r.get("kind") == resource_kind and r.get("amount", 0) > 0
+        ]
+        if not tile_resources:
+            return {"status": "rejected", "reason": f"No {resource_kind} available on this tile"}
+
+        resource = tile_resources[0]
+        gathered = min(1, resource.get("amount", 0))
+        resource["amount"] = resource.get("amount", 0) - gathered
+
+        # Add to agent inventory
+        inventory_key = "_inventory"
+        if not hasattr(self, inventory_key):
+            self._inventory = {"east_adam": {}, "east_eve": {}}
+        agent_inv = self._inventory.get(agent_ref, {})
+        agent_inv[resource_kind] = agent_inv.get(resource_kind, 0) + gathered
+        self._inventory[agent_ref] = agent_inv
+
+        return {
+            "status": "success",
+            "resource_kind": resource_kind,
+            "amount_gathered": gathered,
+            "remaining_on_tile": resource.get("amount", 0),
+        }
 
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
         if not self._habitat or not self._world_state:
@@ -849,6 +909,9 @@ class FirstPairRuntime:
             eve_action: dict | None = None
             eve_outcome: dict = {}
             world_mutations: list[dict] = []
+
+            # Load gatherable resources for this heartbeat
+            self._load_tile_resources()
 
             for agent_ref in ("east_adam", "east_eve"):
                 backend = self._get_cognition_backend(agent_ref)

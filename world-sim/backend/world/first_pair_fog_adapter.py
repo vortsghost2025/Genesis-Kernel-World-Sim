@@ -248,14 +248,26 @@ def cognition_safe_observation(
         }
         landmark_by_tile.setdefault(lm_tile, []).append(safe_lm)
 
-    # Project tiles: keep safe fields, attach landmarks
+    # Project tiles: keep safe fields, attach landmarks and resources
+    # Build a resource lookup from the true map's resource entries
+    resource_by_tile: dict[str, list[str]] = {}
+    for res in true_map.get("resources", []):
+        res_tile = res.get("tile_id", "")
+        if res.get("amount", 0) > 0:
+            resource_by_tile.setdefault(res_tile, []).append(res["kind"])
+    # Deduplicate
+    for k in resource_by_tile:
+        resource_by_tile[k] = sorted(set(resource_by_tile[k]))
+
     tile_details: list[dict[str, Any]] = []
     for t in visible_tiles_raw:
+        tid = t.get("tile_id", "")
         detail = {
-            "tile_id": t.get("tile_id", ""),
+            "tile_id": tid,
             "terrain": t.get("terrain", "unknown"),
             "biome": t.get("biome", "unknown"),
-            "landmarks": landmark_by_tile.get(t.get("tile_id", ""), []),
+            "landmarks": landmark_by_tile.get(tid, []),
+            "resources": resource_by_tile.get(tid, []),
         }
         tile_details.append(detail)
 

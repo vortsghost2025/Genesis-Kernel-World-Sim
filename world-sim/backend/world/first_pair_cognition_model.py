@@ -126,6 +126,7 @@ _VALID_ACTIONS = frozenset({
     "ask_human",
     "request_capability",
     "move",
+    "gather",
 })
 
 
@@ -334,6 +335,7 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     }),
     "request_capability": frozenset({"action_type", "capability_id", "capability_reason"}),
     "move": frozenset({"action_type", "target_tile", "reason"}),
+    "gather": frozenset({"action_type", "resource_kind", "reason"}),
 }
 
 
@@ -434,6 +436,14 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
         if not isinstance(tt, str) or not tt.strip():
             errors.append("action:empty_target_tile")
         err = _check_length(tt, _MAX_TARGET_CHARS, "action:target_tile")
+        if err:
+            errors.append(err)
+
+    elif at == "gather":
+        rk = raw.get("resource_kind", "")
+        if not isinstance(rk, str) or not rk.strip():
+            errors.append("action:empty_resource_kind")
+        err = _check_length(rk, _MAX_TARGET_CHARS, "action:resource_kind")
         if err:
             errors.append(err)
 
@@ -681,6 +691,7 @@ Available actions:
 - ask_human: ask a question to the human operator (requires: question_id, question, reason_for_asking, requested_human_capability, urgency)
 - request_capability: request a new capability from the human (requires: capability_id, capability_reason)
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves
+- gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered
 """
 
 
