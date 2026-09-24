@@ -22,3 +22,6 @@ __pycache__/
 build/
 *.egg-info/
 dist/
+
+# Generated viewer data (too large for git)
+world-sim/viewer/viewer_data.js
