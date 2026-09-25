@@ -8,13 +8,18 @@ finish_reason="length" fired with content=None and the runtime mislabeled the
 truncation as "empty_response".  The same Adam prompt at max_tokens=4096
 returned finish=stop with valid JSON.
 
+2026-09-25: _MAX_COMPLETION_TOKENS escalated 4096 -> 8192 (operator-approved
+fix for nemotron reasoning models burning the whole budget on reasoning
+before emitting JSON; ~30% empty_response rate at 4096). The tests below
+now assert against the live constant so future escalations stay green.
+
 Proves:
 - initial response: finish_reason=length + empty content
   -> "max_tokens_truncated_response" (never "empty_response")
 - repair response: finish_reason=length + empty content
   -> "repair_max_tokens_truncated_response"
 - finish_reason=length + nonempty valid JSON is accepted normally (Eve case)
-- initial and repair calls use max_tokens=4096
+- initial and repair calls use the configured max_tokens budget
 - valid first response still causes exactly one model call
 - transport retry accounting unchanged (max 3, fail closed)
 - no secret leakage regression
@@ -161,18 +166,18 @@ def test_length_with_valid_json_accepted_normally():
     assert completions.calls == 1
 
 
-def test_initial_call_uses_max_tokens_4096():
+def test_initial_call_uses_max_tokens_budget():
     backend, completions = _backend([("stop", _valid_payload())])
     backend._call_model_with_repair("system prompt", _ctx())
-    assert completions.max_tokens_seen == [4096]
+    assert completions.max_tokens_seen == [fpcm._MAX_COMPLETION_TOKENS]
 
 
-def test_repair_call_uses_max_tokens_4096():
+def test_repair_call_uses_max_tokens_budget():
     backend, completions = _backend([("stop", _INVALID_JSON), ("stop", _valid_payload())])
     raw, err = backend._call_model_with_repair("system prompt", _ctx())
     assert err is None
     assert raw is not None
-    assert completions.max_tokens_seen == [4096, 4096]
+    assert completions.max_tokens_seen == [fpcm._MAX_COMPLETION_TOKENS, fpcm._MAX_COMPLETION_TOKENS]
 
 
 def test_valid_first_response_still_single_call():

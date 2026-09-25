@@ -38,6 +38,7 @@ _PERSISTENCE_SCHEMA_VERSION = "10FM.1"
 _MEMORY_SELECTION_SCHEMA_VERSION = "10IN.1"
 _SUMMARY_SCHEMA_VERSION = "10IN.1"
 _RELATIONSHIP_SCHEMA_VERSION = "10IN.1"
+_CHARTER_SCHEMA_VERSION = "charter.1"
 _DEFAULT_ROOT = Path(__file__).resolve().parent.parent.parent / ".runtime" / "first-pair"
 _IDENTITY_FILE = "identity.json"
 _HABITAT_FILE = "habitat.json"
@@ -50,6 +51,7 @@ _RUNTIME_POLICY_FILE = "runtime_policy.json"
 _CAPABILITY_GRANT_FILE = "capability_grant.json"
 _SUMMARY_FILE = "memory_summaries.json"
 _RELATIONSHIP_FILE = "relationship_ledger.json"
+_CHARTER_FILE = "charter.json"
 _MEMORY_SELECTION_MANIFEST_FILE = "memory_selection_manifest.json"
 _PROVENANCE_FILE = "provenance.jsonl"
 
@@ -1226,6 +1228,99 @@ def derive_relationship_event_ids(events: list[RelationshipEventRecord]) -> set[
             if ref.startswith("mem-"):
                 ids.add(ref)
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Charter layer — self-authored identity persistence (recognition layer)
+#
+# A charter is a short self-authored statement each agent may write with the
+# revise_charter action. Versions are append-only records, never modified or
+# removed; the current charter is the latest version for the owning agent.
+# See docs/charter_layer_spec.md.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CharterVersionRecord:
+    charter_version_id: str
+    agent_id: str
+    agent_ref: str
+    pair_id: str
+    heartbeat: int
+    charter_text: str
+    decision_summary: str
+    authored_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    integrity_commitment: str = ""
+
+    def seal(self) -> CharterVersionRecord:
+        material = asdict(self)
+        material.pop("integrity_commitment", None)
+        self.integrity_commitment = _hash_canonical(material)
+        return self
+
+    def to_envelope(self) -> dict:
+        return {
+            "type": "charter_version_record",
+            "schema_version": _CHARTER_SCHEMA_VERSION,
+            "data": asdict(self),
+        }
+
+
+def load_charter_versions(store: FirstPairPersistenceStore) -> list[CharterVersionRecord]:
+    data = store._read_json(store._path(_CHARTER_FILE))
+    if data and data.get("type") == "charter_version_record":
+        raw_list = data.get("data", [])
+        if isinstance(raw_list, list):
+            return [CharterVersionRecord(**e) for e in raw_list]
+    return []
+
+
+def load_latest_charter(
+    store: FirstPairPersistenceStore, agent_ref: str, agent_id: str
+) -> CharterVersionRecord | None:
+    """Current charter for one agent: the most recently appended version.
+
+    Owner-bound: both agent_ref and agent_id must match. A mismatched
+    caller never sees another agent's charter.
+    """
+    latest: CharterVersionRecord | None = None
+    for rec in load_charter_versions(store):
+        if rec.agent_ref == agent_ref and rec.agent_id == agent_id:
+            latest = rec
+    return latest
+
+
+def append_charter_version(
+    store: FirstPairPersistenceStore, record: CharterVersionRecord
+) -> bool:
+    """Append-only persistence of one charter version.
+
+    Idempotent by charter_version_id (duplicate append is a no-op).
+    A version whose text is identical to the owner's current version is also
+    a no-op — identity is not re-persisted when it has not changed.
+    Returns True when actually appended.
+    """
+    versions = load_charter_versions(store)
+    for existing in versions:
+        if existing.charter_version_id == record.charter_version_id:
+            return False
+    for existing in versions:
+        if (
+            existing.agent_ref == record.agent_ref
+            and existing.agent_id == record.agent_id
+            and existing.charter_text == record.charter_text
+        ):
+            return False
+    versions.append(record)
+    store._atomic_write(
+        store._path(_CHARTER_FILE),
+        {
+            "type": "charter_version_record",
+            "schema_version": _CHARTER_SCHEMA_VERSION,
+            "data": [asdict(v) for v in versions],
+        },
+    )
+    return True
 
 
 def maybe_record_relationship_event(

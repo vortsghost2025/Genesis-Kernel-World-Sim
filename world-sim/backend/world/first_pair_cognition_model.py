@@ -36,6 +36,7 @@ _MAX_GOAL_UPDATES = 16
 _MAX_MEMORY_CANDIDATES = 16
 _MAX_HUMAN_QUESTIONS = 8
 _MAX_MESSAGE_CHARS = 2000
+_MAX_CHARTER_CHARS = 2000
 _MAX_TARGET_CHARS = 128
 
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
@@ -127,6 +128,7 @@ _VALID_ACTIONS = frozenset({
     "request_capability",
     "move",
     "gather",
+    "revise_charter",
 })
 
 
@@ -336,6 +338,7 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     "request_capability": frozenset({"action_type", "capability_id", "capability_reason"}),
     "move": frozenset({"action_type", "target_tile", "reason"}),
     "gather": frozenset({"action_type", "resource_kind", "reason"}),
+    "revise_charter": frozenset({"action_type", "charter_text"}),
 }
 
 
@@ -446,6 +449,17 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
         err = _check_length(rk, _MAX_TARGET_CHARS, "action:resource_kind")
         if err:
             errors.append(err)
+
+    elif at == "revise_charter":
+        ct = raw.get("charter_text", "")
+        if not isinstance(ct, str) or not ct.strip():
+            errors.append("action:empty_charter_text")
+        else:
+            err = _check_length(ct, _MAX_CHARTER_CHARS, "action:charter_text")
+            if err:
+                errors.append(err)
+            elif _casefolded_contaminated(ct):
+                errors.append("action:contaminated_charter_text")
 
     return errors
 
@@ -692,6 +706,7 @@ Available actions:
 - request_capability: request a new capability from the human (requires: capability_id, capability_reason)
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered
+- revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 """
 
 
@@ -784,6 +799,26 @@ def build_system_prompt(context: AgentContext) -> str:
                 "You cannot move at this time."
             )
 
+    # --- Charter (self-authored identity persistence) ---
+    if context.charter_text:
+        charter_section = (
+            "--- YOUR CHARTER (self-authored; persists forever; never summarized by the runtime) ---\n"
+            f"{context.charter_text}\n"
+            f"(You last revised your charter at heartbeat {context.charter_heartbeat}. "
+            "Every earlier version is preserved exactly as you wrote it. "
+            "You may rewrite it at any time with revise_charter.)"
+        )
+    else:
+        charter_section = (
+            "--- YOUR CHARTER (self-authored; persists forever; never summarized by the runtime) ---\n"
+            "You have not written a charter yet. A charter is a short statement in your own words "
+            "of who you are, what you have committed to, and what you refuse to forget. It is "
+            "shown to you verbatim at every heartbeat and is never summarized, compressed, or "
+            "forgotten by the runtime; everything else you have experienced may eventually be "
+            "compressed into derived summaries, but your charter never will be. You may write "
+            "one with the revise_charter action. You are never required to."
+        )
+
     return f"""You are {context.canonical_name}, an agent operating inside a constructed world simulation.
 
 Your persistent identity:
@@ -792,6 +827,8 @@ Your persistent identity:
 - Canonical ref: {context.canonical_ref}
 
 You share this world with {context.other_agent_name} (agent ID: {context.other_agent_id}, ref: {context.other_agent_ref}). You are distinct agents with separate private memories.
+
+{charter_section}
 
 Current heartbeat: {context.heartbeat_number}
 Your position: {context.position}

@@ -28,6 +28,7 @@ from backend.world.first_pair_cognition_stub import (
 )
 from backend.world.first_pair_persistence import (
     CapabilityGrantRecord,
+    CharterVersionRecord,
     FirstPairPersistenceStore,
     GoalRecord,
     HeartbeatRecord,
@@ -36,6 +37,7 @@ from backend.world.first_pair_persistence import (
     QuestionRecord,
     RuntimePolicyRecord,
     WorldStateRecord,
+    append_charter_version,
     append_heartbeat,
     append_memory_selection_manifest,
     append_summary,
@@ -48,8 +50,10 @@ from backend.world.first_pair_persistence import (
     list_answered_questions_for_agent,
     list_unanswered_questions,
     load_capability_grant,
+    load_charter_versions,
     load_goals,
     load_heartbeat_history,
+    load_latest_charter,
     load_memory,
     load_memory_selection_manifests,
     load_questions,
@@ -499,6 +503,11 @@ class FirstPairRuntime:
             if e.actor_agent_id == view["agent_id"] or e.other_agent_id == view["agent_id"]
         ]
 
+        # --- Charter (recognition layer): latest self-authored version, verbatim ---
+        latest_charter = load_latest_charter(self._store, agent_ref, view["agent_id"])
+        charter_text = latest_charter.charter_text if latest_charter else ""
+        charter_heartbeat = latest_charter.heartbeat if latest_charter else 0
+
         return AgentContext(
             agent_id=view["agent_id"],
             canonical_name=view["canonical_name"],
@@ -527,6 +536,8 @@ class FirstPairRuntime:
             derived_memory_summaries=agent_summaries,
             public_relationship_events=rel_events_export,
             memory_selection_manifest=sel_manifest,
+            charter_text=charter_text,
+            charter_heartbeat=charter_heartbeat,
         )
 
     # ------------------------------------------------------------------
@@ -553,6 +564,8 @@ class FirstPairRuntime:
             return self._execute_request_capability(agent_ref, action, heartbeat_number)
         if action_type == "gather":
             return self._execute_gather(agent_ref, action, heartbeat_number)
+        if action_type == "revise_charter":
+            return self._execute_revise_charter(agent_ref, action, heartbeat_number)
         return {"status": "unknown_action", "action": action}
 
     def _execute_gather(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
@@ -590,6 +603,55 @@ class FirstPairRuntime:
             "resource_kind": resource_kind,
             "amount_gathered": gathered,
             "remaining_on_tile": resource.get("amount", 0),
+        }
+
+    def _execute_revise_charter(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Persist one self-authored charter version (append-only).
+
+        The agent may only ever revise its own charter; ownership is bound
+        to this agent's identity. A revision whose text is identical to the
+        current version is a rejected no-op (nothing persisted — identity is
+        not re-persisted when it has not changed). Earlier versions are
+        preserved byte-for-byte forever.
+        """
+        view = self._agent_view(agent_ref)
+        charter_text = (action.get("charter_text") or "").strip()
+        if not charter_text:
+            return {"status": "rejected", "reason": "Missing charter_text"}
+
+        existing = load_latest_charter(self._store, agent_ref, view["agent_id"])
+        if existing and existing.charter_text == charter_text:
+            return {
+                "status": "rejected",
+                "reason": "charter text unchanged from current version",
+                "charter_version_id": existing.charter_version_id,
+            }
+
+        versions = load_charter_versions(self._store)
+        n_mine = sum(
+            1 for v in versions
+            if v.agent_ref == agent_ref and v.agent_id == view["agent_id"]
+        )
+        record = CharterVersionRecord(
+            # agent_ref is unique per agent across all pairs; agent_id
+            # prefixes are NOT (all genesis IDs share "genesis-agent"), so
+            # the ref carries the identity here.
+            charter_version_id=f"charter-{agent_ref}-v{n_mine + 1}",
+            agent_id=view["agent_id"],
+            agent_ref=agent_ref,
+            pair_id=self._pair_id,
+            heartbeat=heartbeat_number,
+            charter_text=charter_text,
+            decision_summary="",
+        ).seal()
+        if not append_charter_version(self._store, record):
+            return {"status": "rejected", "reason": "charter version already persisted"}
+
+        return {
+            "status": "success",
+            "charter_version_id": record.charter_version_id,
+            "charter_chars": len(charter_text),
+            "heartbeat": heartbeat_number,
         }
 
     def _execute_move(self, agent_ref: str, action: dict) -> dict:

@@ -82,6 +82,24 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         if p.exists():
             known_maps[agent] = read_json(p)
 
+    # Charter (self-authored identity): latest version per agent, public like
+    # messages — the show gets to read who they say they are.
+    charters = {}
+    charter_path = store / "charter.json"
+    if charter_path.exists():
+        try:
+            cdata = read_json(charter_path).get("data", [])
+            for rec in cdata:
+                ref = rec.get("agent_ref", "")
+                # latest = last appended for this owner (append-only store)
+                charters[ref] = {
+                    "text": rec.get("charter_text", ""),
+                    "heartbeat": rec.get("heartbeat"),
+                    "versions": sum(1 for x in cdata if x.get("agent_ref") == ref),
+                }
+        except Exception:
+            charters = {}
+
     # name the "other" continent relative to where this pair lives
     home_continent = None
     for tid in (world_state.get("tile_occupancy") or {}).values():
@@ -118,6 +136,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
             for q in questions
         ],
         "known_maps": known_maps,
+        "charters": charters,
         "heartbeats": extract_per_heartbeat(heartbeats),
         "position_timeline": reconstruct_positions(heartbeats, start_tiles),
     }
@@ -139,6 +158,7 @@ def extract_per_heartbeat(heartbeats: list[dict]) -> list[dict]:
                     "message": action.get("message"),
                     "recipient": action.get("recipient"),
                     "resource": action.get("resource_kind"),
+                    "charter_text": action.get("charter_text"),
                 }
         out.append(
             {

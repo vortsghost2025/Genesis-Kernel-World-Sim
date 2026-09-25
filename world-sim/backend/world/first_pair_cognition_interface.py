@@ -65,6 +65,10 @@ class AgentContext:
     derived_memory_summaries: list = field(default_factory=list)
     public_relationship_events: list = field(default_factory=list)
     memory_selection_manifest: dict = field(default_factory=dict)
+    # Charter (self-authored identity persistence): injected verbatim every
+    # heartbeat, structurally outside the selection/summarization pipeline.
+    charter_text: str = ""
+    charter_heartbeat: int = 0
 
 
 @dataclass(frozen=True)
