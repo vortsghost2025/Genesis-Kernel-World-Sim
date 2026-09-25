@@ -137,8 +137,10 @@ def main() -> int:
     else:
         print("EVIDENCE=NONE (no path requested; use export_first_pair_state_evidence.py)")
 
-    print(f"ADAM_COGNITION={_safe(runtime._current_run_cognition['east_adam']['decision_summary'])}")
-    print(f"EVE_COGNITION={_safe(runtime._current_run_cognition['east_eve']['decision_summary'])}")
+    adam_ref = runtime._adam_ref
+    eve_ref = runtime._eve_ref
+    print(f"ADAM_COGNITION={_safe(runtime._current_run_cognition.get(adam_ref, {}).get('decision_summary', ''))}")
+    print(f"EVE_COGNITION={_safe(runtime._current_run_cognition.get(eve_ref, {}).get('decision_summary', ''))}")
 
     ok = results.get("heartbeats_completed", 0) > 0 and not results.get("errors")
     print("LIVING_LOOP=OK" if ok else "LIVING_LOOP=PARTIAL")

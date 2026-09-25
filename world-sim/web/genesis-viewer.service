@@ -1,0 +1,19 @@
+[Unit]
+Description=Genesis Civilization Viewer (Adam & Eve, live planet)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/genesis-viewer/world-sim
+Environment=GENESIS_MODE=demo
+Environment=GENESIS_PORT=8000
+Environment=GENESIS_REFRESH_SECONDS=60
+ExecStart=/opt/genesis-viewer/world-sim/web/.venv/bin/python /opt/genesis-viewer/world-sim/web/app.py
+Restart=always
+RestartSec=5
+# hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
