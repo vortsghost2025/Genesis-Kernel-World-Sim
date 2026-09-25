@@ -398,11 +398,11 @@ def merge_observation(
     return updated
 
 
-def fog_gate_active(store_root: Path | str) -> bool:
+def fog_gate_active(store_root: Path | str, pair_id: str = "east") -> bool:
     """Check whether known-map files exist in the living store (the gate)."""
     root = Path(store_root)
-    adam = root / "known_map_east_adam.json"
-    eve = root / "known_map_east_eve.json"
+    adam = root / f"known_map_{pair_id}_adam.json"
+    eve = root / f"known_map_{pair_id}_eve.json"
     return adam.is_file() and eve.is_file()
 
 

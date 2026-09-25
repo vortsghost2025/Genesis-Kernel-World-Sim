@@ -97,9 +97,12 @@ class FirstPairRuntime:
     """Bounded, reproducible First Pair runtime.
 
     State is bound to a `FirstPairPersistenceStore` supplied at construction
-    time.  Two separate memory lists (`east_adam`, `east_eve`) live inside a
-    single shared envelope and are written atomically each tick, so neither
-    agent's entries are overwritten by the other.
+    time.  Two separate memory lists (`{pair_id}_adam`, `{pair_id}_eve`) live
+    inside a single shared envelope and are written atomically each tick, so
+    neither agent's entries are overwritten by the other.
+
+    Supports multiple pairs via `pair_id` (default "east"). The West pair
+    uses pair_id="west" with its own store, identity, and agent refs.
     """
 
     def __init__(
@@ -108,12 +111,19 @@ class FirstPairRuntime:
         heartbeat_limit: int = _DEFAULT_HEARTBEAT_LIMIT,
         backend: str = "stub",
         store: FirstPairPersistenceStore | None = None,
+        pair_id: str = "east",
     ) -> None:
         if store is None:
-            store = FirstPairPersistenceStore(persistence_root)
+            if pair_id == "east":
+                store = FirstPairPersistenceStore(persistence_root)
+            else:
+                store = FirstPairPersistenceStore(persistence_root)
         self._store = store
         self._heartbeat_limit = heartbeat_limit
         self._backend = backend
+        self._pair_id = pair_id
+        self._adam_ref = f"{pair_id}_adam"
+        self._eve_ref = f"{pair_id}_eve"
 
         self._identity_record: IdentityRecord | None = None
         self._habitat: dict | None = None
@@ -137,7 +147,7 @@ class FirstPairRuntime:
     def _agent_view(self, agent_ref: str) -> dict:
         assert self._identity_record is not None
         candidate = self._identity_record.birth_candidate
-        if agent_ref == "east_adam":
+        if agent_ref == self._adam_ref:
             raw = candidate["adam_identity"]
             return {
                 "agent_id": self._identity_record.adam_agent_id,
@@ -145,7 +155,7 @@ class FirstPairRuntime:
                 "canonical_agent_ref": agent_ref,
                 "other_agent_id": self._identity_record.eve_agent_id,
                 "other_agent_name": candidate["eve_identity"]["canonical_name"],
-                "other_agent_ref": "east_eve",
+                "other_agent_ref": self._eve_ref,
             }
         raw = candidate["eve_identity"]
         return {
@@ -154,7 +164,7 @@ class FirstPairRuntime:
             "canonical_agent_ref": agent_ref,
             "other_agent_id": self._identity_record.adam_agent_id,
             "other_agent_name": candidate["adam_identity"]["canonical_name"],
-            "other_agent_ref": "east_adam",
+            "other_agent_ref": self._adam_ref,
         }
 
     # ------------------------------------------------------------------
@@ -169,8 +179,8 @@ class FirstPairRuntime:
         self._habitat = identity.habitat_boundary["habitat"]
 
         memory = load_memory(self._store)
-        self._adam_memory = list(memory.get("east_adam", []))
-        self._eve_memory = list(memory.get("east_eve", []))
+        self._adam_memory = list(memory.get(self._adam_ref, []))
+        self._eve_memory = list(memory.get(self._eve_ref, []))
 
         self._goals = load_goals(self._store)
         self._questions = load_questions(self._store)
@@ -229,7 +239,7 @@ class FirstPairRuntime:
         """True when per-agent known-map files exist (the fog gate)."""
         if self._store is None:
             return False
-        return fog_gate_active(self._store.root)
+        return fog_gate_active(self._store.root, self._pair_id)
 
     def _get_data_root(self) -> Path:
         return Path(__file__).resolve().parents[2] / "data"
@@ -250,7 +260,7 @@ class FirstPairRuntime:
             true_map = load_true_map(self._get_data_root())
             known_maps = [
                 load_known_map(self._store.root, ref)
-                for ref in ("east_adam", "east_eve")
+                for ref in (self._adam_ref, self._eve_ref)
             ]
             topology = derive_topology(true_map, known_maps)
             for tile in topology["tiles"]:
@@ -265,7 +275,7 @@ class FirstPairRuntime:
             true_map = load_true_map(self._get_data_root())
             known_maps = [
                 load_known_map(self._store.root, ref)
-                for ref in ("east_adam", "east_eve")
+                for ref in (self._adam_ref, self._eve_ref)
             ]
             topology = derive_topology(true_map, known_maps)
             return topology["allowed_tile_ids"]
@@ -299,7 +309,7 @@ class FirstPairRuntime:
     def _get_agent_inventory(self, agent_ref: str) -> dict:
         """Return the agent's gathered-resource inventory."""
         if not hasattr(self, "_inventory"):
-            self._inventory = {"east_adam": {}, "east_eve": {}}
+            self._inventory = {self._adam_ref: {}, self._eve_ref: {}}
         return self._inventory.get(agent_ref, {})
 
     # ------------------------------------------------------------------
@@ -311,7 +321,7 @@ class FirstPairRuntime:
     ) -> AgentContext:
         view = self._agent_view(agent_ref)
         memory_list = (
-            self._adam_memory if agent_ref == "east_adam" else self._eve_memory
+            self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
         )
 
         agent_goals = [g for g in self._goals if g.agent_id == view["agent_id"]]
@@ -570,7 +580,7 @@ class FirstPairRuntime:
         # Add to agent inventory
         inventory_key = "_inventory"
         if not hasattr(self, inventory_key):
-            self._inventory = {"east_adam": {}, "east_eve": {}}
+            self._inventory = {self._adam_ref: {}, self._eve_ref: {}}
         agent_inv = self._inventory.get(agent_ref, {})
         agent_inv[resource_kind] = agent_inv.get(resource_kind, 0) + gathered
         self._inventory[agent_ref] = agent_inv
@@ -743,7 +753,7 @@ class FirstPairRuntime:
                 return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
         agent_id = (
             self._identity_record.adam_agent_id
-            if agent_ref == "east_adam"
+            if agent_ref == self._adam_ref
             else self._identity_record.eve_agent_id
         )
         urgency = action.get("urgency", "low")
@@ -819,7 +829,7 @@ class FirstPairRuntime:
             if not isinstance(mw, dict):
                 continue
             target_list = (
-                self._adam_memory if agent_ref == "east_adam" else self._eve_memory
+                self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
             )
             target_list.append({
                 **mw,
@@ -849,7 +859,7 @@ class FirstPairRuntime:
                 continue
             agent_id = (
                 self._identity_record.adam_agent_id
-                if agent_ref == "east_adam"
+                if agent_ref == self._adam_ref
                 else self._identity_record.eve_agent_id
             )
             proposal = QuestionProposal(
@@ -870,8 +880,8 @@ class FirstPairRuntime:
     def run(self, start_heartbeat: int | None = None) -> dict:
         self._load_or_initialize()
         self._current_run_cognition: dict[str, dict] = {
-            "east_adam": {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
-            "east_eve": {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
+            self._adam_ref: {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
+            self._eve_ref: {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
         }
 
         history = load_heartbeat_history(self._store)
@@ -913,7 +923,7 @@ class FirstPairRuntime:
             # Load gatherable resources for this heartbeat
             self._load_tile_resources()
 
-            for agent_ref in ("east_adam", "east_eve"):
+            for agent_ref in (self._adam_ref, self._eve_ref):
                 backend = self._get_cognition_backend(agent_ref)
                 cycle = CognitiveCycle(backend)
                 ctx = self._build_context(agent_ref, hb)
@@ -948,24 +958,24 @@ class FirstPairRuntime:
                     except FogAdapterError:
                         pass  # Known-map persist failure noted; don't crash the cycle
 
-                if agent_ref == "east_adam":
+                if agent_ref == self._adam_ref:
                     adam_action = output.action
                     adam_outcome = outcome
-                    self._current_run_cognition["east_adam"]["observation_summary"] = output.observation_summary
-                    self._current_run_cognition["east_adam"]["decision_summary"] = output.decision_summary
-                    self._current_run_cognition["east_adam"]["uncertainty"] = output.uncertainty
+                    self._current_run_cognition[self._adam_ref]["observation_summary"] = output.observation_summary
+                    self._current_run_cognition[self._adam_ref]["decision_summary"] = output.decision_summary
+                    self._current_run_cognition[self._adam_ref]["uncertainty"] = output.uncertainty
                 else:
                     eve_action = output.action
                     eve_outcome = outcome
-                    self._current_run_cognition["east_eve"]["observation_summary"] = output.observation_summary
-                    self._current_run_cognition["east_eve"]["decision_summary"] = output.decision_summary
-                    self._current_run_cognition["east_eve"]["uncertainty"] = output.uncertainty
+                    self._current_run_cognition[self._eve_ref]["observation_summary"] = output.observation_summary
+                    self._current_run_cognition[self._eve_ref]["decision_summary"] = output.decision_summary
+                    self._current_run_cognition[self._eve_ref]["uncertainty"] = output.uncertainty
 
                 reflection = cycle.reflect(ctx, output.action, outcome)
                 self._apply_cognition_output(agent_ref, output, hb)
 
                 memory_list = (
-                    self._adam_memory if agent_ref == "east_adam" else self._eve_memory
+                    self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
                 )
                 memory_list.append({
                     "type": "reflection",
@@ -1034,8 +1044,8 @@ class FirstPairRuntime:
         save_world_state(self._store, self._world_state)
 
         shared_memory = {
-            "east_adam": list(self._adam_memory),
-            "east_eve": list(self._eve_memory),
+            self._adam_ref: list(self._adam_memory),
+            self._eve_ref: list(self._eve_memory),
         }
         save_memory(self._store, shared_memory)
         save_goals(self._store, self._goals)
@@ -1043,9 +1053,9 @@ class FirstPairRuntime:
 
         actions_taken = {}
         if adam_action:
-            actions_taken["east_adam"] = adam_action
+            actions_taken[self._adam_ref] = adam_action
         if eve_action:
-            actions_taken["east_eve"] = eve_action
+            actions_taken[self._eve_ref] = eve_action
 
         hb_record = HeartbeatRecord(
             heartbeat_number=heartbeat_number,
@@ -1080,8 +1090,8 @@ class FirstPairRuntime:
         history = load_heartbeat_history(self._store)
         process_start = datetime.now(timezone.utc)
 
-        adam_view = self._agent_view("east_adam") if self._identity_record else {}
-        eve_view = self._agent_view("east_eve") if self._identity_record else {}
+        adam_view = self._agent_view(self._adam_ref) if self._identity_record else {}
+        eve_view = self._agent_view(self._eve_ref) if self._identity_record else {}
 
         # --- Resolve run boundaries from pre-run state ---
         pre = getattr(self, "_evidence_pre", None)
@@ -1116,8 +1126,8 @@ class FirstPairRuntime:
         for h in history:
             entry: dict = {"heartbeat_number": h.heartbeat_number}
             actions = h.action_taken or {}
-            entry["adam_action"] = actions.get("east_adam")
-            entry["eve_action"] = actions.get("east_eve")
+            entry["adam_action"] = actions.get(self._adam_ref)
+            entry["eve_action"] = actions.get(self._eve_ref)
             entry["questions_raised"] = h.questions_raised
             entry["goals_updated"] = h.goals_updated
             entry["world_mutations"] = [
@@ -1161,7 +1171,7 @@ class FirstPairRuntime:
         model_name = ""
         backend_label = getattr(self, "_run_backend_label", self._backend)
         try:
-            backend = self._get_cognition_backend("east_adam")
+            backend = self._get_cognition_backend(self._adam_ref)
             if hasattr(backend, "provider_type"):
                 provider_type = backend.provider_type
             if hasattr(backend, "model_name"):
@@ -1215,12 +1225,12 @@ class FirstPairRuntime:
             "active_capability_grants": [
                 self._capability_grant.__dict__
             ] if self._capability_grant else [],
-            "adam_observation_summary": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("observation_summary", ""),
-            "adam_decision_summary": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("decision_summary", ""),
-            "adam_uncertainty": getattr(self, "_current_run_cognition", {}).get("east_adam", {}).get("uncertainty", ""),
-            "eve_observation_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("observation_summary", ""),
-            "eve_decision_summary": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("decision_summary", ""),
-            "eve_uncertainty": getattr(self, "_current_run_cognition", {}).get("east_eve", {}).get("uncertainty", ""),
+            "adam_observation_summary": getattr(self, "_current_run_cognition", {}).get(self._adam_ref, {}).get("observation_summary", ""),
+            "adam_decision_summary": getattr(self, "_current_run_cognition", {}).get(self._adam_ref, {}).get("decision_summary", ""),
+            "adam_uncertainty": getattr(self, "_current_run_cognition", {}).get(self._adam_ref, {}).get("uncertainty", ""),
+            "eve_observation_summary": getattr(self, "_current_run_cognition", {}).get(self._eve_ref, {}).get("observation_summary", ""),
+            "eve_decision_summary": getattr(self, "_current_run_cognition", {}).get(self._eve_ref, {}).get("decision_summary", ""),
+            "eve_uncertainty": getattr(self, "_current_run_cognition", {}).get(self._eve_ref, {}).get("uncertainty", ""),
             # Run-specific sections
             "heartbeats": run_heartbeats,
             "memory_selection_manifests": run_manifests,
