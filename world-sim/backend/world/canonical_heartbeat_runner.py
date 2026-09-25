@@ -245,6 +245,8 @@ def _runner_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--vault", type=str, default=r"S:\kernel-lane\.env")
     p.add_argument("--store-root", type=str, default="")
     p.add_argument("--world-sim-root", type=str, default=str(default_ws))
+    p.add_argument("--pair-id", type=str, default="east",
+                   help="Pair identifier (east or west, default east)")
     p.add_argument(
         "--loop-script", type=str,
         default=str(Path(default_ws) / "scripts" / "run_first_pair_living_loop.py"),
@@ -261,9 +263,12 @@ def runner_main(argv=None) -> int:
     if args.expect_heartbeat < 1:
         return 2
     world_sim_root = Path(args.world_sim_root)
-    store_root = Path(args.store_root) if args.store_root else (
-        world_sim_root / ".runtime" / "first-pair"
-    )
+    if args.store_root:
+        store_root = Path(args.store_root)
+    elif args.pair_id == "east":
+        store_root = world_sim_root / ".runtime" / "first-pair"
+    else:
+        store_root = world_sim_root / ".runtime" / f"first-pair-{args.pair_id}"
     evidence = Path(args.evidence)
     status_path = Path(args.status)
     vault = Path(args.vault)
@@ -311,12 +316,14 @@ def runner_main(argv=None) -> int:
             print(f"[runner] preflight failed: {detail}")
             return 1
         print(f"[runner] preflight ok: {detail}")
-        print(f"[runner] launching ONE heartbeat: {loop_script}")
+        print(f"[runner] launching ONE heartbeat: {loop_script} (pair: {args.pair_id})")
         proc = subprocess.run(
             [
                 sys.executable, "-u", str(loop_script),
                 "--heartbeats", "1",
                 "--evidence", str(evidence),
+                "--pair-id", args.pair_id,
+                "--store-root", str(store_root),
             ],
             cwd=str(world_sim_root),
             env=env,
@@ -370,6 +377,8 @@ def _launcher_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--vault", type=str, default=r"S:\kernel-lane\.env")
     p.add_argument("--store-root", type=str, default="")
     p.add_argument("--world-sim-root", type=str, default="")
+    p.add_argument("--pair-id", type=str, default="east",
+                   help="Pair identifier (east or west, default east)")
     p.add_argument("--loop-script", type=str, default="")
     p.add_argument("--export-script", type=str, default="")
     return p
@@ -383,7 +392,8 @@ def launcher_main(argv=None) -> int:
         Path(__file__).resolve().parents[2]
     )
     store_root = args.store_root or str(
-        world_sim_root / ".runtime" / "first-pair"
+        world_sim_root / ".runtime" / "first-pair" if args.pair_id == "east"
+        else world_sim_root / ".runtime" / f"first-pair-{args.pair_id}"
     )
     loop_script = args.loop_script or str(
         world_sim_root / "scripts" / "run_first_pair_living_loop.py"
@@ -413,6 +423,7 @@ def launcher_main(argv=None) -> int:
         "--vault", args.vault,
         "--store-root", store_root,
         "--world-sim-root", str(world_sim_root),
+        "--pair-id", args.pair_id,
         "--loop-script", loop_script,
         "--export-script", export_script,
     ]

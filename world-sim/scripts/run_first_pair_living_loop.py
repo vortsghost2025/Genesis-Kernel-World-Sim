@@ -54,6 +54,10 @@ def main() -> int:
                         help="Run against an isolated temp store, never canonical")
     parser.add_argument("--evidence", type=str, default="",
                         help="Optional evidence export path (JSON)")
+    parser.add_argument("--pair-id", type=str, default="east",
+                        help="Pair identifier (east or west, default east)")
+    parser.add_argument("--store-root", type=str, default="",
+                        help="Override store root path")
     args = parser.parse_args()
 
     if args.heartbeats < 1 or args.heartbeats > 16:
@@ -70,9 +74,16 @@ def main() -> int:
     if args.scratch:
         root = Path(tempfile.mkdtemp(prefix="genesis-living-loop-scratch-"))
         print(f"STORE=SCRATCH {root}")
+    elif args.store_root:
+        root = Path(args.store_root)
+        print(f"STORE={root}")
     else:
-        root = None
-        print("STORE=CANONICAL")
+        if args.pair_id == "east":
+            root = None
+            print("STORE=CANONICAL (east)")
+        else:
+            root = Path(__file__).resolve().parents[1] / ".runtime" / f"first-pair-{args.pair_id}"
+            print(f"STORE=CANONICAL ({args.pair_id}) {root}")
 
     store = FirstPairPersistenceStore(root)
 
@@ -98,6 +109,7 @@ def main() -> int:
         persistence_root=root,
         heartbeat_limit=args.heartbeats,
         backend="model",
+        pair_id=args.pair_id,
     )
     try:
         results = runtime.run()
