@@ -49,7 +49,8 @@ the file from disk per request. No live connection required.
 ## Deploy: Docker
 
 ```bash
-docker build -t genesis-viewer world-sim/web/
+# context must be the world-sim dir so the viewer page ships in the image
+docker build -f world-sim/web/Dockerfile -t genesis-viewer world-sim/
 docker run -p 8000:8000 genesis-viewer
 # or
 docker compose -f world-sim/web/docker-compose.yml up -d
