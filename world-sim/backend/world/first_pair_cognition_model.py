@@ -876,6 +876,27 @@ def build_system_prompt(context: AgentContext) -> str:
             "one with the revise_charter action. You are never required to."
         )
 
+    # --- Body (world pressure): the world's terms, stated plainly ---
+    carrying = context.carrying if isinstance(context.carrying, dict) else {}
+    provisions = context.provisions if isinstance(context.provisions, dict) else {}
+    if carrying:
+        body_section = (
+            "--- YOUR BODY (the world's terms) ---\n"
+            f"food {carrying.get('food_used', 0)}/{carrying.get('food_cap', 0)}"
+            f" · goods {carrying.get('goods_used', 0)}/{carrying.get('goods_cap', 0)}\n"
+            "Each heartbeat the world takes 1 food from what you hold. "
+            "With none held, you go hungry and cannot build until you hold "
+            "food again. Built things no longer ride on your back: what you "
+            "spend on a build leaves what you carry."
+        )
+        if provisions.get("famished"):
+            body_section += (
+                "\nYou are famished this heartbeat: the world found no food "
+                "on you to take. You cannot build until you hold food again."
+            )
+    else:
+        body_section = ""
+
     return f"""You are {context.canonical_name}, an agent operating inside a constructed world simulation.
 
 Your persistent identity:
@@ -888,6 +909,8 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {charter_section}
 
 {belongings_section}
+
+{body_section}
 
 Current heartbeat: {context.heartbeat_number}
 Your position: {context.position}

@@ -379,6 +379,10 @@ class HeartbeatRecord:
     world_mutations: list = field(default_factory=list)
     goals_updated: list = field(default_factory=list)
     questions_raised: list = field(default_factory=list)
+    # World pressure era: per-agent execution outcomes (success/rejected/
+    # blocked + reason). Additive; old records without it load as {}.
+    # The frozen rejection strings in here are the behavior-census contract.
+    action_outcomes: dict = field(default_factory=dict)
     timestamp_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_envelope(self) -> dict:

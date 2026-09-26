@@ -196,17 +196,24 @@ Ordering within a heartbeat (per agent), fail-closed:
    `build_layer_spec.md`).
 
    **Cap rule, precisely.** Split holdings into ledgers: food units `F`
-   (sum over `FOOD_KINDS`) and goods units `G` (everything else). Let
-   `S` be the relevant ledger's total at the start of this heartbeat —
-   for food, *after* this tick's consumption. A gather is allowed iff
-   `post-gather ledger total ≤ max(ledger_cap, S)`, where the ledger
-   cap is `FOOD_CAP` for a food kind, else `GOODS_CAP`. In words: a
-   ledger at or under its cap may fill up to the cap; a ledger over its
-   cap may only replace what was just consumed (the food ledger, which
-   shrinks each tick) and may never otherwise grow; the goods ledger
-   shrinks only by building. Frozen rejection strings (contract — the
-   §8 census counts them): `"hands full"` (goods), `"food store full"`
-   (food).
+   (sum over `FOOD_KINDS`) and goods units `G` (everything else). `S_F` is
+   the food ledger at the start of this heartbeat (pre-consumption).
+   **Food gather**: allowed iff post-gather `F ≤ max(FOOD_CAP, S_F)` —
+   fill to the cap, or when over the cap replace only what was just
+   consumed; an over-cap food ledger also burns down 1 per heartbeat
+   toward the cap (the world eats your hoard). **Goods gather**: allowed
+   iff post-gather `G ≤ GOODS_CAP` — goods are never consumed, so an
+   over-cap goods ledger cannot grow *and cannot even refill*; it shrinks
+   only by building. That asymmetry is the point: hoarded food decays
+   through appetite, hoarded goods pressure you to construct. Frozen
+   rejection strings (contract — the §8 census counts them):
+   `"hands full"` (goods), `"food store full"` (food).
+
+   Trap check, by construction: an agent with `F = 0` and `G` over cap
+   may still gather food (post-gather `F ≤ max(FOOD_CAP, 0)`), so no
+   famished-and-frozen state exists. Famished blocks only `build`, and
+   famine is curable in one foraging heartbeat — the build-block is a
+   speed bump, never a wall.
 
    Trap check, by construction: an agent with `F = 0` and `G` over cap
    may still gather food (post-gather `F ≤ max(FOOD_CAP, 0)`), so no
@@ -308,9 +315,9 @@ Inventory/economy:
 - two-ledger cap: food gather fills to `FOOD_CAP` then rejects with
   exactly `"food store full"`; goods gather fills to `GOODS_CAP` then
   rejects with exactly `"hands full"`.
-- over-cap grandfathering: an over-cap goods ledger cannot grow by any
-  gather; an over-cap food ledger may replace exactly the 1 unit consumed
-  this heartbeat and no more.
+- over-cap grandfathering: an over-cap goods ledger rejects every goods
+  gather (it shrinks only by building); an over-cap food ledger may
+  replace exactly the 1 unit consumed this heartbeat and no more.
 - trap check: an agent at food 0 / goods over cap may still gather food;
   a provision-step error leaves holdings byte-unchanged.
 - build materials deducted at build time never re-enter either ledger;

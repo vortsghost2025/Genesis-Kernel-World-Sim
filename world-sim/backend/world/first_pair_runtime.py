@@ -56,7 +56,6 @@ from backend.world.first_pair_persistence import (
     load_heartbeat_history,
     load_inventory,
     add_to_inventory,
-    load_heartbeat_history,
     load_latest_charter,
     load_memory,
     load_memory_selection_manifests,
@@ -75,6 +74,15 @@ from backend.world.first_pair_persistence import (
 )
 from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
+from backend.world.world_pressure import (
+    BUILD_REJECT_FAMISHED,
+    FOOD_PER_HEARTBEAT,
+    carrying_view,
+    consume_choice,
+    gather_rejection,
+    provisions_view,
+    split_ledgers,
+)
 from backend.world.first_pair_fog_adapter import (
     FogAdapterError,
     cognition_safe_observation,
@@ -153,6 +161,11 @@ class FirstPairRuntime:
         self._eve_memory: list[dict] = []
         self._runtime_policy: RuntimePolicyRecord | None = None
         self._capability_grant: CapabilityGrantRecord | None = None
+
+        # World pressure (docs/world_pressure_spec.md): per-agent, per-tick
+        # physics state. Refreshed every heartbeat by _pressure_step before
+        # context is built; gates gather caps and the famished build block.
+        self._pressure_tick: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Identity helpers
@@ -384,6 +397,70 @@ class FirstPairRuntime:
         return dict(load_inventory(self._store).get(agent_ref, {}))
 
     # ------------------------------------------------------------------
+    # World pressure (docs/world_pressure_spec.md)
+    # ------------------------------------------------------------------
+
+    def _pressure_step(self, agent_ref: str, heartbeat_number: int = 0) -> dict:
+        """Apply this heartbeat's world physics for one agent.
+
+        Order per spec: consume first — 1 food unit of the most-held food
+        kind is decremented through the store; if no food is held the agent
+        is famished this heartbeat (observable truth, gates only `build`).
+        Records per-tick start-ledger totals so the gather cap rule can
+        compare against them. Fail-closed: any error leaves holdings
+        exactly as they were, and the state is recomputed conservatively
+        from what is actually held.
+        """
+        state = {
+            "heartbeat": heartbeat_number,
+            "food_start": 0,
+            "goods_start": 0,
+            "consumed_kind": "",
+            "famished": False,
+        }
+        try:
+            holdings = self._get_agent_inventory(agent_ref)
+            led = split_ledgers(holdings)
+            state["food_start"] = led["food"]
+            state["goods_start"] = led["goods"]
+            kind = consume_choice(holdings)
+            if kind is None:
+                state["famished"] = True
+            else:
+                add_to_inventory(
+                    self._store, agent_ref, kind, -FOOD_PER_HEARTBEAT
+                )
+                state["consumed_kind"] = kind
+        except Exception:
+            # Fail-closed: nothing (or nothing further) written. Honesty
+            # rule: famished only if the agent actually holds no food.
+            state["consumed_kind"] = ""
+            state["famished"] = state["food_start"] == 0
+        self._pressure_tick[agent_ref] = state
+        return state
+
+    def _pressure_state(self, agent_ref: str, heartbeat_number: int = 0) -> dict:
+        """Current tick's pressure state, or a conservative default.
+
+        Freshness rule: a stored state is authoritative only for the
+        heartbeat it was computed in. Calls outside the heartbeat pipeline
+        (direct executor invocations, other tools) get an inert default —
+        never famished, start ledgers read from live holdings — so world
+        pressure is only ever enforced by the real loop.
+        """
+        state = self._pressure_tick.get(agent_ref)
+        if state is not None and state.get("heartbeat", 0) == heartbeat_number:
+            return state
+        led = split_ledgers(self._get_agent_inventory(agent_ref))
+        return {
+            "heartbeat": heartbeat_number,
+            "food_start": led["food"],
+            "goods_start": led["goods"],
+            "consumed_kind": "",
+            "famished": False,
+        }
+
+    # ------------------------------------------------------------------
     # Context builder
     # ------------------------------------------------------------------
 
@@ -580,6 +657,15 @@ class FirstPairRuntime:
         charter_text = latest_charter.charter_text if latest_charter else ""
         charter_heartbeat = latest_charter.heartbeat if latest_charter else 0
 
+        # --- World pressure: personal physics state (no map data) ---
+        holdings_now = self._get_agent_inventory(agent_ref)
+        pressure_state = self._pressure_state(agent_ref, heartbeat_number)
+        famished_now = bool(pressure_state.get("famished", False))
+        provisions = provisions_view(holdings_now, famished_now)
+        carrying = carrying_view(holdings_now)
+        observation["provisions"] = provisions
+        observation["carrying"] = carrying
+
         return AgentContext(
             agent_id=view["agent_id"],
             canonical_name=view["canonical_name"],
@@ -611,6 +697,8 @@ class FirstPairRuntime:
             charter_text=charter_text,
             charter_heartbeat=charter_heartbeat,
             inventory=self._get_agent_inventory(agent_ref),
+            provisions=provisions,
+            carrying=carrying,
         )
 
     # ------------------------------------------------------------------
@@ -660,6 +748,18 @@ class FirstPairRuntime:
         ]
         if not tile_resources:
             return {"status": "rejected", "reason": f"No {resource_kind} available on this tile"}
+
+        # World pressure: two-ledger carrying capacity (frozen reason
+        # strings — the live census and public show count them verbatim).
+        pressure = self._pressure_state(agent_ref, heartbeat_number)
+        cap_reason = gather_rejection(
+            resource_kind,
+            self._get_agent_inventory(agent_ref),
+            pressure["food_start"],
+            pressure["goods_start"],
+        )
+        if cap_reason:
+            return {"status": "rejected", "reason": cap_reason}
 
         resource = tile_resources[0]
         gathered = min(1, resource.get("amount", 0))
@@ -740,6 +840,11 @@ class FirstPairRuntime:
         raw_description = action.get("description", "")
         tile_id = action.get("tile_id")
         materials = action.get("materials")
+
+        # World pressure: you cannot build on an empty stomach. Build is the
+        # only action famished gates; everything else remains available.
+        if self._pressure_state(agent_ref, heartbeat_number)["famished"]:
+            return {"status": "rejected", "reason": BUILD_REJECT_FAMISHED}
 
         if not _is_safe_object_id(str(object_id or "")):
             return {"status": "rejected", "reason": "Invalid object_id"}
@@ -1128,10 +1233,12 @@ class FirstPairRuntime:
 
             # Load gatherable resources for this heartbeat
             self._load_tile_resources()
+            self._pressure_tick = {}
 
             for agent_ref in (self._adam_ref, self._eve_ref):
                 backend = self._get_cognition_backend(agent_ref)
                 cycle = CognitiveCycle(backend)
+                self._pressure_step(agent_ref, hb)  # physics before observation
                 ctx = self._build_context(agent_ref, hb)
                 output = cycle.run_cycle(ctx)
                 serving = getattr(backend, "serving_provider_type", "")
@@ -1264,6 +1371,12 @@ class FirstPairRuntime:
         if eve_action:
             actions_taken[self._eve_ref] = eve_action
 
+        action_outcomes = {}
+        if adam_outcome:
+            action_outcomes[self._adam_ref] = adam_outcome
+        if eve_outcome:
+            action_outcomes[self._eve_ref] = eve_outcome
+
         hb_record = HeartbeatRecord(
             heartbeat_number=heartbeat_number,
             agent_id="both",
@@ -1275,6 +1388,7 @@ class FirstPairRuntime:
             questions_raised=[
                 q.question_id for q in self._questions if q.status == "pending"
             ],
+            action_outcomes=action_outcomes,
         )
         append_heartbeat(self._store, hb_record)
 

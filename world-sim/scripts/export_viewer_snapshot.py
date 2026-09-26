@@ -26,6 +26,16 @@ RUNTIME_ROOT = WORLD_SIM / ".runtime"
 VIEWER_DIR = WORLD_SIM / "viewer"
 OUT_FILE = VIEWER_DIR / "viewer_data.js"
 
+if str(WORLD_SIM) not in sys.path:
+    sys.path.insert(0, str(WORLD_SIM))
+
+from backend.world.world_pressure import (  # noqa: E402
+    FOOD_CAP,
+    GOODS_CAP,
+    FOOD_PER_HEARTBEAT,
+    split_ledgers,
+)
+
 PAIRS = [
     ("east", RUNTIME_ROOT / "first-pair"),
     ("west", RUNTIME_ROOT / "first-pair-west"),
@@ -121,6 +131,26 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         sid = m.get("sender_agent_id", "")
         return name_by_hash.get(sid, sid)
 
+    # World pressure (docs/world_pressure_spec.md): per-agent physics view
+    # derived from persisted holdings. "famished" here means "no food held
+    # right now" — the between-ticks read of the same ledgers the agent
+    # sees; the per-tick truth lives in heartbeat action_outcomes.
+    pressure = {}
+    for agent, holdings in (inventories or {}).items():
+        led = split_ledgers(holdings)
+        pressure[agent] = {
+            "carrying": {
+                "food_used": led["food"],
+                "food_cap": FOOD_CAP,
+                "goods_used": led["goods"],
+                "goods_cap": GOODS_CAP,
+            },
+            "provisions": {
+                "food_units": led["food"],
+                "famished": led["food"] == 0,
+            },
+        }
+
     return {
         "pair": pair_name,
         "agents": agents,
@@ -147,6 +177,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "known_maps": known_maps,
         "charters": charters,
         "inventories": inventories,
+        "pressure": pressure,
         "heartbeats": extract_per_heartbeat(heartbeats),
         "position_timeline": reconstruct_positions(heartbeats, start_tiles),
     }
@@ -156,11 +187,15 @@ def extract_per_heartbeat(heartbeats: list[dict]) -> list[dict]:
     out = []
     for hb in heartbeats:
         actions = hb.get("action_taken") or {}
+        outcomes = hb.get("action_outcomes") or {}
         slim_actions = {}
         if isinstance(actions, dict):
             for agent_id, action in actions.items():
                 if not isinstance(action, dict):
                     continue
+                outcome = outcomes.get(agent_id, {}) if isinstance(outcomes, dict) else {}
+                if not isinstance(outcome, dict):
+                    outcome = {}
                 slim_actions[agent_id] = {
                     "type": action.get("action_type"),
                     "reason": action.get("reason", ""),
@@ -173,6 +208,11 @@ def extract_per_heartbeat(heartbeats: list[dict]) -> list[dict]:
                     "object_type": action.get("object_type"),
                     "description": action.get("description"),
                     "materials": action.get("materials"),
+                    # execution outcome (world pressure era; absent in older
+                    # records -> None): the frozen rejection strings are the
+                    # census contract.
+                    "outcome_status": outcome.get("status"),
+                    "outcome_reason": outcome.get("reason"),
                 }
         out.append(
             {
