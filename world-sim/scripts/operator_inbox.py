@@ -98,6 +98,28 @@ def scan_pair(pair: str, store: Path) -> dict:
                 "heartbeat": rec.get("heartbeat"),
             }
 
+    # Noncanonical agent asks: the operator sink. An agent stuck in a
+    # loop (e.g. refused construction) speaks here; it never becomes
+    # canonical without a separate operator action, but the operator
+    # MUST be able to hear it.
+    unheard_asks = []
+    asks_path = store / "agent_questions.json"
+    if asks_path.exists():
+        try:
+            for rec in read_json(asks_path).get("data", []):
+                if rec.get("status") != "unheard":
+                    continue
+                unheard_asks.append({
+                    "question_id": rec.get("question_id"),
+                    "agent": rec.get("agent_ref", "?"),
+                    "heartbeat": rec.get("heartbeat"),
+                    "urgency": rec.get("urgency"),
+                    "question": rec.get("question", ""),
+                    "reason_for_asking": rec.get("reason_for_asking", ""),
+                })
+        except Exception:
+            unheard_asks = []
+
     return {
         "pair": pair,
         "tick": world_state.get("tick"),
@@ -107,6 +129,7 @@ def scan_pair(pair: str, store: Path) -> dict:
         "capability_requests": per_cap,
         "capability_request_total": len(cap_reqs),
         "charters": charters,
+        "unheard_asks": unheard_asks,
     }
 
 
@@ -139,6 +162,16 @@ def render(report: list[dict]) -> str:
                 lines.append(f"    {ref} @HB{c['heartbeat']}: {c['text'][:160]}")
         else:
             lines.append("  charters: none written yet")
+        if p.get("unheard_asks"):
+            lines.append(
+                f"  UNHEARD ASKS (noncanonical; the agents are asking) "
+                f"({len(p['unheard_asks'])}):")
+            for a in p["unheard_asks"][-5:]:
+                lines.append(
+                    f"    [{a['urgency'] or '?'}] {a['agent']} @HB{a['heartbeat']}: "
+                    f"{a['question'][:200]}")
+        else:
+            lines.append("  unheard asks: none")
         if p["answered_question_count"]:
             lines.append(f"  answered questions to date: {p['answered_question_count']}")
         lines.append("")

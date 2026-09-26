@@ -151,8 +151,23 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
             },
         }
 
+    # Noncanonical agent asks: the show hears what the operator hears.
+    # An agent in a catch-22 (e.g. refused construction) speaks here.
+    agent_asks = []
+    asks_path = store / "agent_questions.json"
+    if asks_path.exists():
+        try:
+            for rec in read_json(asks_path).get("data", []):
+                agent_asks.append({
+                    "heartbeat": rec.get("heartbeat"),
+                    "agent": rec.get("agent_ref", "?"),
+                    "urgency": rec.get("urgency"),
+                    "question": rec.get("question", ""),
+                })
+        except Exception:
+            agent_asks = []
+
     return {
-        "pair": pair_name,
         "agents": agents,
         "exported_tick": world_state.get("tick"),
         "exported_at_utc": world_state.get("updated_at_utc"),
@@ -178,6 +193,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "charters": charters,
         "inventories": inventories,
         "pressure": pressure,
+        "agent_asks": agent_asks[-10:],
         "heartbeats": extract_per_heartbeat(heartbeats),
         "position_timeline": reconstruct_positions(heartbeats, start_tiles),
     }

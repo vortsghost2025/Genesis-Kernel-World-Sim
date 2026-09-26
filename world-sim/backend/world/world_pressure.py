@@ -22,6 +22,13 @@ from __future__ import annotations
 FOOD_CAP = 20
 GOODS_CAP = 20
 FOOD_PER_HEARTBEAT = 1
+# A gather takes up to GATHER_YIELD units of what the tile offers, bounded
+# by cap room (partial takes top off a nearly-full ledger). GATHER_YIELD
+# must exceed FOOD_PER_HEARTBEAT, or food becomes mathematically
+# unbankable: with yield <= consumption an agent can never hold more than
+# its per-tick burn, so the famished build-gate can never clear (found by
+# the HB701-743 live arc: East pair pinned at 0-1 food forever).
+GATHER_YIELD = 3
 
 FOOD_KINDS = frozenset(
     {"wild_berries", "mushrooms", "edible_roots", "fish", "shellfish"}
@@ -74,34 +81,36 @@ def consume_choice(holdings) -> str | None:
     return sorted(foods.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
-def gather_rejection(
-    resource_kind, holdings, food_start: int, goods_start: int
-) -> str | None:
-    """The precise per-ledger cap rule.
+def gather_allowance(
+    resource_kind, holdings, food_start: int, goods_start: int, available: int
+) -> tuple:
+    """How much a gather may take right now: (take, reason).
 
-    Rule, precise. Food ledger: allowed iff post-gather total <=
-    max(FOOD_CAP, food_start) — fill to the cap, or when over the cap
-    replace only what this tick's consumption just removed (food_start is
-    pre-consumption). A famished agent (food_start == 0) can always gather
-    food, so no famished-and-frozen state exists. Goods ledger: allowed
-    iff post-gather total <= GOODS_CAP — the goods ledger is never
-    consumed, so an over-cap goods ledger may not gather at all; it
-    shrinks only by building, which is what makes construction the
-    question goods ask.
+    `available` is what the tile offers (pre-decrement); `take` is
+    min(GATHER_YIELD, available, cap room) — partial takes top off a
+    nearly-full ledger instead of failing it. `reason` is the frozen
+    rejection string when take == 0, else None.
+
+    Rule, precise. Food ledger: the room is max(FOOD_CAP, food_start) —
+    at/under cap you fill to the cap; over cap you may replace only what
+    this tick's consumption took (food_start is pre-consumption), never
+    grow. Goods ledger: the room is GOODS_CAP outright — goods are never
+    consumed, so an over-cap goods ledger takes nothing and shrinks only
+    by building. A famished agent (food_start == 0) can always gather
+    food, so no famished-and-frozen state exists.
     """
     if not isinstance(resource_kind, str) or not resource_kind.strip():
-        return None  # not a cap question; the executor's own validation answers
+        return 0, None  # not a cap question; the executor's own validation answers
     led = split_ledgers(holdings)
     is_food = resource_kind in FOOD_KINDS
     current = led["food"] if is_food else led["goods"]
-    cap = FOOD_CAP if is_food else GOODS_CAP
-    if is_food:
-        if current + 1 <= max(cap, food_start):
-            return None
-        return GATHER_REJECT_FOOD
-    if current + 1 <= cap:
-        return None
-    return GATHER_REJECT_GOODS
+    room = (
+        max(FOOD_CAP, food_start) if is_food else GOODS_CAP
+    ) - current
+    take = min(GATHER_YIELD, available, room) if available > 0 else 0
+    if take <= 0:
+        return 0, GATHER_REJECT_FOOD if is_food else GATHER_REJECT_GOODS
+    return take, None
 
 
 def provisions_view(holdings, famished: bool) -> dict:

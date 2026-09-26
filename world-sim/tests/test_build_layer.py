@@ -205,7 +205,10 @@ class TestBuildRuntime:
             heartbeat_number=2,
         )
         assert outcome.get("status") == "success"
-        assert load_inventory(store)["east_adam"]["stone"] == 1
+        # world pressure: a gather takes up to GATHER_YIELD units
+        from backend.world.world_pressure import GATHER_YIELD
+        assert outcome.get("amount_gathered") == GATHER_YIELD
+        assert load_inventory(store)["east_adam"]["stone"] == GATHER_YIELD
 
     def test_build_spends_and_creates(self, tmp_path):
         store = _fresh_store(tmp_path)

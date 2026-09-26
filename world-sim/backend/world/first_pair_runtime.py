@@ -38,6 +38,7 @@ from backend.world.first_pair_persistence import (
     RuntimePolicyRecord,
     WorldStateRecord,
     append_charter_version,
+    append_agent_question_proposal,
     append_heartbeat,
     append_memory_selection_manifest,
     append_summary,
@@ -59,6 +60,7 @@ from backend.world.first_pair_persistence import (
     load_latest_charter,
     load_memory,
     load_memory_selection_manifests,
+    load_agent_question_proposals,
     load_questions,
     load_relationship_events,
     load_runtime_policy,
@@ -79,7 +81,7 @@ from backend.world.world_pressure import (
     FOOD_PER_HEARTBEAT,
     carrying_view,
     consume_choice,
-    gather_rejection,
+    gather_allowance,
     provisions_view,
     split_ledgers,
 )
@@ -749,30 +751,33 @@ class FirstPairRuntime:
         if not tile_resources:
             return {"status": "rejected", "reason": f"No {resource_kind} available on this tile"}
 
-        # World pressure: two-ledger carrying capacity (frozen reason
-        # strings — the live census and public show count them verbatim).
+        resource = tile_resources[0]
+        available = resource.get("amount", 0)
+
+        # World pressure: two-ledger carrying capacity, partial takes
+        # (frozen reason strings — the live census and public show count
+        # them verbatim).
         pressure = self._pressure_state(agent_ref, heartbeat_number)
-        cap_reason = gather_rejection(
+        take, cap_reason = gather_allowance(
             resource_kind,
             self._get_agent_inventory(agent_ref),
             pressure["food_start"],
             pressure["goods_start"],
+            available,
         )
         if cap_reason:
             return {"status": "rejected", "reason": cap_reason}
 
-        resource = tile_resources[0]
-        gathered = min(1, resource.get("amount", 0))
-        resource["amount"] = resource.get("amount", 0) - gathered
+        resource["amount"] = available - take
 
         # Belongings persist: holdings live in the store, not in memory,
         # so what is gathered survives restarts.
-        add_to_inventory(self._store, agent_ref, resource_kind, gathered)
+        add_to_inventory(self._store, agent_ref, resource_kind, take)
 
         return {
             "status": "success",
             "resource_kind": resource_kind,
-            "amount_gathered": gathered,
+            "amount_gathered": take,
             "remaining_on_tile": resource.get("amount", 0),
         }
 
@@ -855,11 +860,12 @@ class FirstPairRuntime:
         )
         if tile_id != current_pos:
             return {"status": "rejected", "reason": f"Cannot build on tile {tile_id}: you are at {current_pos}"}
-        allowed = self._habitat.get("allowed_tile_ids", [])
-        if self._runtime_policy:
-            allowed = self._runtime_policy.topology.get("allowed_tile_ids", allowed)
-        if tile_id not in allowed:
-            return {"status": "rejected", "reason": f"Tile {tile_id} not in allowed tiles"}
+        # Placement authority: you may always build on the tile you stand
+        # on. Movement already governed how you got here (fog-derived
+        # effective tiles grow with exploration); the old static policy
+        # whitelist was never updated and refused the agent's own tile
+        # after she moved (HB701-743: 26 build attempts on her own tile,
+        # all refused "Tile ... not in allowed tiles").
 
         sanitized = sanitize_public_text(raw_description)
         if not sanitized.strip():
@@ -950,11 +956,9 @@ class FirstPairRuntime:
         )
         if tile_id != current_pos:
             return {"status": "rejected", "reason": f"Cannot place object on tile {tile_id}: you are at {current_pos}"}
-        allowed = self._habitat.get("allowed_tile_ids", [])
-        if self._runtime_policy:
-            allowed = self._runtime_policy.topology.get("allowed_tile_ids", allowed)
-        if tile_id not in allowed:
-            return {"status": "rejected", "reason": f"Tile {tile_id} not in allowed tiles"}
+        # Placement authority: the tile you stand on is always placeable
+        # (same seam fix as build — movement, not a stale whitelist,
+        # governs where an agent may be).
 
         sanitized = sanitize_public_text(raw_description)
         if not sanitized.strip():
@@ -1055,13 +1059,22 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Missing question_id, question, or reason_for_asking"}
         if not _is_safe_object_id(str(question_id)):
             return {"status": "rejected", "reason": "Invalid question_id"}
-        # Deduplicate against existing canonical questions AND pending proposals
+        # Deduplicate against existing canonical questions AND pending
+        # proposals — in memory (this process) and on disk (proposals from
+        # earlier ticks; each heartbeat is a fresh process, so in-memory
+        # dedupe alone let a stuck agent re-ask forever).
         for existing in self._questions:
             if existing.question_id == question_id:
                 return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
         for existing_proposal in self._question_proposals:
             if existing_proposal.question_id == question_id:
                 return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
+        try:
+            for persisted in load_agent_question_proposals(self._store):
+                if persisted.get("question_id") == question_id:
+                    return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
+        except Exception:
+            pass  # dedupe is best-effort; never block the ask itself
         agent_id = (
             self._identity_record.adam_agent_id
             if agent_ref == self._adam_ref
@@ -1080,8 +1093,34 @@ class FirstPairRuntime:
             urgency=urgency,
         )
         self._question_proposals.append(proposal)
-        # Noncanonical: no signature, no authority, no persistence to questions.json.
-        return {"status": "proposed", "question_id": question_id, "proposal": asdict(proposal)}
+        # Noncanonical sink: the ask is appended to agent_questions.json
+        # (no authority, no signature, never questions.json) so the
+        # operator can hear it. Fail-closed: a sink failure never turns a
+        # heard ask into a crash or a canonical write.
+        sink = "agent_questions.json"
+        try:
+            append_agent_question_proposal(self._store, {
+                "question_id": proposal.question_id,
+                "asking_agent_id": agent_id,
+                "agent_ref": agent_ref,
+                "pair_id": self._pair_id,
+                "heartbeat": heartbeat_number,
+                "question": question,
+                "reason_for_asking": reason,
+                "requested_human_capability": proposal.requested_human_capability,
+                "urgency": urgency,
+                "raised_at_utc": datetime.now(timezone.utc).isoformat(),
+                "status": "unheard",
+            })
+        except Exception:
+            sink = "memory-only"
+        # No signature, no authority, no persistence to questions.json.
+        return {
+            "status": "proposed",
+            "question_id": question_id,
+            "proposal": asdict(proposal),
+            "sink": sink,
+        }
 
     def _execute_request_capability(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)

@@ -57,6 +57,13 @@ _CHARTER_FILE = "charter.json"
 _INVENTORY_FILE = "inventory.json"
 _MEMORY_SELECTION_MANIFEST_FILE = "memory_selection_manifest.json"
 _PROVENANCE_FILE = "provenance.jsonl"
+# Noncanonical agent asks (operator sink). NEVER questions.json: no
+# authority, no signature, no path to canonical state. It exists so the
+# operator can hear an agent that is stuck (HB701-743: an agent asked
+# 10 times and the inbox, reading only canonical questions, showed
+# nothing).
+_AGENT_QUESTIONS_FILE = "agent_questions.json"
+_AGENT_QUESTIONS_SCHEMA = "agent_questions.1"
 
 # --- Signed question-creation authority ---
 RECEIPT_DIR_NAME = "question-create-receipts"
@@ -2222,6 +2229,35 @@ def append_heartbeat(store: FirstPairPersistenceStore, record: HeartbeatRecord) 
         store._path(_HEARTBEAT_FILE),
         {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(h) for h in history]},
     )
+
+
+def load_agent_question_proposals(store: FirstPairPersistenceStore) -> list[dict]:
+    """Noncanonical agent asks, append-only. Never canonical state."""
+    data = store._read_json(store._path(_AGENT_QUESTIONS_FILE))
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return [r for r in data["data"] if isinstance(r, dict)]
+    return []
+
+
+def append_agent_question_proposal(
+    store: FirstPairPersistenceStore, envelope: dict
+) -> bool:
+    """Append one agent ask to the noncanonical operator sink.
+
+    This NEVER writes questions.json and confers no authority: an ask
+    becomes canonical only through the separate signed operator path.
+    """
+    records = load_agent_question_proposals(store)
+    records.append(envelope)
+    store._atomic_write(
+        store._path(_AGENT_QUESTIONS_FILE),
+        {
+            "type": "agent_question_proposals",
+            "schema_version": _AGENT_QUESTIONS_SCHEMA,
+            "data": records,
+        },
+    )
+    return True
 
 
 def list_unanswered_questions(store: FirstPairPersistenceStore) -> list[QuestionRecord]:
