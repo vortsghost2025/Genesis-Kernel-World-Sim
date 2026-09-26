@@ -71,10 +71,8 @@ class AgentContext:
     charter_heartbeat: int = 0
     # Belongings (build layer): the agent's persisted holdings, shown as-is.
     inventory: dict = field(default_factory=dict)
-    # World pressure (docs/world_pressure_spec.md): personal physics state,
-    # attached by the runtime each heartbeat. No map data.
-    provisions: dict = field(default_factory=dict)
-    carrying: dict = field(default_factory=dict)
+    # (provisions/carrying - the food and goods ledgers - are retired with
+    # the pressure model; see docs/epistemic_pressure_spec.md §0.1.)
     # Which version of the world's terms this agent has been shown, and
     # whether it is new to them (rule-change notice).
     physics: dict = field(default_factory=dict)

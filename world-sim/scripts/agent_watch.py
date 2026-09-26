@@ -52,12 +52,15 @@ PAIRS = {
     "west": RUNTIME_ROOT / "first-pair-west",
 }
 
-FOOD_KINDS = ("wild_berries", "mushrooms", "edible_roots", "fish", "shellfish")
+# (The `starving` signal is retired with the pressure model: nothing
+# starves now that the world consumes no food. It fired 0 times in 70
+# heartbeats before removal, on a board where two agents were in fact
+# locked at zero food by a deadlock nobody had measured - which is what
+# scripts/audit_tile_resources.py now guards against.)
 
 # Thresholds are operator-tunable, not agent-visible physics.
 STUCK_MIN_HITS = 5          # same refusal, this many times
 STUCK_WINDOW = 40           # ...within this many heartbeats
-STARVE_TICKS = 6            # consecutive foodless heartbeats
 DEAD_HEARTBEATS = 8         # no tick advance for this many minutes
 
 STATE_PATH = SCRATCH / "ledger.json"
@@ -73,17 +76,8 @@ def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def split_ledgers(holdings) -> dict:
-    food = goods = 0
-    if isinstance(holdings, dict):
-        for kind, amount in holdings.items():
-            if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
-                continue
-            if kind in FOOD_KINDS:
-                food += amount
-            else:
-                goods += amount
-    return {"food": food, "goods": goods}
+# (split_ledgers retired with the pressure model - it existed only to
+# serve the starving signal.)
 
 
 # ---------------------------------------------------------------------------
@@ -156,43 +150,6 @@ def scan_stuck(pair: str, store: Path) -> list[dict]:
     return out
 
 
-def scan_starving(pair: str, store: Path) -> list[dict]:
-    """An agent holding no food, sustained."""
-    inv_path = store / "inventory.json"
-    hb_path = store / "heartbeat.json"
-    if not inv_path.is_file() or not hb_path.is_file():
-        return []
-    inv = read_json(inv_path).get("data", {})
-    heartbeats = read_json(hb_path).get("data", [])
-    if not heartbeats:
-        return []
-    last_hb = heartbeats[-1].get("heartbeat_number", 0)
-    out = []
-    for ref, holdings in inv.items():
-        if split_ledgers(holdings)["food"] > 0:
-            continue
-        # how long has it been foodless? walk back while the agent had none
-        ticks = 0
-        for hb in reversed(heartbeats):
-            if last_hb - hb.get("heartbeat_number", 0) > 200:
-                break
-            ticks += 1
-            if ticks >= STARVE_TICKS:
-                break
-        out.append({
-            "kind": "starving",
-            "key": f"{pair}:starving:{ref}",
-            "severity": "medium",
-            "pair": pair,
-            "agent": ref,
-            "heartbeat": last_hb,
-            "title": f"{ref} holds no food",
-            "body": f"food ledger 0 (checked {min(ticks, STARVE_TICKS)}+ heartbeats)",
-            "reply_hint": "usually a choice, not a bug; watch before intervening",
-        })
-    return out
-
-
 def scan_first_build(pair: str, store: Path) -> list[dict]:
     """An agent built something. The show moment."""
     path = store / "world_state.json"
@@ -255,7 +212,7 @@ def scan_all(pairs: dict | None = None, idle_minutes: float = DEAD_HEARTBEATS) -
     for pair, store in pairs.items():
         if not Path(store).is_dir():
             continue
-        for fn in (scan_asks, scan_stuck, scan_starving, scan_first_build):
+        for fn in (scan_asks, scan_stuck, scan_first_build):
             try:
                 signals.extend(fn(pair, Path(store)))
             except Exception as exc:

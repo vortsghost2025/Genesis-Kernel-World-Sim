@@ -29,13 +29,6 @@ OUT_FILE = VIEWER_DIR / "viewer_data.js"
 if str(WORLD_SIM) not in sys.path:
     sys.path.insert(0, str(WORLD_SIM))
 
-from backend.world.world_pressure import (  # noqa: E402
-    FOOD_CAP,
-    GOODS_CAP,
-    FOOD_PER_HEARTBEAT,
-    split_ledgers,
-)
-
 PAIRS = [
     ("east", RUNTIME_ROOT / "first-pair"),
     ("west", RUNTIME_ROOT / "first-pair-west"),
@@ -131,25 +124,9 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         sid = m.get("sender_agent_id", "")
         return name_by_hash.get(sid, sid)
 
-    # World pressure (docs/world_pressure_spec.md): per-agent physics view
-    # derived from persisted holdings. "famished" here means "no food held
-    # right now" — the between-ticks read of the same ledgers the agent
-    # sees; the per-tick truth lives in heartbeat action_outcomes.
-    pressure = {}
-    for agent, holdings in (inventories or {}).items():
-        led = split_ledgers(holdings)
-        pressure[agent] = {
-            "carrying": {
-                "food_used": led["food"],
-                "food_cap": FOOD_CAP,
-                "goods_used": led["goods"],
-                "goods_cap": GOODS_CAP,
-            },
-            "provisions": {
-                "food_units": led["food"],
-                "famished": led["food"] == 0,
-            },
-        }
+    # (The per-pair `pressure` block - food/goods ledgers and the famished
+    # flag - is retired with the pressure model. Holdings still ship under
+    # "inventories" below, which is the record of what agents own.)
 
     # Noncanonical agent asks: the show hears what the operator hears.
     # An agent in a catch-22 (e.g. refused construction) speaks here.
@@ -210,7 +187,6 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "known_maps": known_maps,
         "charters": charters,
         "inventories": inventories,
-        "pressure": pressure,
         "agent_asks": agent_asks[-10:],
         "operator_messages": operator_messages,
         "heartbeats": extract_per_heartbeat(heartbeats),

@@ -16,7 +16,6 @@ import pytest
 
 from scripts.agent_watch import (
     ALERT_LOG,
-    STARVE_TICKS,
     STUCK_MIN_HITS,
     STUCK_WINDOW,
     dedupe,
@@ -27,10 +26,8 @@ from scripts.agent_watch import (
     scan_asks,
     scan_dead,
     scan_first_build,
-    scan_starving,
     scan_stuck,
     send_telegram,
-    split_ledgers,
     telegram_config,
 )
 
@@ -54,18 +51,34 @@ def _heartbeat(hb: int, actions=None, outcomes=None) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Ledger math
-# ---------------------------------------------------------------------------
+class TestRetiredSignals:
+    """The starving signal is retired with the pressure model."""
 
+    def test_starving_signal_is_gone(self):
+        import scripts.agent_watch as aw
+        assert not hasattr(aw, "scan_starving")
+        assert not hasattr(aw, "STARVE_TICKS")
 
-class TestSplitLedgers:
-    def test_food_vs_goods(self):
-        assert split_ledgers({"wild_berries": 3, "stone": 2}) == {"food": 3, "goods": 2}
+    def test_ledger_helper_is_gone(self):
+        import scripts.agent_watch as aw
+        assert not hasattr(aw, "split_ledgers")
 
-    def test_malformed_is_zero(self):
-        assert split_ledgers({"wild_berries": "x", "stone": True}) == {"food": 0, "goods": 0}
-        assert split_ledgers(None) == {"food": 0, "goods": 0}
+    def test_surviving_signals_all_present(self):
+        import scripts.agent_watch as aw
+        for fn in ("scan_asks", "scan_stuck", "scan_first_build", "scan_dead"):
+            assert hasattr(aw, fn)
+
+    def test_no_stale_starving_key_in_a_full_scan(self, tmp_path, monkeypatch):
+        import scripts.agent_watch as aw
+        store = tmp_path / "store"
+        store.mkdir()
+        (store / "inventory.json").write_text(
+            json.dumps({"data": {"a": {"fiber_plants": 5}}}), encoding="utf-8")
+        (store / "heartbeat.json").write_text(
+            json.dumps({"data": [{"heartbeat_number": 1}]}), encoding="utf-8")
+        monkeypatch.setattr(aw, "PAIRS", {"east": store})
+        kinds = {s["kind"] for s in aw.scan_all()}
+        assert "starving" not in kinds
 
 
 # ---------------------------------------------------------------------------
@@ -163,28 +176,6 @@ class TestScanStuck:
 # ---------------------------------------------------------------------------
 # Starvation
 # ---------------------------------------------------------------------------
-
-
-class TestScanStarving:
-    def test_foodless_agent_fires(self, tmp_path):
-        store = _store(tmp_path)
-        _write(store / "inventory.json", {"data": {
-            "west_eve": {"fiber_plants": 51},
-            "west_adam": {"stone": 3, "wild_berries": 2},
-        }})
-        _write(store / "heartbeat.json", {"data": [_heartbeat(700 + i) for i in range(20)]})
-        signals = scan_starving("west", store)
-        assert len(signals) == 1
-        assert signals[0]["agent"] == "west_eve"
-
-    def test_fed_agent_quiet(self, tmp_path):
-        store = _store(tmp_path)
-        _write(store / "inventory.json", {"data": {"a": {"wild_berries": 1}}})
-        _write(store / "heartbeat.json", {"data": [_heartbeat(700 + i) for i in range(20)]})
-        assert scan_starving("west", store) == []
-
-    def test_missing_files_quiet(self, tmp_path):
-        assert scan_starving("west", _store(tmp_path)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -374,4 +365,4 @@ class TestRenderAndDeliver:
         _write(store / "heartbeat.json", {"data": []})
         _write(store / "inventory.json", {"data": {}})
         assert scan_stuck("east", store) == []
-        assert scan_starving("east", store) == []
+        assert scan_first_build("east", store) == []
