@@ -72,8 +72,14 @@ def scan_pair(pair: str, store: Path) -> dict:
         if q.get("status") == "answered"
     ]
 
-    # capability requests live in world_state.capability_requests
-    cap_reqs = world_state.get("capability_requests", [])
+    # capability requests live in world_state.capability_requests. Only
+    # PENDING ones are outstanding asks: a request whose capability the
+    # operator has since granted is retired by the runtime and must not
+    # keep shouting in the inbox.
+    all_cap_reqs = world_state.get("capability_requests", [])
+    cap_reqs = [
+        r for r in all_cap_reqs if r.get("status", "pending") == "pending"
+    ]
     per_cap: dict[str, dict] = {}
     for r in cap_reqs:
         cap = r.get("capability_id", "?")
@@ -128,6 +134,7 @@ def scan_pair(pair: str, store: Path) -> dict:
         "answered_questions_recent": answered[-3:],
         "capability_requests": per_cap,
         "capability_request_total": len(cap_reqs),
+        "capability_request_retired_total": len(all_cap_reqs) - len(cap_reqs),
         "charters": charters,
         "unheard_asks": unheard_asks,
     }

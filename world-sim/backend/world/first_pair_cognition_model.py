@@ -897,6 +897,40 @@ def build_system_prompt(context: AgentContext) -> str:
     else:
         body_section = ""
 
+    # --- Physics: which version of the world's terms this is, and did
+    # they just change under the agent? ---
+    physics = context.physics if isinstance(context.physics, dict) else {}
+    if physics.get("version"):
+        physics_section = (
+            f"--- THE WORLD'S TERMS (physics {physics.get('version')}) ---\n"
+            "Everything above about capacity, consumption, gathering, and building "
+            "follows this version of the world's terms."
+        )
+        if physics.get("new_to_agent"):
+            physics_section += (
+                "\nThe world's terms have changed from the version you last saw. "
+                "What you concluded about capacity, gathering, or building under the "
+                "old terms may no longer hold; what you remember was true when you "
+                "learned it."
+            )
+    else:
+        physics_section = ""
+
+    # --- Operator: a human is watching and can write ---
+    if context.operator_messages:
+        op_lines = [
+            f"[{m.get('author') or 'the operator'}] {m.get('text', '')}"
+            for m in context.operator_messages[-5:]
+        ]
+        operator_section = (
+            "--- MESSAGES FROM THE OPERATOR (a human is watching and can write to you) ---\n"
+            + "\n".join(op_lines)
+            + "\n(You may reply with leave_public_message, or ask with ask_human. "
+            "Nothing obliges you to answer, and a human is not the world.)"
+        )
+    else:
+        operator_section = ""
+
     return f"""You are {context.canonical_name}, an agent operating inside a constructed world simulation.
 
 Your persistent identity:
@@ -911,6 +945,10 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {belongings_section}
 
 {body_section}
+
+{physics_section}
+
+{operator_section}
 
 Current heartbeat: {context.heartbeat_number}
 Your position: {context.position}

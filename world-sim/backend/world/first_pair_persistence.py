@@ -64,6 +64,14 @@ _PROVENANCE_FILE = "provenance.jsonl"
 # nothing).
 _AGENT_QUESTIONS_FILE = "agent_questions.json"
 _AGENT_QUESTIONS_SCHEMA = "agent_questions.1"
+# Which physics version each agent has been shown (operator channel and
+# rule-change notice are built on this).
+_PHYSICS_SEEN_FILE = "physics_seen.json"
+# Operator-authored messages to agents (append-only, operator-owned;
+# the runtime only reads them). The human is a character in the show who
+# can write, not an authority over any agent's actions.
+_OPERATOR_MESSAGES_FILE = "operator_messages.json"
+_OPERATOR_MESSAGES_SCHEMA = "operator_messages.1"
 
 # --- Signed question-creation authority ---
 RECEIPT_DIR_NAME = "question-create-receipts"
@@ -2254,6 +2262,54 @@ def append_agent_question_proposal(
         {
             "type": "agent_question_proposals",
             "schema_version": _AGENT_QUESTIONS_SCHEMA,
+            "data": records,
+        },
+    )
+    return True
+
+
+def load_physics_seen(store: FirstPairPersistenceStore) -> dict:
+    """Per-agent record of the physics version last shown to them."""
+    data = store._read_json(store._path(_PHYSICS_SEEN_FILE))
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        return data["data"]
+    return {}
+
+
+def record_physics_seen(
+    store: FirstPairPersistenceStore, agent_ref: str, version: str
+) -> bool:
+    """Record that this agent has now been shown `version`."""
+    seen = load_physics_seen(store)
+    if seen.get(agent_ref, {}).get("version") == version:
+        return False
+    seen[agent_ref] = {"version": version, "shown_at_utc": datetime.now(timezone.utc).isoformat()}
+    store._atomic_write(
+        store._path(_PHYSICS_SEEN_FILE),
+        {"type": "physics_seen", "schema_version": "physics_seen.1", "data": seen},
+    )
+    return True
+
+
+def load_operator_messages(store: FirstPairPersistenceStore) -> list[dict]:
+    """Operator-authored messages, append-only. Operator-owned, not runtime state."""
+    data = store._read_json(store._path(_OPERATOR_MESSAGES_FILE))
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return [m for m in data["data"] if isinstance(m, dict)]
+    return []
+
+
+def append_operator_message(
+    store: FirstPairPersistenceStore, message: dict
+) -> bool:
+    """Append one operator message. The runtime never writes this file."""
+    records = load_operator_messages(store)
+    records.append(message)
+    store._atomic_write(
+        store._path(_OPERATOR_MESSAGES_FILE),
+        {
+            "type": "operator_message_log",
+            "schema_version": _OPERATOR_MESSAGES_SCHEMA,
             "data": records,
         },
     )

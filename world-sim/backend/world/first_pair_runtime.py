@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,11 +62,14 @@ from backend.world.first_pair_persistence import (
     load_memory,
     load_memory_selection_manifests,
     load_agent_question_proposals,
+    load_operator_messages,
+    load_physics_seen,
     load_questions,
     load_relationship_events,
     load_runtime_policy,
     load_summaries,
     maybe_record_relationship_event,
+    record_physics_seen,
     save_goals,
     save_memory,
     save_runtime_policy,
@@ -79,6 +83,7 @@ from backend.world.world_event_sanitizer import sanitize_public_text
 from backend.world.world_pressure import (
     BUILD_REJECT_FAMISHED,
     FOOD_PER_HEARTBEAT,
+    PHYSICS_VERSION,
     carrying_view,
     consume_choice,
     gather_allowance,
@@ -115,6 +120,28 @@ def _is_safe_object_id(value: str) -> bool:
     if not isinstance(value, str) or not 1 <= len(value) <= 128:
         return False
     return all(c in _SAFE_OBJECT_ID_CHARS for c in value)
+
+
+def _reflection_is_echo(memory_list: list[dict], reflection: str) -> bool:
+    """True when this reflection says nothing the last reflection didn't.
+
+    Numbers normalized, so a re-noted status line ("35+ consecutive build
+    rejections... food 13/20" -> "food 14/20") is recognized as the same
+    thought. Without this an agent fills its own memory with one belief
+    until that belief crowds out everything else (HB701-743: 53 of 1538
+    memories were the same refusal status line, three near-identical
+    entries in three consecutive heartbeats).
+    """
+    def _norm(text: str) -> str:
+        return re.sub(r"\d+", "#", (text or "").strip().lower())
+
+    target = _norm(reflection)
+    if not target:
+        return False
+    for entry in reversed(memory_list):
+        if entry.get("type") == "reflection":
+            return _norm(entry.get("content", "")) == target
+    return False
 
 
 class FirstPairRuntime:
@@ -402,6 +429,35 @@ class FirstPairRuntime:
     # World pressure (docs/world_pressure_spec.md)
     # ------------------------------------------------------------------
 
+    def _reconcile_capability_requests(self) -> int:
+        """Retire pending requests for capabilities already granted.
+
+        The West pair carried 144 'pending' requests, 138 of them for
+        `gather`, which the operator granted hundreds of heartbeats ago:
+        the request log never reconciled, so the operator inbox's loudest
+        section was stale noise. A request whose capability is now held is
+        answered, not pending.
+        """
+        granted = {
+            g.capability_id
+            for g in load_extra_capability_grants(self._store)
+            if g.status == "granted"
+        }
+        if (
+            self._capability_grant is not None
+            and self._capability_grant.status == "granted"
+        ):
+            granted.add(self._capability_grant.capability_id)
+        if not granted:
+            return 0
+        retired = 0
+        for req in self._world_state.capability_requests:
+            if req.get("status") == "pending" and req.get("capability_id") in granted:
+                req["status"] = "granted"
+                req["retired_at_utc"] = datetime.now(timezone.utc).isoformat()
+                retired += 1
+        return retired
+
     def _pressure_step(self, agent_ref: str, heartbeat_number: int = 0) -> dict:
         """Apply this heartbeat's world physics for one agent.
 
@@ -668,6 +724,26 @@ class FirstPairRuntime:
         observation["provisions"] = provisions
         observation["carrying"] = carrying
 
+        # --- Physics version: can the agent notice the terms changed? ---
+        # new_to_agent is True only on the first heartbeat this agent is
+        # shown the current version, so the prompt can say so once.
+        seen_before = load_physics_seen(self._store).get(agent_ref, {}).get("version", "")
+        new_to_agent = seen_before != PHYSICS_VERSION
+        observation["physics"] = {
+            "version": PHYSICS_VERSION,
+            "new_to_agent": new_to_agent,
+        }
+        try:
+            record_physics_seen(self._store, agent_ref, PHYSICS_VERSION)
+        except Exception:
+            pass  # never fail a heartbeat over the notice
+
+        # --- Operator messages (operator-owned; the runtime only reads) ---
+        operator_messages = [
+            m for m in load_operator_messages(self._store)
+            if m.get("addressed_to") in ("all", agent_ref)
+        ][-5:]
+
         return AgentContext(
             agent_id=view["agent_id"],
             canonical_name=view["canonical_name"],
@@ -701,6 +777,8 @@ class FirstPairRuntime:
             inventory=self._get_agent_inventory(agent_ref),
             provisions=provisions,
             carrying=carrying,
+            physics=dict(observation["physics"]),
+            operator_messages=operator_messages,
         )
 
     # ------------------------------------------------------------------
@@ -1273,6 +1351,7 @@ class FirstPairRuntime:
             # Load gatherable resources for this heartbeat
             self._load_tile_resources()
             self._pressure_tick = {}
+            self._reconcile_capability_requests()
 
             for agent_ref in (self._adam_ref, self._eve_ref):
                 backend = self._get_cognition_backend(agent_ref)
@@ -1329,12 +1408,13 @@ class FirstPairRuntime:
                 memory_list = (
                     self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
                 )
-                memory_list.append({
-                    "type": "reflection",
-                    "content": reflection,
-                    "heartbeat": hb,
-                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                })
+                if not _reflection_is_echo(memory_list, reflection):
+                    memory_list.append({
+                        "type": "reflection",
+                        "content": reflection,
+                        "heartbeat": hb,
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    })
 
                 # Structured mutation evidence — only actual state mutations
                 if outcome.get("status") == "success":

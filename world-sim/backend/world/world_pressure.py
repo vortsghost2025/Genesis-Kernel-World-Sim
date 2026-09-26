@@ -30,6 +30,15 @@ FOOD_PER_HEARTBEAT = 1
 # the HB701-743 live arc: East pair pinned at 0-1 food forever).
 GATHER_YIELD = 3
 
+# Bumped whenever the world's observable terms change (caps, consumption,
+# yield, placement, gates). It rides in every observation and in the
+# prompt, so an agent whose self-authored model was formed under older
+# terms can notice that the world it remembers is not the world it is
+# standing in (HB701-743: an agent concluded "build is impossible while
+# over capacity" from refusals caused by a placement bug, and had no way
+# to learn the rule had changed).
+PHYSICS_VERSION = "pressure.2"
+
 FOOD_KINDS = frozenset(
     {"wild_berries", "mushrooms", "edible_roots", "fish", "shellfish"}
 )

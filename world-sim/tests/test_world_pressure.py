@@ -13,6 +13,8 @@ projection, heartbeat outcome persistence (census contract), and exporter.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -22,9 +24,12 @@ from backend.world.first_pair_persistence import (
     FirstPairPersistenceStore,
     add_to_inventory,
     append_agent_question_proposal,
+    append_operator_message,
     load_agent_question_proposals,
     load_heartbeat_history,
     load_inventory,
+    load_operator_messages,
+    save_world_state,
 )
 from backend.world.first_pair_runtime import FirstPairRuntime
 from backend.world.world_pressure import (
@@ -36,6 +41,7 @@ from backend.world.world_pressure import (
     GOODS_CAP,
     GATHER_REJECT_FOOD,
     GATHER_REJECT_GOODS,
+    PHYSICS_VERSION,
     carrying_view,
     consume_choice,
     gather_allowance,
@@ -635,6 +641,228 @@ class TestContextAndPrompt:
         assert carrying_view({"wild_berries": 3, "stone": 2}) == {
             "food_used": 3, "food_cap": FOOD_CAP,
             "goods_used": 2, "goods_cap": GOODS_CAP}
+
+
+# ---------------------------------------------------------------------------
+# Loop integrity: rule-change notice, operator channel, request
+# reconciliation, reflection-echo suppression
+# ---------------------------------------------------------------------------
+
+
+class TestPhysicsNotice:
+    """An agent must be able to notice the world's terms changed."""
+
+    def test_observation_carries_version_and_new_flag(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        ctx = rt._build_context("east_adam", 2)
+        assert ctx.physics["version"] == PHYSICS_VERSION
+        # _runtime already ran one heartbeat, so the first notice has
+        # already fired for this agent: the flag is now False
+        assert ctx.physics["new_to_agent"] is False
+        assert ctx.observation["physics"]["version"] == PHYSICS_VERSION
+
+    def test_first_ever_exposure_is_flagged(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt._load_or_initialize()
+        ctx = rt._build_context("east_adam", 1)
+        assert ctx.physics["new_to_agent"] is True
+
+    def test_notice_fires_once_then_clears(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._build_context("east_adam", 2)  # records the version
+        ctx = rt._build_context("east_adam", 3)
+        assert ctx.physics["new_to_agent"] is False
+
+    def test_prompt_states_terms_and_the_change_once(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt._load_or_initialize()
+        prompt = build_system_prompt(rt._build_context("east_adam", 1))
+        assert "THE WORLD'S TERMS" in prompt
+        assert PHYSICS_VERSION in prompt
+        assert "terms have changed" in prompt
+        # second heartbeat: the change line is gone
+        prompt2 = build_system_prompt(rt._build_context("east_adam", 2))
+        assert "THE WORLD'S TERMS" in prompt2
+        assert "terms have changed" not in prompt2
+
+    def test_change_notice_fires_again_after_a_version_bump(self, tmp_path, monkeypatch):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._build_context("east_adam", 2)
+        monkeypatch.setattr(
+            "backend.world.first_pair_runtime.PHYSICS_VERSION", "pressure.99")
+        ctx = rt._build_context("east_adam", 3)
+        assert ctx.physics["version"] == "pressure.99"
+        assert ctx.physics["new_to_agent"] is True
+
+    def test_each_agent_tracked_separately(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt._load_or_initialize()
+        rt._build_context("east_adam", 1)  # adam sees it first
+        ctx = rt._build_context("east_eve", 1)  # eve has not yet
+        assert ctx.physics["new_to_agent"] is True
+
+
+class TestOperatorChannel:
+    def _say(self, store, text, addressed_to="all", author="Sean"):
+        return append_operator_message(store, {
+            "message_id": "op-1",
+            "author": author,
+            "addressed_to": addressed_to,
+            "text": text,
+            "created_at_utc": "2026-09-26T00:00:00+00:00",
+        })
+
+    def test_message_reaches_the_addressed_agent(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._say(store, "The stone at the spring is yours.")
+        ctx = rt._build_context("east_adam", 2)
+        assert len(ctx.operator_messages) == 1
+        prompt = build_system_prompt(ctx)
+        assert "MESSAGES FROM THE OPERATOR" in prompt
+        assert "The stone at the spring is yours." in prompt
+        assert "Sean" in prompt
+        assert "Nothing obliges you" in prompt
+
+    def test_addressed_message_not_shown_to_others(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._say(store, "Only for you.", addressed_to="east_eve")
+        assert rt._build_context("east_adam", 2).operator_messages == []
+        assert len(rt._build_context("east_eve", 2).operator_messages) == 1
+
+    def test_broadcast_reaches_both(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._say(store, "I am watching.")
+        assert len(rt._build_context("east_adam", 2).operator_messages) == 1
+        assert len(rt._build_context("east_eve", 2).operator_messages) == 1
+
+    def test_operator_log_is_append_only(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        self._say(store, "first")
+        self._say(store, "second")
+        assert [m["text"] for m in load_operator_messages(store)] == ["first", "second"]
+
+    def test_script_writes_and_reads(self, tmp_path, monkeypatch):
+        import scripts.operator_say as opsay
+        monkeypatch.setitem(opsay.PAIRS, "east", tmp_path / "store")
+        (tmp_path / "store").mkdir()
+        message = opsay.say("east", "hello from the operator", author="Sean")
+        assert message["message_id"].startswith("op-")
+        messages = load_operator_messages(
+            FirstPairPersistenceStore(tmp_path / "store"))
+        assert messages[-1]["text"] == "hello from the operator"
+        assert "hello from the operator" in opsay.history("east")
+
+    def test_exporter_ships_operator_messages(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._say(store, "visible to the show")
+        snap = build_pair_snapshot(
+            "east", store.root, {"tiles": [], "continents": []})
+        assert snap["operator_messages"][-1]["text"] == "visible to the show"
+
+
+class TestRequestReconciliation:
+    def _grant(self, store, capability_id="gather"):
+        from backend.world.first_pair_persistence import (
+            CapabilityGrantRecord, append_capability_grant)
+        append_capability_grant(store, CapabilityGrantRecord(
+            grant_id="g-" + capability_id, capability_id=capability_id,
+            scope="pair", reason="operator grant", status="granted"))
+
+    def test_pending_requests_for_granted_capability_retired(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._grant(store, "gather")
+        rt._world_state.capability_requests = [
+            {"capability_id": "gather", "requesting_agent_id": "x", "status": "pending"},
+            {"capability_id": "sail", "requesting_agent_id": "x", "status": "pending"},
+        ]
+        retired = rt._reconcile_capability_requests()
+        assert retired == 1
+        statuses = {r["capability_id"]: r["status"] for r in rt._world_state.capability_requests}
+        assert statuses == {"gather": "granted", "sail": "pending"}
+
+    def test_reconcile_runs_in_the_loop(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        self._grant(store, "gather")
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt.run()  # first heartbeat: initializes and persists world state
+        # put the stale requests on disk, where a fresh process sees them
+        ws = json.loads((store.root / "world_state.json").read_text(encoding="utf-8"))["data"]
+        ws["capability_requests"] = [
+            {"capability_id": "gather", "requesting_agent_id": "x", "status": "pending"},
+            {"capability_id": "sail", "requesting_agent_id": "x", "status": "pending"},
+        ]
+        save_world_state(store, type(rt._world_state)(**ws))
+        # a fresh runtime = a fresh heartbeat process; the reconcile must
+        # retire the granted request before the tick is persisted
+        rt2 = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt2.run()
+        saved = json.loads((store.root / "world_state.json").read_text(encoding="utf-8"))["data"]
+        statuses = {r["capability_id"]: r["status"] for r in saved["capability_requests"]}
+        assert statuses == {"gather": "granted", "sail": "pending"}
+
+    def test_inbox_lists_only_pending_requests(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        self._grant(store, "gather")
+        rt._world_state.capability_requests = [
+            {"capability_id": "gather", "requesting_agent_id": "x", "status": "pending",
+             "heartbeat": 1, "reason": "please"},
+            {"capability_id": "sail", "requesting_agent_id": "x", "status": "pending",
+             "heartbeat": 2, "reason": "a boat"},
+        ]
+        save_world_state(store, rt._world_state)
+        assert scan_pair("east", store.root)["capability_request_total"] == 2
+        rt._reconcile_capability_requests()
+        save_world_state(store, rt._world_state)
+        report = scan_pair("east", store.root)
+        # the granted one is retired: it is no longer an outstanding ask
+        assert report["capability_request_total"] == 1
+        text = render_inbox([report])
+        assert "'sail'" in text
+        assert "'gather'" not in text
+
+
+class TestReflectionEchoSuppression:
+    def test_identical_thought_recorded_once(self, tmp_path):
+        from backend.world.first_pair_runtime import _reflection_is_echo
+        mem = []
+        assert _reflection_is_echo(mem, "goods 51/20, food 13/20") is False
+        mem.append({"type": "reflection", "content": "goods 51/20, food 13/20"})
+        assert _reflection_is_echo(mem, "goods 51/20, food 14/20") is True
+
+    def test_different_thought_recorded(self, tmp_path):
+        from backend.world.first_pair_runtime import _reflection_is_echo
+        mem = [{"type": "reflection", "content": "I gathered berries"}]
+        assert _reflection_is_echo(mem, "the sky changed") is False
+
+    def test_empty_reflection_never_echo(self, tmp_path):
+        from backend.world.first_pair_runtime import _reflection_is_echo
+        mem = [{"type": "reflection", "content": ""}]
+        assert _reflection_is_echo(mem, "") is False
+
+    def test_loop_does_not_grow_memory_with_one_belief(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=4, store=store)
+        rt.run()
+        mem = json.loads((store.root / "memory.json").read_text(encoding="utf-8"))["data"]
+        for ref, entries in mem.items():
+            reflections = [m for m in entries if m.get("type") == "reflection"]
+            texts = [m.get("content", "") for m in reflections]
+            # no two consecutive reflections may normalize to the same thought
+            norm = [re.sub(r"\d+", "#", t.strip().lower()) for t in texts]
+            for a, b in zip(norm, norm[1:]):
+                assert a != b
 
 
 # ---------------------------------------------------------------------------

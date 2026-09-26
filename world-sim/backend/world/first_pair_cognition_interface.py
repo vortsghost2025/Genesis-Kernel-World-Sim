@@ -75,6 +75,12 @@ class AgentContext:
     # attached by the runtime each heartbeat. No map data.
     provisions: dict = field(default_factory=dict)
     carrying: dict = field(default_factory=dict)
+    # Which version of the world's terms this agent has been shown, and
+    # whether it is new to them (rule-change notice).
+    physics: dict = field(default_factory=dict)
+    # Operator-authored messages addressed to this agent (the human can
+    # write; nothing obliges an agent to read, answer, or obey).
+    operator_messages: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)

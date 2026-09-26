@@ -167,6 +167,24 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         except Exception:
             agent_asks = []
 
+    # Operator-authored messages: the human is a character who can speak.
+    operator_messages = []
+    ops_path = store / "operator_messages.json"
+    if ops_path.exists():
+        try:
+            operator_messages = [
+                {
+                    "message_id": m.get("message_id"),
+                    "author": m.get("author"),
+                    "addressed_to": m.get("addressed_to"),
+                    "text": m.get("text", ""),
+                    "created_at_utc": m.get("created_at_utc"),
+                }
+                for m in read_json(ops_path).get("data", [])[-10:]
+            ]
+        except Exception:
+            operator_messages = []
+
     return {
         "agents": agents,
         "exported_tick": world_state.get("tick"),
@@ -194,6 +212,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "inventories": inventories,
         "pressure": pressure,
         "agent_asks": agent_asks[-10:],
+        "operator_messages": operator_messages,
         "heartbeats": extract_per_heartbeat(heartbeats),
         "position_timeline": reconstruct_positions(heartbeats, start_tiles),
     }
