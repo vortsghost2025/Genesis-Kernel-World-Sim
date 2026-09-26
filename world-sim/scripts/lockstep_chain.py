@@ -30,6 +30,10 @@ RUNNER = WORLD_SIM / "scripts" / "launch_canonical_heartbeat_detached.py"
 EXPORTER = WORLD_SIM / "scripts" / "export_viewer_snapshot.py"
 EVIDENCE_DIR = WORLD_SIM / ".scratch" / "lockstep"
 SNAPSHOT_OUT = EVIDENCE_DIR / "viewer_data.js"
+# Sim-owned credential vault (decoupled from kernel-lane 2026-09-26).
+# The runner's built-in default still points at S:\kernel-lane\.env; the
+# chain passes this explicitly so every heartbeat uses sim-owned keys.
+VAULT = WORLD_SIM / ".env"
 
 PAIRS = ("east", "west")
 STORES = {
@@ -70,6 +74,7 @@ def attempt_heartbeat(pair: str, hb: int) -> bool:
             sys.executable, str(RUNNER),
             "--expect-heartbeat", str(hb),
             "--pair-id", pair,
+            "--vault", str(VAULT),
             "--evidence", str(evidence),
             "--log", str(log),
             "--status", str(status),
