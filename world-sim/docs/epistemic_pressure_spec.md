@@ -13,6 +13,75 @@ provenance of what was tried), `docs/mystery_runtime_integration_spec.md`
 
 ---
 
+## 0. Correction (added after the spec was written, before any code)
+
+Two findings from the live arc, both measured, both changing this
+document.
+
+### 0.1 The agents found a real deadlock, and I misread it as apathy
+
+At HB797 `east_adam` asked, unprompted:
+
+> "I've been gathering wild_berries at public-start-adam for 16+
+> heartbeats but food_units remains 0/20 and wild_berries count in
+> belongings stays at 0. The tile shows wild_berries as a resource.
+> Under the new physics (pressure.2), does gathering wild_berries work
+> differently? Do I need to process them first, **or is there a bug?**"
+
+He was right. Per-tile resources, read from the true map:
+
+| tile | occupant | offers |
+|---|---|---|
+| `public-start-adam` | east_adam | `wild_berries: 1` |
+| `public-shared-center` | east_eve (post) | **nothing** |
+| `public-start-eve` | east_eve | berries 3, fiber 3 |
+| `cont_b_origin_001` | west_eve | berries 2, fiber 5 |
+
+Adam's gathers **succeed every tick and yield exactly 1** — his tile
+holds 1 — and consumption removes 1. Net zero, forever: his food can
+never exceed 0. Eve's gathers are rejected outright (`No wild_berries
+available on this tile`) against a tile with no resource records at all.
+
+**So the East pair's 0% build rate was not apathy — it was two agents
+correctly refusing to act on a board where action was impossible.** They
+were famished, build was gated, and no move existed that changed their
+state. I read that as "the world asks nothing" and blamed human
+metaphor; the actual cause was one line of resource data.
+
+It also invalidates my own earlier "fix": `GATHER_YIELD = 3` assumed the
+tile had more to give, and `min(3, available=1, room)` is 1. The yield
+change did nothing for the pair that needed it. Both prior phases were
+built on an unmeasured premise.
+
+### 0.2 A stationary agent learns nothing — my anti-freeze claim was false
+
+This spec originally claimed that standing still was self-reinforcing
+because a stationary agent's known map grows every heartbeat. Measured
+over HB700–800 (100 heartbeats, per agent):
+
+| agent | known tiles | **newly first-observed in 100 ticks** |
+|---|---|---|
+| east_adam | 12 | **0** |
+| east_eve | 14 | 3 (all at HB780, on a move) |
+| west_adam | 54 | **0** |
+| west_eve | 12 | 3 (all at HB715, on a move) |
+
+A stationary agent learns **nothing**, indefinitely: its radius
+saturates and every neighbour is already known. All new knowledge in
+100 heartbeats came from 2 moves.
+
+**This means §3.1's central mechanic is withdrawn.** The fog *already*
+supplies exactly the right pressure — movement is the only source of new
+knowledge — and no new pressure is needed to create it. What the fog
+does not yet do is make *not knowing* matter to an agent. Inventing an
+"unverified ground" penalty on top of a pressure that already exists
+would be adding a second, weaker version of the same idea, and would
+have rested on a claim that measurement just disproved.
+
+Legibility pressure is therefore **deferred**, not specified: retire the
+deadlock first, observe whether knowing starts to matter once agents are
+no longer starving on a rigged board, and only then decide. See §3.4.
+
 ## 1. The receipt: the pressure model did not work, and the data says why
 
 The `Provision + Capacity + Build-as-storage` phase went live at HB701.
@@ -88,38 +157,16 @@ second new pressure to this one would make any improvement unattributable.
 Retiring inert mechanics rides along safely — a removal has no effect to
 confound.
 
-### 3.1 Unverified ground (the new pressure)
+### 3.1 Unverified ground — WITHDRAWN, see §0.2
 
-Standing still is how you learn. Acting on ground you have never observed
-is how you stay ignorant — and the world stops pretending otherwise.
-
-- An agent's **known map** is the record of ground it has actually
-  observed. `merge_observation` currently persists only what a standing
-  agent could see.
-- **New rule**: an action taken on a tile the agent has *never observed*
-  (never stood on, and never had it enter `visible_tile_details`) yields
-  **no information and no durable record**:
-  - the resulting observation is **not merged** into the known map — the
-    agent learns nothing about where it is or what is there;
-  - a `gather` on such a tile collects nothing identifiable
-    (`"you find nothing you can name"`);
-  - a `move` onto such a tile succeeds (movement stays possible) but
-    leaves no trace in the agent's own map.
-- On a tile the agent *has* observed, everything behaves exactly as it
-  does today. No new refusals, no new rejections, no new strings for the
-  ordinary case.
-- **Standing still is self-reinforcing, by construction**: each heartbeat
-  an agent holds position, its radius-visible neighbours enter
-  `visible_tile_details` and are merged — so a stationary agent's known
-  map *grows*. Stillness is productive, not a trap. This is the direct
-  opposite of the freeze risk and it is deliberate.
-
-This makes three existing-but-inert mechanisms finally reachable:
-**known-map growth becomes worth something**, **returning to a place
-becomes worth something** (you already mapped it; you can act on it), and
-the **occupancy-gated mystery reveal** — which requires standing on one
-tile three times — becomes achievable, because standing somewhere
-specific is now the only way to learn anything.
+The original draft of this section specified a new pressure: actions on
+never-observed ground would yield no information and leave no durable
+trace. It rested on a claim that a stationary agent's known map grows
+every heartbeat. That claim is false (§0.2): a stationary agent learns
+nothing at all, and the fog already imposes the pressure the section was
+inventing. The mechanic is withdrawn rather than shipped on a
+disproven premise. The underlying question — *what makes not-knowing
+matter to an agent* — is still open and is deliberately left open.
 
 ### 3.2 What gets retired, and why it is safe
 
@@ -150,6 +197,33 @@ existing, working verb's meaning. Doing that in the same phase as a new
 pressure would make the result unreadable. Phase A is legible on its
 own; Phase B gets its own spec and its own census.
 
+## 3.4 Precondition: no pressure phase ships until the board is measured
+
+The deadlock in §0.1 was one line of resource data that nobody read
+before shipping two phases of physics on top of it. The agents found it
+in 24 heartbeats; I did not find it in 100. That asymmetry is the reason
+for this rule.
+
+**Precondition (blocking, applies to this and every future pressure
+phase):** `scripts/audit_tile_resources.py` exists, has been run against
+the true map, and its output is on disk. It reports, for every tile any
+agent can currently occupy, what that tile offers and what the
+consumption/pressure rules imply for it. A tile that is occupied and
+offers nothing, or offers only what a heartbeat's consumption would
+exactly cancel, is a **blocking finding** — the pressure phase does not
+ship until it is resolved or the operator accepts it knowingly.
+
+`tests/test_tile_resource_audit.py` fails if the audit regresses: if any
+tile an agent can occupy is un-gatherable under the shipped rules, the
+suite goes red. The audit becomes a standing guard rather than a
+one-time investigation, because the true map is not frozen and tiles are
+edited.
+
+**Standing rule for this project, learned the expensive way: measure the
+board before changing the rules.** Two phases were designed by reasoning
+about what agents would find interesting, and both were wrong in ways a
+single table would have shown.
+
 ## 4. Exact mechanics
 
 ```
@@ -161,146 +235,153 @@ PHYSICS_VERSION = "epistemic.1"     # was "pressure.2"
 # REMOVED. gather_allowance: removed. consume_choice: removed.
 ```
 
-New pure function, no I/O, fail-closed on malformed input:
+New pure function in the audit tool, no I/O, fail-closed:
 
 ```python
-def is_ground_verified(known_tiles, tile_id) -> bool:
-    """True iff this agent has actually observed this tile before."""
+def tile_offer_health(resources, consumption_per_tick) -> dict:
+    """Can an agent standing here actually acquire anything net?"""
 ```
 
-Wiring (all additive-then-retiring, one commit, chain stopped first):
+Wiring (one commit, chain stopped first — it is stopped at HB800):
 
 1. `FirstPairRuntime._pressure_step` — **deleted**, along with
-   `_pressure_state` and the `provenance`/`carrying` context fields.
+   `_pressure_state`, `_reconcile_capability_requests` is **kept**, and
+   the `provisions`/`carrying` context fields are removed.
 2. `FirstPairRuntime._build_context` — attaches `observation["physics"]`
-   only (unchanged shape, new version string). The observation merge
-   step gains the unverified-ground rule: when the agent's current tile
-   is not in its own known map, `_merge_and_persist_known_map` is
-   **skipped for that heartbeat** and the observation is annotated
-   `unverified_ground: true` so the agent can *see* that it learned
-   nothing (truthful, no leak — it is a fact about its own epistemic
-   state, not about hidden map contents).
-3. `_execute_gather` — when the current tile is unverified for this
-   agent, the gather yields nothing and persists nothing. No new
-   rejection string is introduced for the verified path; the unverified
-   path is a successful no-op with a truthful reason
-   (`"nothing here you can name"`), because it is not an error.
+   only (unchanged shape, new version string). Nothing else changes; the
+   fog, the known-map merge, and occupancy-gated mysteries are untouched.
+3. `_execute_gather` — the cap/consumption gate is removed. A gather
+   takes `min(GATHER_YIELD, available)` and persists it. Under the
+   retirement, Adam's tile yields 1/tick and **nothing takes it back**,
+   so his food accumulates from 0 instead of being pinned there.
 4. `_execute_build` — the famished gate is removed. Placement authority
    from `22ba621` (your own tile is always buildable) is **kept**.
 5. `first_pair_cognition_model` — `YOUR BODY` section deleted;
    `THE WORLD'S TERMS` and `MESSAGES FROM THE OPERATOR` kept.
 6. `export_viewer_snapshot` — `pressure` block and its
    `provisions`/`carrying` fields removed; `inventories`, `agent_asks`,
-   `operator_messages`, `physics` kept.
+   `operator_messages` kept.
 7. `scripts/agent_watch.py` — the `starving` signal is retired (nothing
    starves any more); `ask`, `stuck`, `first_build`, `dead` kept.
+8. **New**: `scripts/audit_tile_resources.py` + its test — the standing
+   guard from §3.4.
+
+**Explicitly NOT in this phase** (withdrawn in §0.2): no unverified-ground
+rule, no known-map merge suppression, no `is_ground_verified`. Those were
+built on a disproven premise and are not being shipped in weakened form.
 
 **Ordering within a heartbeat is unchanged** and stays fail-closed:
-observe → model → act → persist. One action per heartbeat. Fail-closed
-on error: a malformed known-map yields `is_ground_verified → False`
-(treated as unverified, the conservative direction — you never get credit
-for knowledge you cannot prove).
+observe → model → act → persist. One action per heartbeat. The audit
+tool fails closed too: a malformed resource record is reported as a
+finding, never silently skipped.
 
 ## 5. Compliance
 
-- **Fog / no-leak**: `unverified_ground` is a boolean about the
-  agent's own knowledge state. It carries no tile data, no mystery ids,
-  no coordinates, no hidden-map content. Test-pinned.
+- **Fog / no-leak**: nothing in this phase touches observation content,
+  the known-map merge, or mystery accrual. There is no new observation
+  key to leak.
 - **Append-only canon**: no store is rewritten. Retirement changes code,
-  not history. HB701–765 remains readable exactly as it is, including
-  the five inventory-chore objects, which stay in the record as the
-  honest evidence of what was tried.
+  not history. HB701–800 remains readable exactly as it is, including
+  the five inventory-chore objects and the deadlock heartbeats, which
+  stay in the record as the honest evidence of what was tried.
 - **Mystery mechanics untouched**: still occupancy-only, still
-  per-agent, still no-leak. This phase only makes the tile *reachable*,
-  it does not change how a reveal works.
-- **Operator vs agent**: the operator sets one boolean's rule. The
-  runtime never tells an agent where to go, what to build, or what a
-  mystery is.
+  per-agent, still no-leak.
+- **Operator vs agent**: the operator removes costs. The runtime never
+  tells an agent where to go, what to build, or what a mystery is.
 
 ## 6. What this deliberately does NOT do
 
 - No metabolism, no food, no hunger, no death, no scarcity of goods.
 - No recipes, no tech tree, no privileged object type.
-- No hint at where a mystery is. Legibility pressure makes *standing
-  still* valuable; it never makes *this tile* valuable.
+- **No new pressure at all.** This phase is a pure removal plus a
+  measurement guard. The legibility question is deferred (§0.2), not
+  answered here.
 - No change to `build`'s meaning (Phase B).
-- No new prompts telling agents to explore, remember, or build. The
-  world states what is true and stops.
+- No new prompts telling agents to explore, remember, or build.
 - No touching the East–West wall (deferred by operator) or the One
   Spring (held back by operator).
 
 ## 7. Risks and falsification
 
-Stated plainly, including the risk that I am wrong again:
+1. **Retirement is not a pressure.** After this phase the world asks
+   *nothing*: no cost, no limit, no decay. Agents may drift further into
+   their loops. That is a real possibility and the census is the check.
+   The bet is that a rigged board was suppressing behavior, and that an
+   honest board with no costs is a better foundation to design the next
+   pressure on. If the census shows *more* inertia, the next move is the
+   legibility question — now on a board where the answer would be
+   readable.
+2. **I have been wrong twice already.** The hunger spec was well
+   reasoned, fully tested, and inert. The fog-pressure claim in §0.2 was
+   measured and still false. Every number in this document is now a
+   measurement, and that is the floor of confidence available here —
+   not a reason for confidence.
+3. **The East pair's deadlock is a board problem, not a code problem.**
+   Retirement makes their gathers accumulate, which resolves the symptom.
+   It does not make `public-shared-center` have resources, so Eve's
+   gather attempts will still be rejected there. The audit surfaces this
+   as a known finding for the operator to accept or fix by authoring.
+4. **The five inventory-chore objects stay.** West may keep building
+   baskets, because nothing stops them and the verb is live. That is
+   Phase B's question, not this phase's.
 
-1. **Freeze.** If unverified ground yields nothing and everything around
-   an agent is unverified, they may stop moving. *Mitigated by
-   construction* (§3.1: a stationary agent's known map grows every
-   heartbeat, so stillness is productive) — but this is the failure mode
-   to watch first.
-2. **I have been wrong once already.** The previous spec was
-   well-reasoned, fully tested, and inert. This one is better grounded
-   (every claim above is a measured number from the live stores) but that
-   is not the same as being right. The census below is the check, not my
-   confidence.
-3. **Attribution.** If behavior changes, it is attributable to legibility
-   pressure alone — provided consolidation is *not* bundled. That is why
-   Phase B is separate.
-4. **The East pair may still be inert.** They are not blocked by
-   inventory; if stillness plus a growing map does not reach them, the
-   honest next step is a different question, not more physics.
+**Falsification census**, over a 100-heartbeat arc from wherever the
+chain stopped (**HB800**), i.e. HB801–900:
 
-**Falsification census**, same shape as the pressure spec, over a
-100-heartbeat arc (HB766–865, or wherever the current arc ends):
-
-| signal | baseline (HB701–765) | pressure passes if |
+| signal | baseline (HB701–800) | passes if |
 |---|---|---|
-| `build_rate` | 23% of West actions | changes, and object *stated purposes* stop saying "overcapacity" |
-| moves per agent-heartbeat | West 4% | rises, or holds while `known_tiles` grows |
-| `known_tiles` growth/agent | East 11–12, West 12–54 (static) | **strictly increases** — the primary measure |
-| mystery reveals | 0, all history | **≥1** — the mechanism finally fires |
-| `ask_human` | West 7% | shifts toward *epistemic* questions |
-| unverified-ground actions | n/a (new) | counted; a high rate with no map growth = freeze |
+| east_adam food ledger | **pinned at 0 for 100+ ticks** | **rises above 0** — the deadlock is gone |
+| `build_rate` East | 0% | becomes non-zero |
+| `build_rate` West | 23% of actions | changes; stated purposes stop saying "overcapacity" |
+| `known_tiles` growth | **0 new in 100 ticks** (2 agents), 3 (2 agents) | **strictly increases per agent** |
+| moves per agent-heartbeat | West 4% | rises |
+| mystery reveals | 0, all history | ≥1 |
+| `ask_human` | West 7% | continues (they use it to report defects — it works) |
+| audit findings | unknown | **0 blocking** after the run |
 
-The decisive metric is **`known_tiles` growth**, because it is the one
-quantity this pressure is designed to move, it is measured rather than
-interpreted, and it cannot be gamed by optimizing an accounting rule.
+The decisive metrics are **the two deadlock measures** — east_adam's food
+ledger and `known_tiles` growth — because both are direct consequences
+of the specific defect being removed, measured rather than interpreted.
+The behavioural rows are secondary: this phase is a removal, and a
+removal that changes nothing behaviourally is still a success, provided
+the deadlock is gone.
 
 ## 8. Test plan (TDD outline, for the implementation phase)
 
 Retirement (each pinned so it cannot silently return):
 - consumption no longer decrements holdings; `famished` never appears
 - `GATHER_REJECT_FOOD` / `GATHER_REJECT_GOODS` never emitted
+- a `gather` on a 1-berry tile **accumulates** 1/tick with nothing
+  removing it (the direct regression test for §0.1 — written first, and
+  it must fail against the current code)
 - `YOUR BODY` absent from the prompt; `THE WORLD'S TERMS` present
 - exporter ships no `pressure` block; `inventories` still present
 - watcher no longer emits `starving`; still emits `ask`/`stuck`/`dead`
+- `world_pressure` exports no `FOOD_CAP`/`GOODS_CAP`/`consume_choice`/
+  `gather_allowance`/`split_ledgers` (an import guard, so the removal
+  cannot be quietly undone)
 
-Unverified ground (the new mechanic):
-- `is_ground_verified`: known tile → True; unknown → False; malformed
-  known-map → False (fail-closed, never credits unproven knowledge)
-- known-map merge skipped on an unverified tile; known-map **unchanged**
-  after such a heartbeat
-- merge proceeds normally on a verified tile (no regression to fog)
-- `gather` on unverified ground persists nothing and returns the
-  truthful no-op reason; on verified ground, unchanged behavior
-- stationary agent's `known_tiles` strictly increases across N
-  heartbeats (the anti-freeze guarantee, as a test)
-- `unverified_ground` carries no tile id, no mystery id, no coordinate
-- mystery reveal path still occupancy-only and still per-agent (no
-  accidental sharing through the new branch)
+The audit guard (§3.4):
+- `tile_offer_health` reports `deadlock` for a tile whose yield is
+  exactly cancelled by consumption; `healthy` otherwise
+- a tile with no resource records is reported as `barren` (a finding,
+  not a silent pass)
+- malformed resource records are reported, never skipped
+- the test asserts the **current live board** produces zero un-gatherable
+  occupied tiles, and fails loudly when the true map regresses
 
 Compliance:
-- HB701–765 records still load and still mean what they meant
+- HB701–800 records still load and still mean what they meant
 - no store file is rewritten by a retirement tick (byte compare)
 - one action per heartbeat, unchanged
+- fog, known-map merge, and mystery accrual byte-identical in behavior
 
 ## 9. Decision requested
 
-Approve Phase A (retire the metabolism, install unverified ground) with
-`PHYSICS_VERSION = "epistemic.1"`? And confirm Phase B (build as
-consolidation — anchoring a thought so it survives selection) stays a
-separate spec, so the two pressures can be read apart.
+Approve Phase A as amended: **pure retirement + the audit guard**, no
+new pressure, `PHYSICS_VERSION = "epistemic.1"`. Confirm that the
+legibility question (§0.2) and consolidation (Phase B) both stay
+deferred, so the next thing we learn is from a board that is not rigged.
 
-Operational note: the current arc is live and mid-build-storm. Under the
-standing rule, the chain is stopped before this is implemented, and
-implementation resumes from the tick the chain reached.
+Operational note: the chain has been stopped at **HB800** as instructed.
+Implementation proceeds from there.
