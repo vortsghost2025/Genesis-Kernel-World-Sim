@@ -69,6 +69,8 @@ class AgentContext:
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""
     charter_heartbeat: int = 0
+    # Belongings (build layer): the agent's persisted holdings, shown as-is.
+    inventory: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

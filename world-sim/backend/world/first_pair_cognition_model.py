@@ -37,6 +37,8 @@ _MAX_MEMORY_CANDIDATES = 16
 _MAX_HUMAN_QUESTIONS = 8
 _MAX_MESSAGE_CHARS = 2000
 _MAX_CHARTER_CHARS = 2000
+_MAX_BUILD_MATERIAL_ENTRIES = 8
+_MAX_BUILD_MATERIAL_TOTAL = 64
 _MAX_TARGET_CHARS = 128
 
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
@@ -129,6 +131,7 @@ _VALID_ACTIONS = frozenset({
     "move",
     "gather",
     "revise_charter",
+    "build",
 })
 
 
@@ -339,6 +342,10 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     "move": frozenset({"action_type", "target_tile", "reason"}),
     "gather": frozenset({"action_type", "resource_kind", "reason"}),
     "revise_charter": frozenset({"action_type", "charter_text"}),
+    "build": frozenset({
+        "action_type", "object_id", "object_type", "description",
+        "tile_id", "materials",
+    }),
 }
 
 
@@ -460,6 +467,41 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
                 errors.append(err)
             elif _casefolded_contaminated(ct):
                 errors.append("action:contaminated_charter_text")
+
+    elif at == "build":
+        for f in ("object_id", "object_type", "description", "tile_id"):
+            val = raw.get(f, "")
+            if not isinstance(val, str) or not val.strip():
+                errors.append(f"action:empty_{f}")
+        oid = raw.get("object_id", "")
+        if oid and not _is_safe_id(oid):
+            errors.append("action:unsafe_object_id")
+        desc = raw.get("description", "")
+        if isinstance(desc, str):
+            err = _check_length(desc, _MAX_OBSERVATION_CHARS, "action:description")
+            if err:
+                errors.append(err)
+            elif _casefolded_contaminated(desc):
+                errors.append("action:contaminated_description")
+        mats = raw.get("materials")
+        if mats is None or (isinstance(mats, dict) and not mats):
+            errors.append("action:empty_materials")
+        elif not isinstance(mats, dict):
+            errors.append("action:materials_not_a_dict")
+        else:
+            if len(mats) > _MAX_BUILD_MATERIAL_ENTRIES:
+                errors.append("action:too_many_materials")
+            total = 0
+            for kind, amount in mats.items():
+                if not isinstance(kind, str) or not kind.strip():
+                    errors.append("action:bad_material_kind")
+                    continue
+                if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+                    errors.append(f"action:bad_material_amount_{kind}")
+                    continue
+                total += amount
+            if total > _MAX_BUILD_MATERIAL_TOTAL:
+                errors.append("action:materials_total_too_large")
 
     return errors
 
@@ -707,6 +749,7 @@ Available actions:
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
+- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently
 """
 
 
@@ -799,6 +842,20 @@ def build_system_prompt(context: AgentContext) -> str:
                 "You cannot move at this time."
             )
 
+    # --- Belongings (build layer): persisted holdings, shown as-is ---
+    holdings = context.inventory if isinstance(context.inventory, dict) else {}
+    if holdings:
+        belongings_section = (
+            "--- YOUR BELONGINGS (persisted; these survive restarts) ---\n"
+            + "\n".join(f"- {k}: x{v}" for k, v in sorted(holdings.items()))
+            + "\n(You may spend these with the build action. You can only spend what is listed here.)"
+        )
+    else:
+        belongings_section = (
+            "--- YOUR BELONGINGS (persisted; these survive restarts) ---\n"
+            "Empty hands. Gather resources to hold them; what you gather persists."
+        )
+
     # --- Charter (self-authored identity persistence) ---
     if context.charter_text:
         charter_section = (
@@ -829,6 +886,8 @@ Your persistent identity:
 You share this world with {context.other_agent_name} (agent ID: {context.other_agent_id}, ref: {context.other_agent_ref}). You are distinct agents with separate private memories.
 
 {charter_section}
+
+{belongings_section}
 
 Current heartbeat: {context.heartbeat_number}
 Your position: {context.position}

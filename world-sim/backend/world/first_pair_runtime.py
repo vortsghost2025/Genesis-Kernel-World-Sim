@@ -54,6 +54,9 @@ from backend.world.first_pair_persistence import (
     load_extra_capability_grants,
     load_goals,
     load_heartbeat_history,
+    load_inventory,
+    add_to_inventory,
+    load_heartbeat_history,
     load_latest_charter,
     load_memory,
     load_memory_selection_manifests,
@@ -377,10 +380,8 @@ class FirstPairRuntime:
             self._current_tile_resources = {}
 
     def _get_agent_inventory(self, agent_ref: str) -> dict:
-        """Return the agent's gathered-resource inventory."""
-        if not hasattr(self, "_inventory"):
-            self._inventory = {self._adam_ref: {}, self._eve_ref: {}}
-        return self._inventory.get(agent_ref, {})
+        """Return the agent's gathered-resource inventory (persisted)."""
+        return dict(load_inventory(self._store).get(agent_ref, {}))
 
     # ------------------------------------------------------------------
     # Context builder
@@ -609,6 +610,7 @@ class FirstPairRuntime:
             memory_selection_manifest=sel_manifest,
             charter_text=charter_text,
             charter_heartbeat=charter_heartbeat,
+            inventory=self._get_agent_inventory(agent_ref),
         )
 
     # ------------------------------------------------------------------
@@ -637,6 +639,8 @@ class FirstPairRuntime:
             return self._execute_gather(agent_ref, action, heartbeat_number)
         if action_type == "revise_charter":
             return self._execute_revise_charter(agent_ref, action, heartbeat_number)
+        if action_type == "build":
+            return self._execute_build(agent_ref, action, heartbeat_number)
         return {"status": "unknown_action", "action": action}
 
     def _execute_gather(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
@@ -661,13 +665,9 @@ class FirstPairRuntime:
         gathered = min(1, resource.get("amount", 0))
         resource["amount"] = resource.get("amount", 0) - gathered
 
-        # Add to agent inventory
-        inventory_key = "_inventory"
-        if not hasattr(self, inventory_key):
-            self._inventory = {self._adam_ref: {}, self._eve_ref: {}}
-        agent_inv = self._inventory.get(agent_ref, {})
-        agent_inv[resource_kind] = agent_inv.get(resource_kind, 0) + gathered
-        self._inventory[agent_ref] = agent_inv
+        # Belongings persist: holdings live in the store, not in memory,
+        # so what is gathered survives restarts.
+        add_to_inventory(self._store, agent_ref, resource_kind, gathered)
 
         return {
             "status": "success",
@@ -723,6 +723,79 @@ class FirstPairRuntime:
             "charter_version_id": record.charter_version_id,
             "charter_chars": len(charter_text),
             "heartbeat": heartbeat_number,
+        }
+
+    def _execute_build(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Construct an agent-defined object from persisted holdings.
+
+        The agent declares WHAT to make and WHAT it is made of; the runtime
+        enforces placement (same rules as create_public_object), validates
+        the materials declaration, checks affordability, then deducts and
+        creates. No partial builds, no debt: insufficient holdings reject
+        the whole build with everything untouched.
+        """
+        view = self._agent_view(agent_ref)
+        object_id = action.get("object_id")
+        object_type = action.get("object_type", "generic")
+        raw_description = action.get("description", "")
+        tile_id = action.get("tile_id")
+        materials = action.get("materials")
+
+        if not _is_safe_object_id(str(object_id or "")):
+            return {"status": "rejected", "reason": "Invalid object_id"}
+        if object_id in self._world_state.public_objects:
+            return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
+        current_pos = self._world_state.tile_occupancy.get(
+            agent_ref, self._habitat["starting_tile_ids"][agent_ref]
+        )
+        if tile_id != current_pos:
+            return {"status": "rejected", "reason": f"Cannot build on tile {tile_id}: you are at {current_pos}"}
+        allowed = self._habitat.get("allowed_tile_ids", [])
+        if self._runtime_policy:
+            allowed = self._runtime_policy.topology.get("allowed_tile_ids", allowed)
+        if tile_id not in allowed:
+            return {"status": "rejected", "reason": f"Tile {tile_id} not in allowed tiles"}
+
+        sanitized = sanitize_public_text(raw_description)
+        if not sanitized.strip():
+            return {"status": "rejected", "reason": "Empty public_description after sanitization"}
+
+        if not isinstance(materials, dict) or not materials:
+            return {"status": "rejected", "reason": "Missing or empty materials"}
+        for kind, amount in materials.items():
+            if not isinstance(kind, str) or not kind.strip():
+                return {"status": "rejected", "reason": "Invalid material kind"}
+            if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+                return {"status": "rejected", "reason": f"Invalid material amount for {kind}"}
+
+        holdings = self._get_agent_inventory(agent_ref)
+        for kind, amount in materials.items():
+            if holdings.get(kind, 0) < amount:
+                return {
+                    "status": "rejected",
+                    "reason": f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}",
+                }
+
+        for kind, amount in materials.items():
+            add_to_inventory(self._store, agent_ref, kind, -amount)
+
+        record = PublicObjectRecord(
+            object_id=object_id,
+            creator_agent_id=view["agent_id"],
+            tile_id=tile_id,
+            object_type=object_type,
+            public_description=sanitized,
+            created_heartbeat=heartbeat_number,
+            materials=dict(materials),
+        )
+        self._world_state.public_objects[object_id] = record.to_envelope()
+        return {
+            "status": "success",
+            "object_id": object_id,
+            "tile_id": tile_id,
+            "object_type": object_type,
+            "materials_spent": dict(materials),
+            "remaining": self._get_agent_inventory(agent_ref),
         }
 
     def _execute_move(self, agent_ref: str, action: dict) -> dict:
@@ -1127,6 +1200,7 @@ class FirstPairRuntime:
                         "leave_public_message",
                         "request_capability",
                         "move",
+                        "build",
                     ):
                         view = self._agent_view(agent_ref)
                         mutation = {

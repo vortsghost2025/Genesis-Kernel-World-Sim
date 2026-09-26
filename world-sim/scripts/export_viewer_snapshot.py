@@ -84,6 +84,15 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
 
     # Charter (self-authored identity): latest version per agent, public like
     # messages — the show gets to read who they say they are.
+    # Belongings (build layer): persisted holdings per agent, public like
+    # messages — the show gets to see what they own.
+    inventories = {}
+    inventory_path = store / "inventory.json"
+    if inventory_path.exists():
+        try:
+            inventories = read_json(inventory_path).get("data", {}) or {}
+        except Exception:
+            inventories = {}
     charters = {}
     charter_path = store / "charter.json"
     if charter_path.exists():
@@ -137,6 +146,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         ],
         "known_maps": known_maps,
         "charters": charters,
+        "inventories": inventories,
         "heartbeats": extract_per_heartbeat(heartbeats),
         "position_timeline": reconstruct_positions(heartbeats, start_tiles),
     }
@@ -159,6 +169,10 @@ def extract_per_heartbeat(heartbeats: list[dict]) -> list[dict]:
                     "recipient": action.get("recipient"),
                     "resource": action.get("resource_kind"),
                     "charter_text": action.get("charter_text"),
+                    "object_id": action.get("object_id"),
+                    "object_type": action.get("object_type"),
+                    "description": action.get("description"),
+                    "materials": action.get("materials"),
                 }
         out.append(
             {

@@ -39,6 +39,7 @@ _MEMORY_SELECTION_SCHEMA_VERSION = "10IN.1"
 _SUMMARY_SCHEMA_VERSION = "10IN.1"
 _RELATIONSHIP_SCHEMA_VERSION = "10IN.1"
 _CHARTER_SCHEMA_VERSION = "charter.1"
+_INVENTORY_SCHEMA_VERSION = "inventory.1"
 _DEFAULT_ROOT = Path(__file__).resolve().parent.parent.parent / ".runtime" / "first-pair"
 _IDENTITY_FILE = "identity.json"
 _HABITAT_FILE = "habitat.json"
@@ -53,6 +54,7 @@ _EXTRA_GRANTS_FILE = "capability_grants.json"
 _SUMMARY_FILE = "memory_summaries.json"
 _RELATIONSHIP_FILE = "relationship_ledger.json"
 _CHARTER_FILE = "charter.json"
+_INVENTORY_FILE = "inventory.json"
 _MEMORY_SELECTION_MANIFEST_FILE = "memory_selection_manifest.json"
 _PROVENANCE_FILE = "provenance.jsonl"
 
@@ -212,6 +214,7 @@ class PublicObjectRecord:
     public_description: str
     created_heartbeat: int
     created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    materials: dict = field(default_factory=dict)
 
     def to_envelope(self) -> dict:
         return {
@@ -222,6 +225,7 @@ class PublicObjectRecord:
             "public_description": self.public_description,
             "created_heartbeat": self.created_heartbeat,
             "created_at_utc": self.created_at_utc,
+            "materials": dict(self.materials),
         }
 
 
@@ -1373,6 +1377,65 @@ def append_charter_version(
         },
     )
     return True
+
+
+# ---------------------------------------------------------------------------
+# Inventory — persistent agent belongings (build layer)
+#
+# Gathered amounts used to live only in runtime memory, so every restart
+# wiped every hoard. Holdings now persist per store, keyed by agent ref.
+# See docs/build_layer_spec.md.
+# ---------------------------------------------------------------------------
+
+
+def load_inventory(store: FirstPairPersistenceStore) -> dict:
+    """Current holdings: {agent_ref: {resource_kind: int}}. Missing file = {}."""
+    data = store._read_json(store._path(_INVENTORY_FILE))
+    if data and data.get("type") == "inventory_record":
+        raw = data.get("data", {})
+        if isinstance(raw, dict):
+            out: dict = {}
+            for ref, holdings in raw.items():
+                if isinstance(ref, str) and isinstance(holdings, dict):
+                    clean = {
+                        k: v for k, v in holdings.items()
+                        if isinstance(k, str) and isinstance(v, int)
+                        and not isinstance(v, bool) and v >= 0
+                    }
+                    out[ref] = clean
+            return out
+    return {}
+
+
+def add_to_inventory(
+    store: FirstPairPersistenceStore, agent_ref: str, kind: str, delta: int
+) -> dict:
+    """Apply a signed delta to one agent's holding of one resource kind.
+
+    Fail-closed: empty kind, non-integer delta (bools rejected), or a
+    result below zero raises ValueError and nothing is written. Returns
+    the full updated holdings on success.
+    """
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("inventory:empty_resource_kind")
+    if not isinstance(delta, int) or isinstance(delta, bool):
+        raise ValueError("inventory:delta_not_an_integer")
+    holdings = load_inventory(store)
+    agent_holdings = dict(holdings.get(agent_ref, {}))
+    new_amount = agent_holdings.get(kind, 0) + delta
+    if new_amount < 0:
+        raise ValueError("inventory:overdraft")
+    agent_holdings[kind] = new_amount
+    holdings[agent_ref] = agent_holdings
+    store._atomic_write(
+        store._path(_INVENTORY_FILE),
+        {
+            "type": "inventory_record",
+            "schema_version": _INVENTORY_SCHEMA_VERSION,
+            "data": holdings,
+        },
+    )
+    return holdings
 
 
 def maybe_record_relationship_event(
