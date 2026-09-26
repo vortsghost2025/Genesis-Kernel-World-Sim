@@ -131,6 +131,24 @@ def push_snapshot() -> None:
             print(f"SNAPSHOT: docker cp failed — {ssh.stderr[:150]}", flush=True)
     except Exception as exc:
         print(f"SNAPSHOT: push error — {type(exc).__name__}: {exc}", flush=True)
+    print_inbox()
+
+
+def print_inbox() -> None:
+    """Operator inbox: surface what the agents are asking us. Non-fatal."""
+    try:
+        r = subprocess.run(
+            [sys.executable, str(WORLD_SIM / "scripts" / "operator_inbox.py")],
+            cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode == 0:
+            print("--- OPERATOR INBOX " + "-" * 40, flush=True)
+            print(r.stdout.rstrip(), flush=True)
+            print("-" * 58, flush=True)
+        else:
+            print(f"INBOX: scan failed — {r.stderr[:150]}", flush=True)
+    except Exception as exc:
+        print(f"INBOX: scan error — {type(exc).__name__}: {exc}", flush=True)
 
 
 def run_tick(hb: int) -> bool:

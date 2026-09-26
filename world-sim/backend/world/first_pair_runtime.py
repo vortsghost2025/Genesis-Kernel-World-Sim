@@ -51,6 +51,7 @@ from backend.world.first_pair_persistence import (
     list_unanswered_questions,
     load_capability_grant,
     load_charter_versions,
+    load_extra_capability_grants,
     load_goals,
     load_heartbeat_history,
     load_latest_charter,
@@ -422,10 +423,14 @@ class FirstPairRuntime:
                         "agent_name": other_view.get("canonical_name", ref),
                     })
 
-        # Current runtime capabilities
+        # Current runtime capabilities: the legacy movement grant plus any
+        # extra operator-granted capabilities (append-only grants store)
         caps = []
         if self._movement_grant_active():
             caps.append(self._capability_grant.capability_id)
+        for extra in load_extra_capability_grants(self._store):
+            if extra.status == "granted" and extra.capability_id not in caps:
+                caps.append(extra.capability_id)
 
         # --- Bounded memory selection ---
         history = load_heartbeat_history(self._store)

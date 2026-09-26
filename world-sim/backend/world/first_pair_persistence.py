@@ -49,6 +49,7 @@ _QUESTIONS_FILE = "questions.json"
 _HEARTBEAT_FILE = "heartbeat.json"
 _RUNTIME_POLICY_FILE = "runtime_policy.json"
 _CAPABILITY_GRANT_FILE = "capability_grant.json"
+_EXTRA_GRANTS_FILE = "capability_grants.json"
 _SUMMARY_FILE = "memory_summaries.json"
 _RELATIONSHIP_FILE = "relationship_ledger.json"
 _CHARTER_FILE = "charter.json"
@@ -526,6 +527,57 @@ def get_adjacent_tiles(policy: RuntimePolicyRecord, tile_id: str) -> list[str]:
         if tile["tile_id"] == tile_id:
             return list(tile.get("adjacent", []))
     return []
+
+
+# ---------------------------------------------------------------------------
+# Extra capability grants (append-only, operator answers to agent requests)
+#
+# The legacy capability system holds ONE grant per store (the movement grant,
+# bound to the runtime policy). Overwriting it to acknowledge a new capability
+# would destroy movement. Additional grants live in their own append-only
+# store so the operator can answer request_capability requests without ever
+# touching the legacy record.
+# ---------------------------------------------------------------------------
+
+
+def load_extra_capability_grants(store: FirstPairPersistenceStore) -> list[CapabilityGrantRecord]:
+    """Additional granted capabilities, append order. Missing file -> []."""
+    data = store._read_json(store._path(_EXTRA_GRANTS_FILE))
+    if data and data.get("type") == "capability_grants_record":
+        raw_list = data.get("data", [])
+        if isinstance(raw_list, list):
+            return [CapabilityGrantRecord(**e) for e in raw_list]
+    return []
+
+
+def append_capability_grant(
+    store: FirstPairPersistenceStore, grant: CapabilityGrantRecord
+) -> bool:
+    """Append-only grant of an additional capability. Idempotent by grant_id.
+
+    Never touches the legacy capability_grant.json (movement). Returns True
+    when actually appended.
+    """
+    grants = load_extra_capability_grants(store)
+    for existing in grants:
+        if existing.grant_id == grant.grant_id:
+            return False
+    grants.append(grant)
+    store._atomic_write(
+        store._path(_EXTRA_GRANTS_FILE),
+        {
+            "type": "capability_grants_record",
+            "schema_version": _CAPABILITY_GRANT_SCHEMA_VERSION,
+            "data": [asdict(g) for g in grants],
+        },
+    )
+    store._append_provenance("capability_grant_extra", {
+        "grant_id": grant.grant_id,
+        "capability_id": grant.capability_id,
+        "scope": grant.scope,
+        "operator_provenance": grant.operator_provenance,
+    })
+    return True
 
 
 # ---------------------------------------------------------------------------
