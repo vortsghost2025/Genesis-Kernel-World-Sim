@@ -82,6 +82,12 @@ from backend.world.first_pair_fog_adapter import (
     merge_observation,
     persist_known_map,
 )
+from backend.world.mystery_reveal import (
+    accrue_mystery_evidence,
+    apply_reveal,
+    project_discoveries,
+    project_unsettled_reports,
+)
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
 _SAFE_OBJECT_ID_CHARS = frozenset(
@@ -249,15 +255,74 @@ class FirstPairRuntime:
     def _get_data_root(self) -> Path:
         return Path(__file__).resolve().parents[2] / "data"
 
-    def _get_fog_observation(
-        self, agent_ref: str, position: str, objects_here: list
+    def _mystery_step(
+        self,
+        known_map: dict[str, Any],
+        position_tile: str,
+        agent_ref: str,
+        tick: int,
+        true_map: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Build a cognition-safe fog observation. Raises on fog failure."""
+        """Accrue mystery evidence and apply reveals for the agent's tile.
+
+        Spec: docs/mystery_runtime_integration_spec.md. Occupancy-only:
+        only mysteries whose tile_id equals the agent's current position
+        accrue — one unit per tick, per-agent (Adam's evidence gives Eve
+        nothing). The true map is read-only; state lives in
+        known_map['myths'] and, on reveal, known_map['known_landmarks'].
+        Persist happens once, only when something changed. Fail-closed: any
+        error returns the input map unchanged (no partial state handed to
+        the caller, no crash; the tick is retried by the next heartbeat).
+        """
+        try:
+            tm = true_map if true_map is not None else load_true_map(self._get_data_root())
+            km = known_map
+            changed = False
+            for mystery in tm.get("mysteries", []):
+                if not isinstance(mystery, dict) or not mystery.get("mystery_id"):
+                    continue
+                if mystery.get("tile_id") != position_tile:
+                    continue
+                km, accrued = accrue_mystery_evidence(
+                    km, mystery, {"tile_id": position_tile}, tick
+                )
+                km, revealed = apply_reveal(km, mystery, tick)
+                changed = changed or accrued or revealed is not None
+            if changed:
+                persist_known_map(self._store.root, agent_ref, km)
+            return km
+        except Exception:
+            return known_map
+
+    def _get_fog_observation(
+        self, agent_ref: str, position: str, objects_here: list,
+        heartbeat_number: int | None = None,
+    ) -> dict[str, Any]:
+        """Build a cognition-safe fog observation. Raises on fog failure.
+
+        Mystery accrual + reveal happen here — before the observation is
+        built from the just-updated known map — so hints earned this tick
+        are visible to the agent in this same heartbeat's cognition
+        (spec §2.1 item 7). The additive observation keys
+        'unsettled_reports' and 'discoveries' are present only when the
+        agent has earned them (absent otherwise).
+        """
         true_map = load_true_map(self._get_data_root())
         known_map = load_known_map(self._store.root, agent_ref)
-        return cognition_safe_observation(
+        if heartbeat_number is not None:
+            known_map = self._mystery_step(
+                known_map, position, agent_ref, heartbeat_number, true_map=true_map
+            )
+        obs = cognition_safe_observation(
             true_map, position, known_map, None, objects_here, agent_ref
         )
+        reports = project_unsettled_reports(known_map)
+        if reports:
+            obs["unsettled_reports"] = reports
+        discoveries = project_discoveries(known_map)
+        if discoveries:
+            obs["discoveries"] = discoveries
+        return obs
 
     def _get_effective_adjacency(self, current_pos: str) -> list[str]:
         """Adjacent tiles from fog-derived topology or legacy policy."""
@@ -360,7 +425,8 @@ class FirstPairRuntime:
         if self._fog_active():
             try:
                 observation = self._get_fog_observation(
-                    agent_ref, position, current_tile_objects
+                    agent_ref, position, current_tile_objects,
+                    heartbeat_number=heartbeat_number,
                 )
                 visible_tiles = observation["visible_tiles"]
                 available_moves = [t for t in visible_tiles if t != position]

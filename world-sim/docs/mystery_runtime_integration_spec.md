@@ -1,9 +1,12 @@
 # Mystery Runtime Integration — Design Specification
 
-**Status:** DESIGN SPECIFICATION ONLY
-**Scope:** wiring `scripts/world_content/mystery_reveal.py` into the living
-first-pair runtime
-**Implementation authorization:** NOT GRANTED by this document
+**Status:** IMPLEMENTED 2026-09-25 (operator-authorized live deployment;
+see `backend/world/first_pair_runtime.py::_mystery_step` and
+`backend/world/mystery_reveal.py`, tested in
+`tests/test_mystery_runtime_integration.py` — 10 integration tests +
+11 original pure tests, all green)
+**Scope:** wiring `mystery_reveal.py` into the living first-pair runtime
+**Implementation authorization:** GRANTED by operator (Sean), 2026-09-25
 **Canonical-write authorization:** NONE (this document; deployment of the
 content candidate was separately authorized and already completed)
 **Companion artifacts:** `world-sim/scripts/world_content/mystery_reveal.py`
