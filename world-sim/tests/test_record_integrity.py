@@ -127,6 +127,27 @@ class TestArcFilesAreConsistent:
             rows = [ln for ln in index.splitlines() if f"]({p.name})" in ln]
             assert len(rows) == 1, f"{p.name} listed {len(rows)} times in the index"
 
+    def test_no_two_arcs_overlap(self):
+        """One authoritative record per stretch of history.
+
+        arc_0801_0900.md (a mid-arc preview exported at tick 810) sat next
+        to arc_0801_0840.md (the real arc) for a full commit: two files
+        claiming overlapping heartbeats with different numbers, and
+        nothing an auditor could use to tell which was authoritative.
+        Overlap is a record-keeping bug, so it is now a test failure.
+        """
+        spans = []
+        for p in self._arcs():
+            m = re.match(r"arc_(\d+)_(\d+)\.md", p.name)
+            assert m, f"unparseable name: {p.name}"
+            spans.append((int(m.group(1)), int(m.group(2)), p.name))
+        spans.sort()
+        for (s1, e1, n1), (s2, e2, n2) in zip(spans, spans[1:]):
+            assert e1 < s2, (
+                f"{n1} (HB{s1}-{e1}) overlaps {n2} (HB{s2}-{e2}): two censuses "
+                f"cover the same heartbeats and the record cannot say which "
+                f"is authoritative")
+
 
 class TestCensusMatchesStores:
     """A committed number must be reproducible from the store it came from."""

@@ -44,4 +44,11 @@ GATHER_YIELD = 1
 # world it is standing in. (HB701-743: an agent concluded "build is
 # impossible while over capacity" from refusals caused by a placement
 # bug, and had no way to learn the rule had changed.)
-PHYSICS_VERSION = "epistemic.1"
+#
+# epistemic.1.1 is a delivery bump, not a physics change: the terms
+# changelog for epistemic.1 shipped keyed to a version the live agents
+# had ALREADY been recorded as seeing, so its gate (new_to_agent) was
+# False forever and the message never reached the only agents it was
+# written for - verified live, they kept burning berries at HB842-846.
+# The bump re-arms the gate once for every agent.
+PHYSICS_VERSION = "epistemic.1.1"

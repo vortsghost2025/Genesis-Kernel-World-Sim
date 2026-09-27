@@ -97,7 +97,7 @@ class TestRetiredMechanicsAreGone:
         assert GATHER_YIELD == 1
 
     def test_version_moved_to_the_new_era(self):
-        assert PHYSICS_VERSION == "epistemic.1"
+        assert PHYSICS_VERSION == "epistemic.1.1"
 
     def test_runtime_has_no_pressure_step(self):
         rt = FirstPairRuntime(heartbeat_limit=1, store=_fresh_store(Path(".")))
@@ -289,6 +289,20 @@ class TestTermsChangelog:
         from backend.world.world_terms import CURRENT_TERMS, terms_change_line
         assert terms_change_line(CURRENT_TERMS).strip()
 
+    def test_runtime_version_always_has_a_changelog_entry(self):
+        """Drift guard: the version the runtime ships must be speakable.
+
+        The changelog is keyed by version string. If world_pressure ships a
+        version that world_terms has no entry for, agents get a number with
+        no content - the exact silence that wasted eight builds. This pins
+        the two modules together so they cannot drift apart again.
+        """
+        from backend.world.world_pressure import PHYSICS_VERSION
+        from backend.world.world_terms import terms_change_line
+        assert terms_change_line(PHYSICS_VERSION).strip(), (
+            f"PHYSICS_VERSION {PHYSICS_VERSION!r} has no terms changelog entry: "
+            "a version bump without a changelog line ships a silent change")
+
     def test_changelog_states_the_removals(self):
         from backend.world.world_terms import terms_change_line
         line = terms_change_line("epistemic.1").lower()
@@ -322,6 +336,36 @@ class TestTermsChangelog:
         second = build_system_prompt(rt._build_context("east_adam", 2))
         assert "No longer true" not in second
         assert "THE WORLD'S TERMS" in second
+
+    def test_changelog_fires_for_agents_who_already_saw_the_old_version(self, tmp_path):
+        """THE DELIVERY TEST. The live condition that broke the first ship.
+
+        All four live agents had physics_seen = the current version
+        already recorded when the changelog shipped keyed to that same
+        version, so new_to_agent was False forever and the message never
+        reached the only agents it was written for (verified live: they
+        kept burning berries at HB842-846). This test reproduces that
+        exact condition: a store that has seen the PREVIOUS version must
+        get the changelog once under the new one.
+        """
+        from backend.world.first_pair_persistence import record_physics_seen
+        from backend.world.world_pressure import PHYSICS_VERSION
+        from backend.world.world_terms import PREVIOUS_TERMS
+        store = _fresh_store(tmp_path)
+        # the live condition: the agent has already been shown a version
+        record_physics_seen(store, "east_adam", PREVIOUS_TERMS)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt._load_or_initialize()
+        ctx = rt._build_context("east_adam", 2)
+        assert ctx.physics["version"] == PHYSICS_VERSION
+        assert ctx.physics["new_to_agent"] is True, (
+            "an agent that saw the previous version must be treated as "
+            "newly exposed: this is the gate that ate the changelog")
+        prompt = build_system_prompt(ctx)
+        assert "No longer true" in prompt
+        # and it fires exactly once: the next heartbeat is quiet
+        ctx2 = rt._build_context("east_adam", 3)
+        assert ctx2.physics["new_to_agent"] is False
 
 
 class TestAskRestatement:

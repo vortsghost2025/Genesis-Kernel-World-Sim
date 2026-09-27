@@ -30,7 +30,16 @@ TERMS_CHANGELOG: dict[str, str] = {
     ),
 }
 
-CURRENT_TERMS = "epistemic.1"
+# epistemic.1.1 is a DELIVERY bump: same terms as epistemic.1, shipped
+# because the changelog above was keyed to a version the live agents had
+# already been marked as seeing, so its gate never opened. The agents who
+# need this message have never received it, so the current version carries
+# it too - not as a physics change, but as the envelope for the one that
+# already happened.
+TERMS_CHANGELOG["epistemic.1.1"] = TERMS_CHANGELOG["epistemic.1"]
+
+CURRENT_TERMS = "epistemic.1.1"
+PREVIOUS_TERMS = "epistemic.1"
 
 
 def terms_change_line(version: str) -> str:
