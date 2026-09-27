@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.world.world_terms import terms_change_line
+
 from openai import OpenAI
 
 from backend.world.first_pair_cognition_interface import (
@@ -896,6 +898,12 @@ def build_system_prompt(context: AgentContext) -> str:
                 "old terms may no longer hold; what you remember was true when you "
                 "learned it."
             )
+            # Name what changed, when we know. A version number alone left
+            # both East agents running "food processing" experiments
+            # against a mechanic deleted two commits earlier (HB801-834).
+            changelog = terms_change_line(str(physics.get("version")))
+            if changelog:
+                physics_section += f"\n{changelog}"
     else:
         physics_section = ""
 

@@ -2247,6 +2247,26 @@ def load_agent_question_proposals(store: FirstPairPersistenceStore) -> list[dict
     return []
 
 
+def save_agent_question_proposals(
+    store: FirstPairPersistenceStore, records: list[dict]
+) -> bool:
+    """Rewrite the noncanonical ask log (still never questions.json).
+
+    Used only to annotate an existing record - e.g. recording that an
+    agent restated a question - so the listener can see persistence
+    without the agent being refused for it.
+    """
+    store._atomic_write(
+        store._path(_AGENT_QUESTIONS_FILE),
+        {
+            "type": "agent_question_proposals",
+            "schema_version": _AGENT_QUESTIONS_SCHEMA,
+            "data": [r for r in records if isinstance(r, dict)],
+        },
+    )
+    return True
+
+
 def append_agent_question_proposal(
     store: FirstPairPersistenceStore, envelope: dict
 ) -> bool:

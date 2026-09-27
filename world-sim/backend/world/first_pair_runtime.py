@@ -65,6 +65,7 @@ from backend.world.first_pair_persistence import (
     load_operator_messages,
     load_physics_seen,
     load_questions,
+    save_agent_question_proposals,
     load_relationship_events,
     load_runtime_policy,
     load_summaries,
@@ -1064,22 +1065,39 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Missing question_id, question, or reason_for_asking"}
         if not _is_safe_object_id(str(question_id)):
             return {"status": "rejected", "reason": "Invalid question_id"}
-        # Deduplicate against existing canonical questions AND pending
-        # proposals — in memory (this process) and on disk (proposals from
-        # earlier ticks; each heartbeat is a fresh process, so in-memory
-        # dedupe alone let a stuck agent re-ask forever).
+        # Re-asking the same question_id is a legitimate act of persistence:
+        # both East agents asked the same "food conversion" question three
+        # times each across HB803-809 and were then REJECTED for it, which
+        # reads to an agent as the world refusing to hear it rather than
+        # the question already being on record. The record stays one entry
+        # per question_id (unheard, append-only, still awaiting a human);
+        # what changes is that a repeat is accepted as a restatement and
+        # counted, instead of refused.
         for existing in self._questions:
             if existing.question_id == question_id:
-                return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
+                return {"status": "proposed", "question_id": question_id,
+                        "sink": "already-canonical", "repeat": True}
+        try:
+            records = load_agent_question_proposals(self._store)
+            for record in records:
+                if record.get("question_id") == question_id:
+                    record["restated_heartbeat"] = heartbeat_number
+                    record["restated_at_utc"] = datetime.now(
+                        timezone.utc).isoformat()
+                    record["restatement_count"] = int(
+                        record.get("restatement_count", 0)) + 1
+                    save_agent_question_proposals(self._store, records)
+                    return {"status": "proposed", "question_id": question_id,
+                            "sink": "agent_questions.json", "repeat": True,
+                            "restatements": record["restatement_count"]}
+        except Exception:
+            pass  # dedupe/restatement is best-effort; never block the ask
+        # in-memory fallback (the durable log is normally authoritative,
+        # since each heartbeat is a fresh process)
         for existing_proposal in self._question_proposals:
             if existing_proposal.question_id == question_id:
-                return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
-        try:
-            for persisted in load_agent_question_proposals(self._store):
-                if persisted.get("question_id") == question_id:
-                    return {"status": "rejected", "reason": f"Duplicate question_id: {question_id}"}
-        except Exception:
-            pass  # dedupe is best-effort; never block the ask itself
+                return {"status": "proposed", "question_id": question_id,
+                        "sink": "already-proposed", "repeat": True}
         agent_id = (
             self._identity_record.adam_agent_id
             if agent_ref == self._adam_ref

@@ -277,6 +277,112 @@ class TestBuildLayerSurvives:
 # ---------------------------------------------------------------------------
 
 
+class TestTermsChangelog:
+    """The world names what changed, not just which version it is.
+
+    A version number alone left both East agents running "food
+    processing" experiments against a mechanic deleted two commits
+    earlier (HB801-834), burning every berry they held.
+    """
+
+    def test_current_version_has_a_changelog_entry(self):
+        from backend.world.world_terms import CURRENT_TERMS, terms_change_line
+        assert terms_change_line(CURRENT_TERMS).strip()
+
+    def test_changelog_states_the_removals(self):
+        from backend.world.world_terms import terms_change_line
+        line = terms_change_line("epistemic.1").lower()
+        for gone in ("no food counter", "no conversion", "capacity", "consumption"):
+            assert gone in line, f"changelog does not mention: {gone}"
+
+    def test_changelog_gives_no_strategy(self):
+        """A changelog states facts. It must not tell an agent what to do."""
+        from backend.world.world_terms import terms_change_line
+        line = terms_change_line("epistemic.1").lower()
+        for directive in ("you should", "you must", "try to", "build a",
+                          "gather more", "in order to"):
+            assert directive not in line, f"changelog gives advice: {directive!r}"
+
+    def test_unknown_version_is_empty_not_invented(self):
+        from backend.world.world_terms import terms_change_line
+        assert terms_change_line("never-shipped.9") == ""
+
+    def test_prompt_names_what_changed_on_first_exposure(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt._load_or_initialize()
+        prompt = build_system_prompt(rt._build_context("east_adam", 1))
+        assert "terms have changed" in prompt
+        assert "No longer true" in prompt
+        assert "food counter" in prompt
+
+    def test_prompt_does_not_repeat_the_changelog_every_heartbeat(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        second = build_system_prompt(rt._build_context("east_adam", 2))
+        assert "No longer true" not in second
+        assert "THE WORLD'S TERMS" in second
+
+
+class TestAskRestatement:
+    """Re-asking is persistence, not an error.
+
+    Both East agents asked the same question three times each and were
+    then rejected for it - which reads as the world refusing to hear
+    them rather than the question already being on record.
+    """
+
+    def _ask(self, qid="q1", question="Why does my food stay at 0?"):
+        return {
+            "action_type": "ask_human", "question_id": qid,
+            "question": question, "reason_for_asking": "Blocked",
+            "urgency": "high"}
+
+    def test_first_ask_is_recorded(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        outcome = rt._execute_action("east_adam", self._ask(), heartbeat_number=2)
+        assert outcome.get("status") == "proposed"
+        assert not outcome.get("repeat")
+        assert len(load_agent_question_proposals(store)) == 1
+
+    def test_repeat_is_accepted_not_refused(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=2)
+        again = rt._execute_action("east_adam", self._ask(), heartbeat_number=3)
+        assert again.get("status") == "proposed"
+        assert again.get("repeat") is True
+        assert "rejected" not in str(again).lower()
+
+    def test_repeat_across_processes_is_accepted(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=2)
+        rt2 = FirstPairRuntime(heartbeat_limit=1, store=store)
+        rt2._load_or_initialize()
+        again = rt2._execute_action("east_adam", self._ask(), heartbeat_number=3)
+        assert again.get("status") == "proposed"
+        assert again.get("repeat") is True
+
+    def test_repeat_is_recorded_as_a_restatement(self, tmp_path):
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=2)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=5)
+        records = load_agent_question_proposals(store)
+        assert len(records) == 1, "a restatement must not duplicate the record"
+        assert records[0].get("restated_heartbeat") == 5
+
+    def test_restating_never_touches_canonical_questions(self, tmp_path):
+        from backend.world.first_pair_persistence import load_questions
+        store = _fresh_store(tmp_path)
+        rt = _runtime(store)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=2)
+        rt._execute_action("east_adam", self._ask(), heartbeat_number=3)
+        assert load_questions(store) == []
+
+
 class TestPhysicsNoticeSurvives:
     def test_version_and_new_flag_present(self, tmp_path):
         store = _fresh_store(tmp_path)
