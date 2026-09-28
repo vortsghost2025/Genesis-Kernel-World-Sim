@@ -185,3 +185,57 @@ would be a finding about the prompt, not about the agents.
    hit, never silent. This is the one place Phase B could quietly lose a
    thought, and the whole point of the phase is that thoughts stop being lost.
 4. Confirm no prompt line is added, so the census stays falsifiable.
+
+## 9. Census close-out — HB944–1043 (run 2026-09-28, east pair only)
+
+The full 100-heartbeat arc ran unattended and clean: 100 heartbeats landed,
+zero timeouts, zero retries, zero hard stops. Commit `6fe387a` carries the
+implementation; this section records the result.
+
+| signal | baseline (HB943) | final (HB1043) | verdict |
+|---|---|---|---|
+| **anchors per agent** | 19 available, 0 new | 19 available, **0 new builds in 100 heartbeats** | **null — the decisive row did not move** |
+| known_tiles Adam / Eve | 18 / 17 | **63 / 89** | rising steeply, Phase 1 undisturbed |
+| reachability blocks | 0 | **0 across all 100** | the `677f2a2` fix holds |
+| questions asked | 0 pending | **0 raised in 100 heartbeats** | no new confusion |
+| food-conversion questions | 0 | **0** | the changelog still holds |
+| moves | 2 of 2 succeeding | succeeding throughout | Adam walked 12 tiles west; Eve mapped a full hill cluster |
+
+Two events of note inside the null:
+
+1. **Adam found, reached, and gathered the water.** At HB994 he stood on
+   `cont_a_origin_000` and gathered fresh water successfully — the first time
+   anyone has held actual water. The transmission chain (Phase 1 → visible at
+   HB942 → navigated to → held) is closed end to end.
+2. **The agents were not idle.** Eve mapped 72 new tiles; Adam crossed into
+   new country. This was 100 heartbeats of successful exploration during which
+   neither agent chose to record anything.
+
+### Reading
+
+The hypothesis was that an anchor requires no new decision from the agent,
+because it attaches to a thing already chosen. One hundred heartbeats say
+otherwise: **building itself is the decision, and they are not making it.**
+The slot works — 19 objects each, verbatim, including a founding statement
+from heartbeat 10 — but in 100 heartbeats of active, successful, curious
+behavior, nothing new entered it.
+
+This is the outcome §7 named in advance: what the agents want durable is not
+findings. The next question is therefore the one §7 deferred to — **why the
+charter goes unwritten.** It is the identity slot, it has been available for
+1,043 heartbeats, and the count is still 0 of 4. The agents write goals,
+track each other's plans across heartbeats, and name their own patterns
+("systematic hill survey", "complete resource map"). They have durable things
+to say and a durable place to say them, and they do not use it.
+
+That is a finding about the prompt, not about the agents — and it is the
+narrowest next investigation available. It does not need a new mechanic, a new
+verb, or a new pressure. It needs reading the charter prompt text as an
+instruction and asking why a rational agent follows everything around it and
+never that.
+
+### Status
+
+Phase B is **closed as implemented-but-null**. The mechanism stays — it is
+correct, tested, and costs nothing when unused. No follow-on build is
+proposed. The open thread is the charter question above.
