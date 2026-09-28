@@ -265,6 +265,179 @@ class TestCognitionSafeObservation:
         assert "known_map" not in text
         assert "true_landmark_id" not in text
 
+    # -- World observation transmission (docs/world_observation_transmission_spec.md)
+    # The projection silently dropped `water` and `hazards`. The world has
+    # exactly ONE drinkable fresh_water tile in 80,000; agents have been
+    # asking about water since the first live loop. These tests pin the fix.
+
+    def test_water_is_transmitted_for_visible_tile(self):
+        tm = _mini_true_map()
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, {"radius": 1}, [], "east_adam"
+        )
+        by_id = {d["tile_id"]: d for d in obs["visible_tile_details"]}
+        origin = by_id.get("cont_a_origin_000")
+        assert origin is not None, "origin tile should be visible at radius 1"
+        assert "water" in origin, "water key missing from visible tile detail"
+        # A tile with no water carries an empty water block, not a null one:
+        # the key is always present so consumers never branch on absence.
+        center = by_id["public-shared-center"]
+        assert center.get("water") == {}
+
+    def test_hazards_are_transmitted(self):
+        tm = _mini_true_map()
+        for tile in tm["tiles"]:
+            if tile["tile_id"] == "cont_a_origin_000":
+                tile["hazards"] = ["flood_risk"]
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, {"radius": 1}, [], "east_adam"
+        )
+        by_id = {d["tile_id"]: d for d in obs["visible_tile_details"]}
+        assert by_id["cont_a_origin_000"].get("hazards") == ["flood_risk"]
+
+    def test_conditions_absent_when_none_passed(self):
+        """Phase 1 guarantee: the runtime passes conditions=None, so no
+        conditions key appears and visibility is untouched.
+
+        Note the pre-existing radius dial: `_condition_radius` already shrinks
+        radius when `visibility` is storm/fog. That behaviour is untouched by
+        this phase - it is only unreachable because the runtime passes None.
+        Turning the dial on is Phase 2."""
+        tm = _mini_true_map()
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, None, [], "east_adam"
+        )
+        assert "conditions" not in obs
+
+    def test_conditions_reported_read_only_when_supplied(self):
+        """When conditions ARE supplied they are reported verbatim."""
+        tm = _mini_true_map()
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km,
+            {"visibility": "gentle", "time_of_day": "day"}, [], "east_adam"
+        )
+        assert obs["conditions"]["visibility"] == "gentle"
+        assert obs["conditions"]["time_of_day"] == "day"
+
+    def test_radius_dial_untouched_by_this_phase(self):
+        """The pre-existing storm/radius behaviour must behave identically
+        before and after this phase - this phase did not introduce it."""
+        tm = _mini_true_map()
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        clear = cognition_safe_observation(
+            tm, "public-shared-center", km,
+            {"radius": 1, "visibility": "high"}, [], "east_adam"
+        )
+        storm = cognition_safe_observation(
+            tm, "public-shared-center", km,
+            {"radius": 1, "visibility": "storm"}, [], "east_adam"
+        )
+        assert len(storm["visible_tiles"]) < len(clear["visible_tiles"]), (
+            "radius dial should still narrow the visible set under storm"
+        )
+
+    def test_water_never_leaks_from_non_visible_tiles(self):
+        """A drinkable tile outside the visible set must not appear anywhere."""
+        tm = _mini_true_map()
+        for tile in tm["tiles"]:
+            if tile["tile_id"] == "public-start-adam":
+                tile["water"] = {"type": "river", "drinkable": True}
+                tile["resources"] = ["fresh_water"]
+        for res in tm.get("resources", []):
+            if res.get("tile_id") == "public-start-adam":
+                res["kind"] = "fresh_water"
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        # Observe from the center, so the drinkable tile is NOT in radius.
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, {"radius": 0}, [], "east_adam"
+        )
+        text = json.dumps(obs)
+        if "public-start-adam" not in obs["visible_tiles"]:
+            assert "drinkable" not in text
+            assert "fresh_water" not in text
+
+    def test_projection_does_not_special_case_water(self):
+        """The single drinkable tile must stay a discovery.
+
+        The projection must transmit whatever `water` a tile carries, with no
+        branch on drinkability, resource name, or tile id. Proven by
+        behavioural test: an arbitrary invented drinkable river on an ordinary
+        tile is transmitted exactly like any other water body.
+        """
+        tm = _mini_true_map()
+        visible_ids = {
+            t["tile_id"] for t in tm["tiles"]
+        }
+        # Pick whatever tile the existing fixture makes visible, rather than
+        # assuming a coordinate geometry.
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        probe = cognition_safe_observation(
+            tm, "public-shared-center", km, {"radius": 1}, [], "east_adam"
+        )
+        target = probe["visible_tiles"][0]
+        assert target in visible_ids
+        for tile in tm["tiles"]:
+            if tile["tile_id"] == target:
+                tile["water"] = {"type": "river", "drinkable": True}
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, {"radius": 1}, [], "east_adam"
+        )
+        by_id = {d["tile_id"]: d for d in obs["visible_tile_details"]}
+        assert by_id[target]["water"] == {"type": "river", "drinkable": True}
+
+    def test_no_contamination_via_new_fields(self):
+        """New fields are added BEFORE the contamination check so they are
+        covered by it."""
+        tm = _mini_true_map()
+        for tile in tm["tiles"]:
+            if tile["tile_id"] == "cont_a_origin_000":
+                tile["hazards"] = ["true_map_internal_marker"]
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        with pytest.raises(FogAdapterError):
+            cognition_safe_observation(
+                tm, "public-shared-center", km, {"radius": 1}, [], "east_adam"
+            )
+
+    def test_observation_shape_with_no_water_or_hazards(self):
+        """A map with no water/hazards yields neutral values, so the key set
+        is stable and consumers never branch on absence."""
+        tm = _mini_true_map()
+        for tile in tm["tiles"]:
+            tile["water"] = None
+            tile["hazards"] = []
+        km = seed_known_map_from_history(
+            _simple_heartbeats(), "east_adam", "public-start-adam"
+        )
+        obs = cognition_safe_observation(
+            tm, "public-shared-center", km, None, [], "east_adam"
+        )
+        assert set(obs.keys()) == {
+            "tile_id", "visible_tiles", "objects_here", "visible_tile_details",
+        }
+        for detail in obs["visible_tile_details"]:
+            assert detail["water"] == {}
+            assert detail["hazards"] == []
+
     def test_only_visible_tiles(self):
         tm = _mini_true_map()
         km = seed_known_map_from_history(

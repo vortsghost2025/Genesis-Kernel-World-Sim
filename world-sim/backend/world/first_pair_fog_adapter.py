@@ -15,6 +15,7 @@ Contamination-safety contract (10IZ §5.7):
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -259,6 +260,16 @@ def cognition_safe_observation(
     for k in resource_by_tile:
         resource_by_tile[k] = sorted(set(resource_by_tile[k]))
 
+    # Conditions are REPORTED ONLY. The radius dial is deliberately not
+    # turned on here: wiring conditions into the radius is a pressure change
+    # and is deferred to its own phase (spec §4.1). Reporting must not alter
+    # visible_tiles.
+    safe_conditions = {}
+    if conditions:
+        for key in ("visibility", "time_of_day", "radius"):
+            if key in conditions:
+                safe_conditions[key] = conditions[key]
+
     tile_details: list[dict[str, Any]] = []
     for t in visible_tiles_raw:
         tid = t.get("tile_id", "")
@@ -268,6 +279,14 @@ def cognition_safe_observation(
             "biome": t.get("biome", "unknown"),
             "landmarks": landmark_by_tile.get(tid, []),
             "resources": resource_by_tile.get(tid, []),
+            # Transmitted per visible tile. The world carries exactly one
+            # drinkable fresh_water tile in 80,000 and the agents have been
+            # asking about water since the first live loop; the fact was
+            # present in the true map and dropped here. Generic projection -
+            # no tile id or resource name is special-cased, so the singular
+            # tile stays a discovery (spec §6).
+            "water": copy.deepcopy(t.get("water")) or {},
+            "hazards": list(t.get("hazards", [])),
         }
         tile_details.append(detail)
 
@@ -277,6 +296,8 @@ def cognition_safe_observation(
         "objects_here": objects_here,
         "visible_tile_details": tile_details,
     }
+    if safe_conditions:
+        observation["conditions"] = safe_conditions
 
     # Contamination safety check
     obs_text = json.dumps(observation)
