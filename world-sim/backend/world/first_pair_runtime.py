@@ -1298,10 +1298,12 @@ class FirstPairRuntime:
             self._pressure_tick = {}
             self._reconcile_capability_requests()
 
+            hb_observations: dict = {}
             for agent_ref in (self._adam_ref, self._eve_ref):
                 backend = self._get_cognition_backend(agent_ref)
                 cycle = CognitiveCycle(backend)
                 ctx = self._build_context(agent_ref, hb)
+                hb_observations[agent_ref] = ctx.observation
                 output = cycle.run_cycle(ctx)
                 serving = getattr(backend, "serving_provider_type", "")
                 cycle_fallback_used = getattr(backend, "fallback_used", False)
@@ -1403,11 +1405,34 @@ class FirstPairRuntime:
 
             # End-of-tick persistence
             self._persist_shared_state(
-                hb, adam_action, adam_outcome, eve_action, eve_outcome, world_mutations
+                hb, adam_action, adam_outcome, eve_action, eve_outcome,
+                world_mutations, observations=hb_observations,
             )
             results["heartbeats_completed"] += 1
 
         return results
+
+    def _audit_observations(self, observations: dict) -> dict:
+        """Per-agent observation snapshot for the heartbeat record.
+
+        Read-only audit projection. It stores exactly what the cognition layer
+        received and nothing more: no true-map identifiers, no known-map
+        internals, no credentials. The per-agent keying is deliberate - two
+        agents standing on different tiles saw different worlds, and a single
+        merged map would misrepresent both.
+        """
+        snapshot: dict = {}
+        for agent_ref, obs in (observations or {}).items():
+            if not isinstance(obs, dict):
+                continue
+            entry: dict = {}
+            for key in ("tile_id", "visible_tiles", "visible_tile_details",
+                        "objects_here", "fog_error", "conditions"):
+                if key in obs:
+                    entry[key] = obs[key]
+            if entry:
+                snapshot[agent_ref] = entry
+        return snapshot
 
     def _persist_shared_state(
         self,
@@ -1417,6 +1442,7 @@ class FirstPairRuntime:
         eve_action: dict | None = None,
         eve_outcome: dict | None = None,
         world_mutations: list[dict] | None = None,
+        observations: dict | None = None,
     ) -> None:
         save_world_state(self._store, self._world_state)
 
@@ -1440,11 +1466,18 @@ class FirstPairRuntime:
         if eve_outcome:
             action_outcomes[self._eve_ref] = eve_outcome
 
+        # Retain what the agents were actually shown this heartbeat.
+        # Previously this was hardcoded `{}`, which made the record unable to
+        # answer "what did they see when they decided that?" - see
+        # docs/world_observation_transmission_spec.md §7. An empty observation
+        # remains distinguishable from a populated one: if the fog adapter
+        # failed, the record carries the fog_error and an empty map, which is
+        # itself the audit signal.
         hb_record = HeartbeatRecord(
             heartbeat_number=heartbeat_number,
             agent_id="both",
             position="",
-            observation={},
+            observation=self._audit_observations(observations),
             action_taken=actions_taken if actions_taken else None,
             world_mutations=world_mutations or [],
             goals_updated=[g.goal_id for g in self._goals],
