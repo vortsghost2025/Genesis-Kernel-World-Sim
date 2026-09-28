@@ -858,6 +858,52 @@ def build_system_prompt(context: AgentContext) -> str:
             "Empty hands. Gather resources to hold them; what you gather persists."
         )
 
+    # --- Anchors (Phase B): this agent's own built things, verbatim ---
+    # An agent sees ~1% of its own history per heartbeat
+    # (epistemic_pressure_spec.md §2), and the charter - the one verbatim,
+    # unbudgeted slot - has gone unwritten by 0 of 4 agents. This gives the
+    # same guarantee to findings: when an agent writes a thing down, the
+    # runtime presents it back to that agent, verbatim.
+    #
+    # Authorship is the whole rule. No classifier, no new object type, no new
+    # verb. The agent decides what a thing means by what it wrote; the runtime
+    # only stops forgetting. Anchors sit outside memory selection exactly as
+    # the charter does and consume no selection budget.
+    own_objects = [
+        o for o in (context.world_public_objects or {}).values()
+        if isinstance(o, dict) and o.get("creator_agent_id") == context.agent_id
+    ]
+    _anchor_header = (
+        "--- YOUR ANCHORS (things you built; your own words; shown verbatim at "
+        "every heartbeat; never summarized or forgotten by the runtime) ---\n"
+    )
+    _anchor_lines = [
+        f"- [{o.get('object_id', '?')}] on {o.get('tile_id', '?')} "
+        f"(heartbeat {o.get('created_heartbeat', '?')}): "
+        f"{(o.get('public_description') or '').strip()}"
+        for o in own_objects
+        if (o.get("public_description") or "").strip()
+    ]
+    if _anchor_lines:
+        anchor_section = _anchor_header + "\n".join(_anchor_lines) + "\n"
+    elif own_objects:
+        anchor_section = (
+            _anchor_header
+            + "The things you have built so far carry no description, so there "
+            "is nothing to anchor yet. Whatever you write about a thing you "
+            "build is kept here verbatim and never summarized."
+        )
+    else:
+        anchor_section = (
+            _anchor_header
+            + "You have not built anything yet. When you do, whatever you "
+            "write about it is kept here in your own words and shown back to "
+            "you verbatim at every heartbeat, never summarized, compressed, or "
+            "forgotten. Everything else you experience may eventually be "
+            "compressed into derived summaries; your anchors will not. You are "
+            "never required to build."
+        )
+
     # --- Charter (self-authored identity persistence) ---
     if context.charter_text:
         charter_section = (
@@ -932,6 +978,8 @@ Your persistent identity:
 You share this world with {context.other_agent_name} (agent ID: {context.other_agent_id}, ref: {context.other_agent_ref}). You are distinct agents with separate private memories.
 
 {charter_section}
+
+{anchor_section}
 
 {belongings_section}
 

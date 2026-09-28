@@ -324,6 +324,68 @@ class TestRunnerFlow:
         assert status["status"] == "failed"
 
 
+class TestLogPathResolution:
+    """Defect C's sibling: --log was left unresolved by the original fix.
+
+    Found while running HB943: the runner log appeared at the repository
+    root instead of beside the run's evidence and status, because evidence and
+    status resolve against the world-sim root and the log did not.
+    """
+
+    def test_relative_log_resolves_under_world_sim_root(self, tmp_path):
+        root = tmp_path / "wsroot"
+        root.mkdir()
+        resolved = chr_mod._resolve_under(root, ".scratch/hb/runner.log")
+        assert resolved == root / ".scratch" / "hb" / "runner.log"
+
+    def test_log_resolution_is_idempotent(self, tmp_path):
+        root = tmp_path / "wsroot"
+        root.mkdir()
+        once = chr_mod._resolve_under(root, ".scratch/hb/runner.log")
+        assert chr_mod._resolve_under(root, str(once)) == once
+
+    def test_launcher_resolves_the_log_before_spawning(self, tmp_path):
+        """The log arg handed to the runner must already be absolute, so the
+        detached child cannot re-resolve it against its own cwd."""
+        loop, exporter, vault = _write_test_scripts(tmp_path)
+        store = tmp_path / "store"
+        _write_store(store, 9, 9)
+        calls: list[tuple] = []
+        monkey_popen = MagicMock()
+        monkey_popen.pid = 5150
+
+        def fake_popen(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return monkey_popen
+
+        original = chr_mod.subprocess.Popen
+        chr_mod.subprocess.Popen = fake_popen
+        try:
+            rc = launcher_main([
+                "--expect-heartbeat", "10",
+                "--evidence", str(tmp_path / "evidence.json"),
+                "--log", ".scratch/hb/runner.log",
+                "--status", str(tmp_path / "status.json"),
+                "--store-root", str(store),
+                "--vault", str(vault),
+                "--world-sim-root", str(tmp_path / "wsroot"),
+                "--loop-script", str(loop),
+                "--export-script", str(exporter),
+            ])
+        finally:
+            chr_mod.subprocess.Popen = original
+        assert rc == 0
+        assert calls, "runner was never spawned"
+        cmd = calls[0][0]
+        log_arg = cmd[cmd.index("--log") + 1]
+        assert chr_mod.os.path.isabs(log_arg), (
+            f"runner received a relative --log: {log_arg}"
+        )
+        assert log_arg.startswith(str(tmp_path / "wsroot")), (
+            f"log must resolve under the world-sim root, got {log_arg}"
+        )
+
+
 class TestLauncher:
     def _launcher_args(self, tmp_path, loop, exporter, vault, store):
         return [
