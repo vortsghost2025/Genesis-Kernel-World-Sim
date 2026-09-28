@@ -7,6 +7,46 @@
 **Operator origin:** "if it rained and sucked outside they would be more inclined
 to build something to protect from the elements."
 
+> ## CORRECTION (2026-09-28, before any code)
+>
+> **The original §2.1 of this document was wrong. Nothing was ever implemented
+> from the false premise.** It has been corrected in place below.
+>
+> The original §2.1 claimed the first-pair world *already* cycled weather and
+> that this phase would merely read the existing value — a "read-only" wiring
+> job. Measured immediately before implementation:
+>
+> ```
+> first-pair world_state keys:
+>   capability_requests, habitat, public_messages, public_objects,
+>   schema_version, tick, tile_occupancy, updated_at_utc, world_state_id
+>
+> weather present? False
+> season present?  False
+>
+> --- who imports state.py? ---
+> dual_sim.py:20
+> ```
+>
+> The `state.py` weather cycle belongs to `dual_sim.py`, the two-sided demo
+> simulation. The first-pair canonical store has **no weather at all**. The
+> `temperature: float = 0.3` elsewhere in the package is
+> `ModelBackendConfig` — LLM sampling temperature, not the world.
+>
+> **Consequence:** wiring the dial into the first pair requires *adding a
+> weather field to canonical world state*, which is a new mechanic — exactly
+> what this spec twice promised it would not do. The dial itself
+> (`fog_of_war._condition_radius`) is real and verified, but nothing in the
+> first-pair world produces a value to feed it.
+>
+> Implementing as-written would have been "transmission" that was secretly a new
+> pressure source, destroying the attribution discipline that Phase 1
+> (`dfe0589`) was split to protect.
+>
+> **Status: superseded.** §2.1 is corrected in place. The dial is now a
+> *follow-on* to a weather-source design, not a wiring task. The evidence
+> points at Phase B instead — see `docs/build_meaning_spec.md`.
+
 ---
 
 ## 0. What Phase 1 established, and what this phase is not
@@ -48,19 +88,44 @@ before and after.
 
 ## 2. The change
 
-### 2.1 Source of conditions
+### 2.1 Source of conditions — CORRECTED, and this is now a blocker
 
-`state.py:84-85` already cycles weather every 8 ticks:
+**There is no weather source in the first-pair world.** The original text here
+claimed `state.py` supplied one read-only. It does not, for this world:
 
 ```python
+# state.py — imported ONLY by dual_sim.py, the two-sided demo simulation
 weathers = ["gentle", "warm", "cool", "gentle"]
 self.weather = weathers[(self.tick // 8) % len(weathers)]
 ```
 
-**Constraint, not a new mechanic:** this phase does not change the weather
-cycle, its period, or its vocabulary. It reads the existing value and reports
-it. Changing the cycle would confound "did the dial do anything" with "did I
-change the weather".
+The first-pair canonical `world_state.json` carries no `weather`, no `season`,
+and no `temperature`. Its complete key set is: `capability_requests`,
+`habitat`, `public_messages`, `public_objects`, `schema_version`, `tick`,
+`tile_occupancy`, `updated_at_utc`, `world_state_id`.
+
+**So this phase is blocked, not implementable as written.** It is split:
+
+- **2A — design the weather source** (its own spec, not this one). What the
+  cycle is, its vocabulary, its cadence, whether it belongs in canonical world
+  state at all, and whether it is a pressure or merely scenery. This is the
+  part that was accidentally smuggled into §2.1 as if it were free.
+- **2B — connect the dial** (this document, revised). Once 2A ships a value,
+  2B is the wiring: pass it to the `cognition_safe_observation` call site so
+  `_condition_radius` consumes it.
+
+§2.2–§2.4 below remain valid as the *design* for 2B and are deliberately left
+in place so the eventual wiring follows a written decision rather than an
+improvisation. Nothing in them is implemented.
+
+### 2.1a Why this is not simply done anyway
+
+The honest alternative was to add a weather field and ship the dial in one
+commit. It was rejected because it would have made this document's central
+claim — "pure transmission, zero behavioural change" — false, while appearing
+to honour it. The Phase 1 split (`dfe0589`) exists precisely so that a
+pressure change is attributable to a pressure phase. Fusing a new pressure
+source into a phase that disclaims pressure would have destroyed that.
 
 ### 2.2 What the runtime passes
 
@@ -219,11 +284,35 @@ predicting which measurement *moves*.
 
 ## 8. Decision requested
 
-1. Approve Phase 2 as specified: connect the existing dial, change nothing else.
-2. Confirm the weather cycle and its vocabulary are read-only inputs here.
-3. Confirm the shelter mechanic stays rejected, and that "no prompt nudges"
-   holds.
-4. Confirm the audit precondition is satisfied by `b7e828a`, and that this
-   phase runs **after** it (already true).
-5. Note the thesis in §7: a null result means move to Phase B, not louder
-   weather.
+**As of the correction above, this document requests no approval.** It is
+blocked pending a weather-source design (§2.1, 2A).
+
+Retained for when 2A lands:
+
+1. Approve 2B as specified: connect the value 2A produces to the existing
+   dial, change nothing else.
+2. Confirm "no prompt nudges" holds.
+3. Note the thesis in §7: a null result means move to Phase B, not louder
+   weather. **The evidence has since pointed at Phase B directly** — see
+   `docs/build_meaning_spec.md`.
+
+## 9. Retrospective: how this got wrong
+
+Three separate claims in this session were falsified by measurement before any
+of them reached production. All three were mine, and all three shared a cause:
+**reasoning about a code path without executing it.**
+
+| claim | what measurement showed |
+|---|---|
+| "the move executor reads a stale `runtime_policy.json`" | it calls the fog-derived topology; there is exactly **one** blocked move in 942 heartbeats |
+| "a thirteen-day-old snapshot is winning over live state" | no backlog exists; the file is never consulted on the fog path |
+| "weather already exists, this is read-only wiring" | the cycle belongs to `dual_sim.py`; the first-pair world has no weather |
+
+The third is this document. The first two are recorded in
+`docs/known_map_merge_order_spec.md` §0, where the real cause turned out to be
+a one-tick ordering gap between the observation and the known-map merge.
+
+The standing rule from `epistemic_pressure_spec.md` — *measure the board
+before changing the rules* — is a rule about code exactly as much as about
+physics. Applying it to the physics and skipping it for the runtime is the same
+mistake three times over.
