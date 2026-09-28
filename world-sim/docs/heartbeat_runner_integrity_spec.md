@@ -390,3 +390,93 @@ any code moves:
 - The doubled-path artifact `world-sim/world-sim/.scratch/hb941/evidence.json`
   is left in place as the record of Defect C pending an operator decision on
   retention. It is not deleted by this phase.
+
+---
+
+## 8. Implementation record (2026-09-28)
+
+TDD cycle completed. Tests were written first and observed RED (9 failing)
+before any source change.
+
+### 8.1 What changed
+
+| file | change |
+|---|---|
+| `backend/world/canonical_heartbeat_runner.py` | Defects A, C, D |
+| `tests/test_canonical_heartbeat_runner.py` | 12 new/rewritten tests |
+| `scripts/docs_correction_workflow.ps1` | Defect E (§8.4) |
+| `docs/heartbeat_runner_integrity_spec.md` | this record |
+
+**Defect A** — `resolution_proof()` now asserts what it previously only
+printed. Five gates, all fail-closed before the loop launches:
+`KEY_SET=TRUE`, fallback present, `FALLBACK_FREE=TRUE`, resolved primary
+model equals `PRIMARY_MODEL`, resolved base URL equals `PRIMARY_BASE_URL`. The
+last two stop a silent lane hijack. `PRIMARY_BASE_URL` was added as a single
+constant consumed by both `build_clean_env()` and the assertion, so the
+configured policy and the enforced policy cannot drift apart.
+
+**Defect C** — new `_resolve_under(root, path)` resolves a relative path once,
+against the world-sim root, before it reaches a subprocess that runs with
+`cwd=root`. Absolute inputs pass through untouched, making the operation
+idempotent, which is precisely the doubled-path failure mode. The misleading
+`evidence export exited 0` message now names the resolved path it looked for.
+
+**Defect D** — the durable `status.json` now records `primary_model`,
+`fallback_model`, `fallback_free`, `provider_base_url`, and the full
+`resolution_proof` text, plus a serving summary derived from the store
+(`_serving_provenance`). The serving summary is an explicitly coarse proxy: it
+reports an error path only when an agent's persisted outcome carries an error,
+and never invents a transport count it cannot see.
+
+**Defect E (new, found while committing this spec)** —
+`docs_correction_workflow.ps1:Get-UnstagedPaths` filtered on
+`$status[0] -eq ' '`, which excludes `??` untracked entries. `CommitDocs`
+therefore compared an untracked-blind list against the full `-Path` array and
+always failed with `Dirty paths do not match exactly`, making it structurally
+impossible to commit a newly created document. The workflow's own 24-assertion
+self-test passed throughout, because nothing in it committed an untracked
+file. Fixed, and self-test assertion **T25** now covers exactly that case
+(25 assertions, all passing).
+
+### 8.2 The guard's first honest effect: the shipped policy is non-compliant
+
+With Defect A enforced, the runner now **refuses to launch a heartbeat under
+the shipped configuration**:
+
+```
+RESOLUTION_FALLBACK_FREE=FALSE (rejected: fallback lane is not a :free model)
+```
+
+`FALLBACK_MODEL` is `z-ai/glm-5.3-flash`, which is not a `:free` model. This
+is the guard doing its job: Defect B is no longer a documentation discrepancy
+but a **blocking** condition. Heartbeat 942 cannot run until the fallback is
+changed to a genuinely free model, or the policy is explicitly amended.
+
+Flow tests now opt into a compliant policy via `_use_compliant_policy()`,
+which is deliberate — the default being non-compliant is a finding, and a
+fixture must not paper over it.
+
+### 8.3 A pre-existing test encoded the defect
+
+`TestResolutionProof.test_accepts_explicit_url_primary_and_nvidia_fallback`
+asserted that a non-`:free` fallback is **accepted**. It passed only because
+the guard did not work. It has been rewritten as
+`test_shipped_policy_fails_closed_until_fallback_is_free`, which pins the
+corrected behaviour and names what changed. No test was weakened to make this
+pass.
+
+### 8.4 Verification
+
+- `tests/test_canonical_heartbeat_runner.py`: 29 passed (was 17)
+- `test_canonical_heartbeat_runner.py` + `test_world_pressure.py` +
+  `test_question_creation_authority.py`: 99 passed, 1 skipped
+- `docs_correction_workflow.ps1 -SelfTest`: 25 assertions, all passed
+- No test touches `world-sim/data`, connects to a provider, or runs a daemon
+- `git diff --check` clean, LF-only
+
+### 8.5 Still open
+
+Defect B's direction is unchanged and still requires an operator decision: the
+fallback must become a genuinely `:free` model, or the free-only requirement
+must be explicitly amended in both the docstring and the runbook. Until then
+the runner correctly refuses to run.

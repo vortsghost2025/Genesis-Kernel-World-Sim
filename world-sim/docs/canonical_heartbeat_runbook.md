@@ -35,30 +35,54 @@ Verify before launch, read-only:
   must contain `NVIDIA_NIM_API_KEY` and `OPENROUTER_API_KEY`.
 - It builds a clean child environment: every ambient provider variable
   (`GENESIS_FIRST_PAIR_*`, `NVIDIA_API_KEY`, `OPENROUTER_API_KEY`,
-  `OLLAMA_HOST`) is stripped, then the lane is set explicitly:
-  `NVIDIA_API_KEY=<vault NVIDIA_NIM_API_KEY>`,
-  `OPENROUTER_API_KEY=<vault value>`,
-  `GENESIS_FIRST_PAIR_MODEL=z-ai/glm-5.3-flash`,
-  `GENESIS_FIRST_PAIR_FALLBACK_MODEL=z-ai/glm-5.2:free`.
+  `OLLAMA_HOST`) is stripped, then the lane is set explicitly from the
+  runner's policy constants (`canonical_heartbeat_runner.py` is the single
+  source of truth):
+  `GENESIS_FIRST_PAIR_BASE_URL=<PRIMARY_BASE_URL>`,
+  `GENESIS_FIRST_PAIR_API_KEY=<vault OPENROUTER_API_KEY>`,
+  `GENESIS_FIRST_PAIR_MODEL=<PRIMARY_MODEL>`,
+  `GENESIS_FIRST_PAIR_FALLBACK_MODEL=<FALLBACK_MODEL>`.
+- **Current policy (as implemented, 2026-09-28):** primary
+  `nvidia/nemotron-3-super-120b-a12b:free`, fallback `z-ai/glm-5.2:free`,
+  endpoint `https://openrouter.ai/api/v1`. **Both lanes are `:free`.** A
+  provider failure therefore degrades availability, never cost.
 - Credentials are never printed, logged, or persisted. Missing credentials
   fail closed, naming the variable only.
+
+> **Correction history.** This section previously documented an NVIDIA
+> primary (`z-ai/glm-5.3-flash`) with an OpenRouter free fallback, while the
+> code had already drifted to a different pair in which the *fallback* was
+> the non-free lane. The code was made the source of truth and this section
+> corrected to match. See `docs/heartbeat_runner_integrity_spec.md` Defect B.
 
 ## 4. Provider-resolution proof
 
 Before any model call, the runner executes the repo resolver in the clean
-child environment and requires, verbatim:
+child environment and requires all five of the following. Anything else fails
+closed **before the heartbeat launches**:
+
+1. `RESOLUTION_KEY_SET=TRUE`
+2. `RESOLUTION_FALLBACK` present and not `NONE`
+3. `RESOLUTION_FALLBACK_FREE=TRUE` — the free-only invariant
+4. `RESOLUTION_MODEL` equals `PRIMARY_MODEL` — no silent lane hijack
+5. `RESOLUTION_BASE_URL` equals `PRIMARY_BASE_URL` — no silent endpoint swap
+
+For the current policy a conforming proof reads:
 
 ```
-RESOLUTION_PROVIDER=nvidia
-RESOLUTION_MODEL=z-ai/glm-5.3-flash
+RESOLUTION_PROVIDER=explicit_url
+RESOLUTION_BASE_URL=https://openrouter.ai/api/v1
+RESOLUTION_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 RESOLUTION_KEY_SET=TRUE
-RESOLUTION_FALLBACK=openrouter/z-ai/glm-5.2:free
+RESOLUTION_FALLBACK=nvidia/z-ai/glm-5.2:free
 RESOLUTION_FALLBACK_FREE=TRUE
 ```
 
-Anything else — wrong primary, missing fallback, or a non-`:free` fallback
-model — fails closed before the heartbeat launches. The committed free-only
-guard makes a paid OpenRouter fallback structurally impossible at resolution.
+Assertions 3–5 are enforced, not merely reported. Historically the guard
+computed `RESOLUTION_FALLBACK_FREE` and never asserted on it, so a paid
+fallback passed through while this document claimed it was structurally
+impossible — measured on heartbeat 941. See `docs/heartbeat_runner_integrity_spec.md`
+Defect A.
 
 ## 5. Detached launch
 

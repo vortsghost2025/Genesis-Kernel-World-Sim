@@ -98,6 +98,16 @@ def _write_test_scripts(tmp_path: Path) -> tuple[Path, Path, Path]:
     return loop, exporter, vault
 
 
+def _use_paid_fallback(monkeypatch):
+    """Force a non-free fallback so the guard can be observed rejecting it.
+
+    The shipped policy is now compliant (both lanes ':free'), so the guard's
+    rejection path has to be provoked deliberately rather than inherited from
+    a broken default.
+    """
+    monkeypatch.setattr(chr_mod, "FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+
+
 def _runner_args(loop, exporter, vault, store, tmp_path):
     args = [
         "--expect-heartbeat", "10",
@@ -123,10 +133,13 @@ class TestBuildCleanEnv:
         env = build_clean_env(vault)
         assert env["NVIDIA_API_KEY"] == "fake-nv-abc123"
         assert env["OPENROUTER_API_KEY"] == "fake-or-xyz789"
-        assert env["GENESIS_FIRST_PAIR_BASE_URL"] == "https://openrouter.ai/api/v1"
+        assert env["GENESIS_FIRST_PAIR_BASE_URL"] == chr_mod.PRIMARY_BASE_URL
         assert env["GENESIS_FIRST_PAIR_API_KEY"] == "fake-or-xyz789"
-        assert env["GENESIS_FIRST_PAIR_MODEL"] == "nvidia/nemotron-3-super-120b-a12b:free"
-        assert env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] == "z-ai/glm-5.3-flash"
+        assert env["GENESIS_FIRST_PAIR_MODEL"] == chr_mod.PRIMARY_MODEL
+        assert env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] == chr_mod.FALLBACK_MODEL
+        # Defect B: the fallback the environment actually carries must be a
+        # free model, or the enforced guard will refuse to launch.
+        assert env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"].endswith(":free")
 
     def test_missing_credential_fails_naming_the_variable(self, tmp_path):
         vault = tmp_path / "vault.env"
@@ -139,15 +152,44 @@ class TestBuildCleanEnv:
 
 
 class TestResolutionProof:
-    def test_accepts_explicit_url_primary_and_nvidia_fallback(self, tmp_path):
+    def test_shipped_policy_is_free_only_and_conforms(self, tmp_path):
+        """The shipped policy must satisfy the guard it enforces.
+
+        Regression guard for Defect B: the fallback was a non-free model, so
+        once Defect A was actually enforced the runner refused to launch at
+        all. The policy is now compliant and the proof passes unaltered.
+        """
+        assert chr_mod.FALLBACK_MODEL.endswith(":free"), (
+            f"shipped fallback is not free: {chr_mod.FALLBACK_MODEL}"
+        )
+        assert chr_mod.PRIMARY_MODEL.endswith(":free"), (
+            f"shipped primary is not free: {chr_mod.PRIMARY_MODEL}"
+        )
         vault = tmp_path / "vault.env"
         vault.write_text(FAKE_VAULT, newline="\n")
         env = build_clean_env(vault)
         ok, text = resolution_proof(env, WORLD_SIM)
         assert ok, text
         assert "RESOLUTION_KEY_SET=TRUE" in text
-        assert "RESOLUTION_FALLBACK=" in text
+        assert "RESOLUTION_FALLBACK_FREE=TRUE" in text
+        assert f"RESOLUTION_MODEL={chr_mod.PRIMARY_MODEL}" in text
+        assert f"RESOLUTION_BASE_URL={chr_mod.PRIMARY_BASE_URL}" in text
         assert "RESOLUTION_FALLBACK=NONE" not in text
+
+    def test_paid_fallback_fails_closed(self, tmp_path, monkeypatch):
+        """Defect A, pinned: a non-':free' fallback must be refused.
+
+        This assertion previously passed only because the guard computed
+        RESOLUTION_FALLBACK_FREE and never read it.
+        """
+        _use_paid_fallback(monkeypatch)
+        vault = tmp_path / "vault.env"
+        vault.write_text(FAKE_VAULT, newline="\n")
+        env = build_clean_env(vault)
+        ok, text = resolution_proof(env, WORLD_SIM)
+        assert "RESOLUTION_FALLBACK_FREE=FALSE" in text
+        assert not ok, f"paid fallback was accepted: {text}"
+        assert ":free" in text
 
     def test_rejects_missing_fallback(self, tmp_path):
         vault = tmp_path / "vault.env"
@@ -352,3 +394,182 @@ class TestLauncher:
         status = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
         assert status["pid"] == 777
         assert status["breakaway"] is False
+
+
+# ---------------------------------------------------------------------------
+# Defect A - the free-only guard computed its verdict and never read it.
+# Measured on heartbeat 941: RESOLUTION_FALLBACK_FREE=FALSE and the run
+# proceeded. The docstring and runbook both claim this fails closed.
+# ---------------------------------------------------------------------------
+
+
+class TestResolutionProofEnforcesPolicy:
+    def test_accepts_free_fallback(self, tmp_path, monkeypatch):
+        """With a genuinely free fallback configured, the proof passes."""
+        monkeypatch.setattr(chr_mod, "FALLBACK_MODEL", "z-ai/glm-5.2:free")
+        vault = tmp_path / "vault.env"
+        vault.write_text(FAKE_VAULT, newline="\n")
+        env = build_clean_env(vault)
+        ok, text = resolution_proof(env, WORLD_SIM)
+        assert ok, text
+        assert "RESOLUTION_FALLBACK_FREE=TRUE" in text
+
+    def test_rejects_primary_model_hijack(self, tmp_path, monkeypatch):
+        """A primary that is not the configured one is a silent lane hijack."""
+        monkeypatch.setattr(chr_mod, "FALLBACK_MODEL", "z-ai/glm-5.2:free")
+        vault = tmp_path / "vault.env"
+        vault.write_text(FAKE_VAULT, newline="\n")
+        env = build_clean_env(vault)
+        env["GENESIS_FIRST_PAIR_MODEL"] = "attacker/injected:free"
+        ok, text = resolution_proof(env, WORLD_SIM)
+        assert not ok, f"hijacked primary accepted: {text}"
+
+    def test_rejects_base_url_hijack(self, tmp_path, monkeypatch):
+        """A base URL other than the configured one must not be served from."""
+        monkeypatch.setattr(chr_mod, "FALLBACK_MODEL", "z-ai/glm-5.2:free")
+        vault = tmp_path / "vault.env"
+        vault.write_text(FAKE_VAULT, newline="\n")
+        env = build_clean_env(vault)
+        env["GENESIS_FIRST_PAIR_BASE_URL"] = "https://attacker.invalid/v1"
+        ok, text = resolution_proof(env, WORLD_SIM)
+        assert not ok, f"hijacked base url accepted: {text}"
+
+    def test_free_only_assertion_cannot_be_removed(self):
+        """Import-guard: the free-only check must remain in the source."""
+        source = (WORLD_SIM / "backend" / "world"
+                  / "canonical_heartbeat_runner.py").read_text(encoding="utf-8")
+        assert "RESOLUTION_FALLBACK_FREE" in source
+        assert ":free" in source
+
+
+# ---------------------------------------------------------------------------
+# Defect C - relative evidence path resolved against the subprocess cwd,
+# producing a doubled directory. NFM-021 recurring (see Paper F).
+# ---------------------------------------------------------------------------
+
+
+class TestEvidencePathResolution:
+    def test_relative_path_resolves_under_root(self, tmp_path):
+        root = tmp_path / "ws"
+        root.mkdir()
+        resolved = chr_mod._resolve_under(root, "world-sim/.scratch/hb/evidence.json")
+        assert resolved == root / "world-sim" / ".scratch" / "hb" / "evidence.json"
+
+    def test_absolute_path_is_unchanged(self, tmp_path):
+        target = tmp_path / "elsewhere" / "evidence.json"
+        resolved = chr_mod._resolve_under(tmp_path, str(target))
+        assert resolved == target
+
+    def test_resolution_is_idempotent(self, tmp_path):
+        """The doubled-path failure: resolving twice must not prepend again."""
+        root = tmp_path / "ws"
+        root.mkdir()
+        once = chr_mod._resolve_under(root, "world-sim/.scratch/hb/evidence.json")
+        twice = chr_mod._resolve_under(root, str(once))
+        assert twice == once
+        assert str(twice).count("ws") == 1
+
+    def test_runner_resolves_evidence_before_launching_loop(
+        self, tmp_path, monkeypatch
+    ):
+        """A relative --evidence must reach the loop as an absolute path."""
+        _write_store(tmp_path / "store", 9, 9)
+        loop = tmp_path / "argv_loop.py"
+        loop.write_text(
+            "import json, os, sys\n"
+            "store = os.environ['RUNNER_TEST_STORE']\n"
+            "hb = json.load(open(os.path.join(store, 'heartbeat.json')))\n"
+            "hb['data'].append({'heartbeat_number': len(hb['data']) + 1})\n"
+            "json.dump(hb, open(os.path.join(store, 'heartbeat.json'), 'w'))\n"
+            "ws = json.load(open(os.path.join(store, 'world_state.json')))\n"
+            "ws['data']['tick'] += 1\n"
+            "json.dump(ws, open(os.path.join(store, 'world_state.json'), 'w'))\n"
+            "json.dump(sys.argv[1:], open(os.path.join(store, 'argv.json'), 'w'))\n",
+            newline="\n",
+        )
+        exporter = tmp_path / "fake_exporter.py"
+        exporter.write_text(
+            "import argparse, json, os\n"
+            "p = argparse.ArgumentParser()\n"
+            "p.add_argument('--out', required=True)\n"
+            "out = p.parse_args().out\n"
+            "os.makedirs(os.path.dirname(out), exist_ok=True)\n"
+            "json.dump({'exporter': 'stub'}, open(out, 'w'))\n",
+            newline="\n",
+        )
+        vault = tmp_path / "vault.env"
+        vault.write_text(FAKE_VAULT, newline="\n")
+
+        monkeypatch.setenv("RUNNER_TEST_STORE", str(tmp_path / "store"))
+        monkeypatch.setattr(chr_mod, "resolution_proof",
+                            lambda env, root: (True, "STUB RESOLUTION_OK"))
+        monkeypatch.chdir(tmp_path)
+
+        # world-sim-root is a temp dir, NOT the real repository: a relative
+        # --evidence resolves under it, so using the real root would make
+        # this test write into the working tree on every run.
+        ws_root = tmp_path / "wsroot"
+        ws_root.mkdir()
+
+        rc = runner_main([
+            "--expect-heartbeat", "10",
+            "--store-root", str(tmp_path / "store"),
+            "--evidence", "rel/evidence.json",
+            "--status", str(tmp_path / "status.json"),
+            "--vault", str(vault),
+            "--world-sim-root", str(ws_root),
+            "--loop-script", str(loop),
+            "--export-script", str(exporter),
+        ])
+        assert rc == 0
+        argv = json.loads((tmp_path / "store" / "argv.json").read_text())
+        evidence_arg = argv[argv.index("--evidence") + 1]
+        assert chr_mod.os.path.isabs(evidence_arg), (
+            f"loop received a relative evidence path: {evidence_arg}"
+        )
+        # The evidence landed exactly once, under the resolved root.
+        assert (ws_root / "rel" / "evidence.json").is_file()
+        assert not (ws_root / "rel" / "rel").exists()
+        # And nothing was written into the real repository.
+        assert not (WORLD_SIM / "rel").exists()
+
+
+# ---------------------------------------------------------------------------
+# Defect D - provider provenance was printed to a scratch log and never
+# persisted to a durable artifact.
+# ---------------------------------------------------------------------------
+
+
+class TestProviderProvenancePersisted:
+    def test_status_records_resolved_provider_policy(
+        self, tmp_path, monkeypatch
+    ):
+        _write_store(tmp_path / "store", 9, 9)
+        loop, exporter, vault = _write_test_scripts(tmp_path)
+        monkeypatch.setenv("RUNNER_TEST_STORE", str(tmp_path / "store"))
+        monkeypatch.setattr(chr_mod, "resolution_proof",
+                            lambda env, root: (True, "STUB RESOLUTION_OK"))
+        rc = runner_main(_runner_args(loop, exporter, vault,
+                                      tmp_path / "store", tmp_path))
+        assert rc == 0
+        status = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
+        assert status["primary_model"] == chr_mod.PRIMARY_MODEL
+        assert status["fallback_model"] == chr_mod.FALLBACK_MODEL
+        assert status["fallback_free"] is False
+        assert status["provider_base_url"] == chr_mod.PRIMARY_BASE_URL
+
+    def test_status_records_serving_attempts_from_error_memories(
+        self, tmp_path, monkeypatch
+    ):
+        """No error memories means a single transport attempt (runbook S9)."""
+        _write_store(tmp_path / "store", 9, 9)
+        loop, exporter, vault = _write_test_scripts(tmp_path)
+        monkeypatch.setenv("RUNNER_TEST_STORE", str(tmp_path / "store"))
+        monkeypatch.setattr(chr_mod, "resolution_proof",
+                            lambda env, root: (True, "STUB RESOLUTION_OK"))
+        rc = runner_main(_runner_args(loop, exporter, vault,
+                                      tmp_path / "store", tmp_path))
+        assert rc == 0
+        status = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
+        assert status["serving_provider_type"] == "single_attempt_no_error_memories"
+        assert "credential" not in json.dumps(status).lower()

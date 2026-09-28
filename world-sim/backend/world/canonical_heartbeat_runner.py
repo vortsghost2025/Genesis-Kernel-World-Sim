@@ -10,9 +10,14 @@ Boundaries:
 - One heartbeat per invocation; no scheduler, no recurring mode, no
   automatic next heartbeat (Gate-7 stays closed — this is a bounded
   one-shot operator-launched process, not a daemon).
-- Provider policy is fixed: NVIDIA primary (z-ai/glm-5.3-flash) plus
-  OpenRouter free fallback (z-ai/glm-5.2:free ONLY; the committed
-  free-only guard rejects any paid fallback at resolution).
+- Provider policy (see the constants below for the single source of truth):
+  primary and fallback are BOTH ':free' models served through the
+  OpenRouter-compatible endpoint. The free-only guard is ENFORCED at
+  resolution: a non-':free' fallback, a primary that is not the configured
+  model, or a base URL that is not the configured endpoint all fail closed
+  before the loop launches. This sentence previously described a guard that
+  only printed its verdict; see docs/heartbeat_runner_integrity_spec.md
+  Defect A.
 - Credentials are never printed, logged, or persisted by this module.
 - CRITICAL NO-RERUN RULE: if the authoritative store already shows the
   authorized heartbeat persisted, the heartbeat is NEVER re-executed;
@@ -41,10 +46,21 @@ CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 CREATE_NO_WINDOW = 0x08000000
 
+# Provider policy. These four constants are the single source of truth:
+# build_clean_env() writes them and resolution_proof() asserts the resolver
+# honored them, so the configured policy and the enforced policy cannot
+# drift apart. The fallback MUST end in ':free' - the guard rejects anything
+# else. Both lanes are free, so a provider failure degrades availability
+# rather than cost.
 PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-FALLBACK_MODEL = "z-ai/glm-5.3-flash"
+FALLBACK_MODEL = "z-ai/glm-5.2:free"
 ADAM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 EVE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+# Single source of truth for the lane endpoint. build_clean_env() writes this
+# and resolution_proof() asserts the resolver honored it, so the configured
+# policy and the enforced policy cannot drift apart.
+PRIMARY_BASE_URL = "https://openrouter.ai/api/v1"
 
 _STRIPPED_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",
@@ -77,6 +93,30 @@ def _utc_now() -> str:
 
 def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _resolve_under(root: Path, path: str) -> Path:
+    """Resolve a possibly-relative path against a known root.
+
+    The loop and exporter subprocesses run with ``cwd=root``, so a relative
+    path handed to them is resolved a SECOND time against that root. Passing
+    the relative value through produced a doubled directory
+    (``world-sim/world-sim/.scratch/...``) and a false failure report. Resolve
+    once here; absolute inputs pass through untouched, which makes the
+    operation idempotent.
+    """
+    p = Path(path)
+    return p if p.is_absolute() else root / p
+
+
+def _parse_proof(text: str) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` lines out of a resolution proof."""
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            fields[key.strip()] = value.strip()
+    return fields
 
 
 def _write_status(status_path: Path, **fields) -> None:
@@ -125,7 +165,7 @@ def build_clean_env(vault_path: Path) -> dict:
         env.pop(key, None)
     env["NVIDIA_API_KEY"] = nv
     env["OPENROUTER_API_KEY"] = ork
-    env["GENESIS_FIRST_PAIR_BASE_URL"] = "https://openrouter.ai/api/v1"
+    env["GENESIS_FIRST_PAIR_BASE_URL"] = PRIMARY_BASE_URL
     env["GENESIS_FIRST_PAIR_API_KEY"] = ork
     env["GENESIS_FIRST_PAIR_MODEL"] = PRIMARY_MODEL
     env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] = FALLBACK_MODEL
@@ -167,10 +207,35 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     text = proc.stdout.strip()
     if proc.returncode != 0:
         return False, text or f"resolution proof exited {proc.returncode}"
-    if "RESOLUTION_KEY_SET=TRUE" not in text:
-        return False, text
-    if "RESOLUTION_FALLBACK=" not in text or "RESOLUTION_FALLBACK=NONE" in text:
+    fields = _parse_proof(text)
+    if fields.get("RESOLUTION_KEY_SET") != "TRUE":
+        return False, text + " (no primary credential resolved)"
+    if fields.get("RESOLUTION_FALLBACK", "NONE") == "NONE":
         return False, text + " (no fallback lane)"
+
+    # --- The free-only guard, actually enforced. -------------------------
+    # Historically this function COMPUTED RESOLUTION_FALLBACK_FREE and never
+    # asserted on it, so a paid fallback passed through while the docstring
+    # and runbook both claimed the run fails closed. Measured on heartbeat
+    # 941: RESOLUTION_FALLBACK_FREE=FALSE and the heartbeat launched anyway.
+    if fields.get("RESOLUTION_FALLBACK_FREE") != "TRUE":
+        return False, text + " (rejected: fallback lane is not a :free model)"
+
+    # The remaining assertions stop a silent lane hijack: the resolver must
+    # have honored the configured primary model and endpoint, not merely
+    # returned *some* primary.
+    resolved_model = fields.get("RESOLUTION_MODEL", "")
+    if resolved_model != PRIMARY_MODEL:
+        return False, (
+            text + f" (rejected: primary model {resolved_model!r} is not the "
+            f"configured {PRIMARY_MODEL!r})"
+        )
+    resolved_url = fields.get("RESOLUTION_BASE_URL", "")
+    if resolved_url != PRIMARY_BASE_URL:
+        return False, (
+            text + f" (rejected: base url {resolved_url!r} is not the "
+            f"configured {PRIMARY_BASE_URL!r})"
+        )
     return True, text
 
 
@@ -223,8 +288,41 @@ def export_state_evidence(
     except Exception as exc:
         return False, f"evidence export process failed: {type(exc).__name__}"
     if proc.returncode != 0 or not evidence_path.is_file():
-        return False, f"evidence export exited {proc.returncode}"
+        # Report the RESOLVED path. A bare returncode here is actively
+        # misleading: heartbeat 941 exported successfully and this reported
+        # "exited 0" as a failure, because the file had been written to a
+        # doubled path the runner was not looking at.
+        return False, (
+            f"evidence export exited {proc.returncode}; expected file at "
+            f"{evidence_path} (not found)"
+        )
     return True, "evidence exported"
+
+
+def _serving_provenance(store_root: Path) -> dict:
+    """Summarise what actually served the heartbeat, from the store alone.
+
+    The runbook's rule is "absence of error memories means single-attempt
+    serves". This is a coarse proxy: it reads the persisted heartbeat record
+    and reports an error path only when an agent's action outcome carries an
+    error. It never invents a transport count it cannot see.
+    """
+    try:
+        records = _read_json(store_root / "heartbeat.json").get("data", [])
+        last = records[-1] if records else {}
+    except Exception:
+        return {"serving_provider_type": "unknown"}
+    outcomes = last.get("action_outcomes") or {}
+    errored = sorted(
+        ref for ref, outcome in outcomes.items()
+        if isinstance(outcome, dict) and outcome.get("error")
+    )
+    if errored:
+        return {
+            "serving_provider_type": "error_path_observed",
+            "agents_with_errors": errored,
+        }
+    return {"serving_provider_type": "single_attempt_no_error_memories"}
 
 
 def label_recovered_evidence(evidence_path: Path) -> None:
@@ -269,8 +367,8 @@ def runner_main(argv=None) -> int:
         store_root = world_sim_root / ".runtime" / "first-pair"
     else:
         store_root = world_sim_root / ".runtime" / f"first-pair-{args.pair_id}"
-    evidence = Path(args.evidence)
-    status_path = Path(args.status)
+    evidence = _resolve_under(world_sim_root, args.evidence)
+    status_path = _resolve_under(world_sim_root, args.status)
     vault = Path(args.vault)
     loop_script = Path(args.loop_script)
     export_script = Path(args.export_script)
@@ -302,6 +400,19 @@ def runner_main(argv=None) -> int:
             detail="provider resolution proof rejected (no paid fallback permitted)",
         )
         return 1
+
+    # Defect D: the runbook requires provider provenance in the durable run
+    # record. It used to exist only in this process's stdout. Persist both the
+    # configured policy and what the resolver actually reported.
+    proof_fields = _parse_proof(text)
+    _write_status(
+        status_path,
+        primary_model=proof_fields.get("RESOLUTION_MODEL", PRIMARY_MODEL),
+        fallback_model=proof_fields.get("RESOLUTION_FALLBACK", FALLBACK_MODEL),
+        fallback_free=proof_fields.get("RESOLUTION_FALLBACK_FREE") == "TRUE",
+        provider_base_url=proof_fields.get("RESOLUTION_BASE_URL", PRIMARY_BASE_URL),
+        resolution_proof=text,
+    )
 
     if already_persisted(store_root, expect):
         _write_status(
@@ -343,17 +454,23 @@ def runner_main(argv=None) -> int:
             print(f"[runner] FAILED: loop did not persist heartbeat {expect}")
             return 1
 
+    serving = _serving_provenance(store_root)
+
     if evidence.is_file():
         _write_status(
             status_path, status="evidence-exported",
             evidence_class="original_execution_evidence",
+            **serving,
         )
         print("[runner] original execution evidence present")
         return 0
 
     ok, detail = export_state_evidence(export_script, world_sim_root, evidence)
     if not ok:
-        _write_status(status_path, status="failed", detail=f"recovery evidence: {detail}")
+        _write_status(
+            status_path, status="failed",
+            detail=f"recovery evidence: {detail}", **serving,
+        )
         print(f"[runner] FAILED: recovery evidence export: {detail}")
         return 1
     label_recovered_evidence(evidence)
@@ -361,6 +478,7 @@ def runner_main(argv=None) -> int:
         status_path, status="evidence-exported",
         evidence_class="recovered_state_evidence",
         detail=f"recovery evidence exported; heartbeat {expect} never re-executed",
+        **serving,
     )
     print("[runner] recovered state evidence exported (labeled)")
     return 0

@@ -214,7 +214,13 @@ function Get-UnstagedPaths {
     foreach ($line in $summary) {
         $status = $line.Substring(0, 2)
         if ($status -notmatch '^[ MADRCU?][ MADRCU?]$') { continue }
-        if ($status[0] -eq ' ' -and $status[1] -ne ' ') {
+        # Untracked entries are '??' - status[0] is '?', not ' '. Excluding
+        # them made CommitDocs structurally unable to commit a NEW file: the
+        # exact-match check compared an untracked-blind list against a full
+        # -Path array and always reported "Dirty paths do not match exactly".
+        $isUntracked = $status.StartsWith('??')
+        $isWorktreeModified = ($status[0] -eq ' ' -and $status[1] -ne ' ')
+        if ($isUntracked -or $isWorktreeModified) {
             $path = $line.Substring(3).Trim()
             if ($path -and $path -notlike '-> *') {
                 $paths.Add($path)
@@ -1565,6 +1571,39 @@ function Run-SelfTest {
         $staged08 = @(Get-StagedPaths -RepoRoot $repo08)
         Pop-Location
         Assert-Condition 'T08' { $t08Result.ExitCode -eq 0 -and $staged08.Count -eq 1 -and $staged08[0] -eq 'world-sim/docs/test.md' } "COMMIT decline leaves only exact staged paths"
+
+        # T25: CommitDocs can commit a BRAND-NEW untracked file.
+        # Regression guard: Get-UnstagedPaths filtered on status[0] -eq ' ',
+        # which excludes '??' entries entirely. CommitDocs then compared an
+        # untracked-blind list against the full -Path array and always failed
+        # with "Dirty paths do not match exactly" - making it structurally
+        # impossible to commit any newly created document.
+        $repo25 = Join-Path $tempDir 'repo25'
+        New-TempGitRepo $repo25
+        $doc25 = Join-Path $repo25 'world-sim/docs/test.md'
+        $null = New-Item -ItemType Directory -Path (Split-Path $doc25) -Force
+        [System.IO.File]::WriteAllText($doc25, "# Test`n", [System.Text.UTF8Encoding]::new($false))
+        Push-Location $repo25
+        git add . 2>&1 | Out-Null
+        git commit -m 'init' 2>&1 | Out-Null
+        $sha25 = (& git rev-parse HEAD) | Select-Object -First 1
+        Push-TempRepoToOrigin $repo25
+        # create a NEW file that git has never seen -> porcelain reports '??'
+        $new25 = Join-Path $repo25 'world-sim/docs/new_spec.md'
+        [System.IO.File]::WriteAllText($new25, "# New Spec`n", [System.Text.UTF8Encoding]::new($false))
+        Pop-Location
+        $queue25 = New-Object System.Collections.Generic.Queue[string]
+        $null = $queue25.Enqueue('CONTENT-REVIEWED')
+        $null = $queue25.Enqueue('STAGE')
+        $null = $queue25.Enqueue('COMMIT')
+        $provider25 = Get-QueueProvider -Queue $queue25
+        Push-Location $repo25
+        $t25Result = Invoke-Dispatcher -Action 'CommitDocs' -Path 'world-sim/docs/new_spec.md' -ExpectedSha $sha25 -CommitMessage 'docs: add new spec' -PushMode Manual -Branch master -Remote origin -ConfirmProvider $provider25
+        Pop-Location
+        Push-Location $repo25
+        $t25Committed = (& git log --oneline -1) -join ' '
+        Pop-Location
+        Assert-Condition 'T25' { $t25Result.Checkpoint -eq 'COMMIT_A_CREATED_PUSH_PENDING' -and $t25Committed -match 'add new spec' } "CommitDocs commits a new untracked file"
 
         # T09: Commit A is created using exact-path staging
         $repo09 = Join-Path $tempDir 'repo09'
