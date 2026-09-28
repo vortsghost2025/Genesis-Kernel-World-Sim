@@ -61,6 +61,49 @@ def _prompt(agent_id: str, objects: dict) -> str:
     return cm.build_system_prompt(_ctx(agent_id, objects))
 
 
+class TestCanonicalAgentIdForm:
+    """The real store uses the hashed canonical id, not the short ref.
+
+    Found by checking against live data. An earlier draft of this file used
+    `creator_agent_id="east_adam"` matched against `agent_id="east_adam"` -
+    self-consistent, all green, and structurally incapable of catching a
+    mismatch with the real store, where both sides are
+    `genesis-agent-<64 hex>` and neither side ever equals the short ref.
+
+    A test that cannot fail on the real data is not evidence.
+    """
+
+    ADAM = ("genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d"
+            "8508ab3a059e73f34e")
+    EVE = ("genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832d"
+           "c1ef4079bf593f211a")
+
+    def test_canonical_ids_do_not_equal_the_short_refs(self):
+        """Guard the premise: the two forms are genuinely different strings."""
+        assert self.ADAM != "east_adam"
+        assert self.ADAM.startswith("genesis-agent-")
+
+    def test_anchors_resolve_under_the_canonical_id(self):
+        objects = {
+            "a1": _obj("a1", self.ADAM, "t1", "A finding in canonical form."),
+            "e1": _obj("e1", self.EVE, "t2", "Eve's canonical finding."),
+        }
+        adam = _prompt(self.ADAM, objects)
+        assert "A finding in canonical form." in _anchor_block(adam)
+        assert "Eve's canonical finding." not in _anchor_block(adam)
+
+        eve = _prompt(self.EVE, objects)
+        assert "Eve's canonical finding." in _anchor_block(eve)
+        assert "A finding in canonical form." not in _anchor_block(eve)
+
+    def test_a_short_ref_as_creator_does_not_anchor(self):
+        """If the store ever wrote the short ref, this must fail loudly rather
+        than silently produce an empty anchor section."""
+        objects = {"a1": _obj("a1", "east_adam", "t1", "short-ref creator.")}
+        adam = _prompt(self.ADAM, objects)
+        assert "short-ref creator." not in _anchor_block(adam)
+
+
 def _anchor_block(prompt: str) -> str:
     """The anchors section only - bounded at the next section header.
 

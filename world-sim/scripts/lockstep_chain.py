@@ -14,6 +14,11 @@ Resilience model (mirrors the west catch-up chain):
 
 Usage:
     python world-sim/scripts/lockstep_chain.py 453 500
+    python world-sim/scripts/lockstep_chain.py 944 1043 east
+
+The optional third argument restricts the run to a pair subset, so a
+single-pair census can run on its own clock without the merged-clock hard
+stop that a lagging comparison store would otherwise cause.
 """
 from __future__ import annotations
 
@@ -35,7 +40,12 @@ SNAPSHOT_OUT = EVIDENCE_DIR / "viewer_data.js"
 # chain passes this explicitly so every heartbeat uses sim-owned keys.
 VAULT = WORLD_SIM / ".env"
 
-PAIRS = ("east", "west")
+PAIRS_ALL = ("east", "west")
+# Overridable so a single-pair arc can run on its own clock. The east pair is
+# frequently ahead of west (west is a deliberately dormant comparison store),
+# and a merged clock hard-stops on that mismatch - which is correct for a
+# lockstep run and useless for a census that only measures one pair.
+PAIRS = PAIRS_ALL
 STORES = {
     "east": WORLD_SIM / ".runtime" / "first-pair",
     "west": WORLD_SIM / ".runtime" / "first-pair-west",
@@ -43,7 +53,16 @@ STORES = {
 
 MAX_RETRIES = 3
 RETRY_DELAY_S = 45
+# Per-heartbeat budget for the detached runner. Generous - a free-tier model
+# can be slow - but finite, so a dead runner cannot spin the chain forever.
+STATUS_TIMEOUT_S = 600
 SNAPSHOT_EVERY = 10
+# The snapshot push is an EXTERNAL network write: it exports the slim world
+# state and scp/ssh's it onto a public viewer. It is not a local read or a
+# sim write - it publishes. It is non-fatal by design and unrelated to any
+# census row, so a single-pair measurement arc should run with it off rather
+# than quietly pushing state to a public URL 10 times.
+SNAPSHOTS_ENABLED = True
 # IP not hostname: the hostname is not yet in known_hosts and subprocess ssh
 # cannot answer the interactive host-key prompt. Equivalent target.
 PUBLIC_VPS = os.environ.get("GENESIS_PUBLIC_VPS", "root@187.77.3.56")
@@ -90,9 +109,19 @@ def attempt_heartbeat(pair: str, hb: int) -> bool:
     return True
 
 
-def wait_for_status(pair: str, hb: int) -> bool:
-    """Block until the detached runner reports exported or failed."""
+def wait_for_status(pair: str, hb: int, timeout_s: int = STATUS_TIMEOUT_S,
+                    poll_s: int = 5) -> bool:
+    """Block until the detached runner reports exported or failed.
+
+    Fails closed on timeout. The original version polled forever, so a runner
+    that died before writing a terminal status left the chain spinning
+    indefinitely - it could not tell "still working" from "dead". That is the
+    worst possible behaviour for an unattended run: it looks alive, reports
+    nothing, and never stops. A timeout turns that into a retryable failure
+    and, eventually, a hard stop.
+    """
     status = status_path(pair, hb)
+    deadline = time.monotonic() + timeout_s
     while True:
         if status.is_file():
             try:
@@ -101,11 +130,22 @@ def wait_for_status(pair: str, hb: int) -> bool:
                 if st == "evidence-exported":
                     return True
                 if st == "failed":
-                    print(f"HB{hb} {pair}: runner FAILED — {s.get('detail', '?')}", flush=True)
+                    print(f"HB{hb} {pair}: runner FAILED — {s.get('detail', '?')}",
+                          flush=True)
                     return False
             except Exception:
                 pass
-        time.sleep(5)
+        if time.monotonic() > deadline:
+            seen = None
+            if status.is_file():
+                try:
+                    seen = json.loads(status.read_text(encoding="utf-8")).get("status")
+                except Exception:
+                    seen = "<unreadable>"
+            print(f"HB{hb} {pair}: TIMEOUT after {timeout_s}s — last status "
+                  f"{seen!r} (runner dead, or slower than the budget)", flush=True)
+            return False
+        time.sleep(poll_s)
 
 
 def push_snapshot() -> None:
@@ -226,18 +266,74 @@ def run_tick(hb: int) -> bool:
     return True
 
 
+def select_pairs(spec: str | None) -> tuple[str, ...]:
+    """Parse an optional pair filter. None/empty means the full both-pairs set.
+
+    An unknown pair name is a hard error rather than a silent no-op: a typo
+    that selected nothing would report success while advancing zero heartbeats.
+    """
+    global PAIRS
+    if not spec:
+        PAIRS = PAIRS_ALL
+        return PAIRS
+    names = tuple(n.strip() for n in spec.split(",") if n.strip())
+    if not names:
+        PAIRS = PAIRS_ALL
+        return PAIRS
+    unknown = [n for n in names if n not in STORES]
+    if unknown:
+        raise SystemExit(
+            f"unknown pair(s) {unknown}; known: {sorted(STORES)}"
+        )
+    PAIRS = names
+    return PAIRS
+
+
+def parse_args(argv: list[str]) -> tuple[int, int, tuple[str, ...], bool]:
+    """<start> <end> [pairs] [--no-snapshot]
+
+    An unknown flag is a hard error. A silently-ignored `--no-snapshot` would
+    push to a public URL the caller believed they had disabled.
+    """
+    global PAIRS, SNAPSHOTS_ENABLED
+    positional: list[str] = []
+    snapshots = True
+    for arg in argv:
+        if arg == "--no-snapshot":
+            snapshots = False
+        elif arg.startswith("-"):
+            raise SystemExit(f"unknown flag {arg!r}; known flags: --no-snapshot")
+        else:
+            positional.append(arg)
+    if len(positional) < 2:
+        raise SystemExit(
+            "usage: lockstep_chain.py <start> <end> [pairs] [--no-snapshot]"
+        )
+    pairs = select_pairs(positional[2] if len(positional) > 2 else None)
+    PAIRS, SNAPSHOTS_ENABLED = pairs, snapshots
+    return int(positional[0]), int(positional[1]), pairs, snapshots
+
+
 def main() -> int:
-    start = int(sys.argv[1])
-    end = int(sys.argv[2])
+    start, end, pairs, snapshots = parse_args(sys.argv[1:])
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"LOCKSTEP CHAIN: HB{start}-{end} (both pairs, merged clock)", flush=True)
+    label = "both pairs, merged clock" if pairs == PAIRS_ALL else (
+        f"single clock, pairs={','.join(pairs)}"
+    )
+    snap = "on" if snapshots else "OFF (public viewer will not update)"
+    print(f"LOCKSTEP CHAIN: HB{start}-{end} ({label}; snapshots {snap})",
+          flush=True)
     print(f"Start: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    for pair in pairs:
+        count, tick, _ = store_state(pair)
+        print(f"PREFLIGHT {pair}: count={count} tick={tick} "
+              f"(needs {start - 1} to start at {start})", flush=True)
 
     for hb in range(start, end + 1):
         if not run_tick(hb):
             return 1
-        if hb % SNAPSHOT_EVERY == 0:
+        if snapshots and hb % SNAPSHOT_EVERY == 0:
             push_snapshot()
 
     for pair in PAIRS:

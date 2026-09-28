@@ -344,19 +344,25 @@ class TestLogPathResolution:
         once = chr_mod._resolve_under(root, ".scratch/hb/runner.log")
         assert chr_mod._resolve_under(root, str(once)) == once
 
-    def test_launcher_resolves_the_log_before_spawning(self, tmp_path):
-        """The log arg handed to the runner must already be absolute, so the
-        detached child cannot re-resolve it against its own cwd."""
+    def test_launcher_resolves_the_log_itself_and_does_not_pass_it_on(self,
+                                                                     tmp_path):
+        """The launcher owns the log. The runner must never receive --log.
+
+        _runner_arg_parser has no --log flag. Passing one killed the child at
+        argparse, so the status file stayed at "not-started" forever and the
+        lockstep chain polled indefinitely. The launcher opens the file and
+        redirects the child's output into it instead.
+        """
         loop, exporter, vault = _write_test_scripts(tmp_path)
         store = tmp_path / "store"
         _write_store(store, 9, 9)
         calls: list[tuple] = []
-        monkey_popen = MagicMock()
-        monkey_popen.pid = 5150
 
         def fake_popen(cmd, **kwargs):
             calls.append((cmd, kwargs))
-            return monkey_popen
+            m = MagicMock()
+            m.pid = 5150
+            return m
 
         original = chr_mod.subprocess.Popen
         chr_mod.subprocess.Popen = fake_popen
@@ -377,12 +383,56 @@ class TestLogPathResolution:
         assert rc == 0
         assert calls, "runner was never spawned"
         cmd = calls[0][0]
-        log_arg = cmd[cmd.index("--log") + 1]
-        assert chr_mod.os.path.isabs(log_arg), (
-            f"runner received a relative --log: {log_arg}"
+        assert "--log" not in cmd, (
+            "launcher must not pass --log to the runner; the runner's parser "
+            "rejects it and the child dies before running any heartbeat"
         )
-        assert log_arg.startswith(str(tmp_path / "wsroot")), (
-            f"log must resolve under the world-sim root, got {log_arg}"
+
+    def test_runner_parser_rejects_log(self):
+        """Direct guard on the parser, not just on the call site."""
+        parser = chr_mod._runner_arg_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "--expect-heartbeat", "10",
+                "--evidence", "e.json",
+                "--log", "r.log",
+                "--status", "s.json",
+            ])
+
+    def test_launcher_creates_the_log_file_under_the_world_sim_root(self,
+                                                                   tmp_path):
+        loop, exporter, vault = _write_test_scripts(tmp_path)
+        store = tmp_path / "store"
+        _write_store(store, 9, 9)
+        root = tmp_path / "wsroot"
+        root.mkdir()
+
+        def fake_popen(cmd, **kwargs):
+            m = MagicMock()
+            m.pid = 5150
+            return m
+
+        original = chr_mod.subprocess.Popen
+        chr_mod.subprocess.Popen = fake_popen
+        try:
+            launcher_main([
+                "--expect-heartbeat", "10",
+                "--evidence", str(tmp_path / "evidence.json"),
+                "--log", ".scratch/hb/runner.log",
+                "--status", str(tmp_path / "status.json"),
+                "--store-root", str(store),
+                "--vault", str(vault),
+                "--world-sim-root", str(root),
+                "--loop-script", str(loop),
+                "--export-script", str(exporter),
+            ])
+        finally:
+            chr_mod.subprocess.Popen = original
+        assert (root / ".scratch" / "hb" / "runner.log").is_file(), (
+            "launcher must open the log itself, resolved under world-sim root"
+        )
+        assert not (tmp_path / ".scratch").exists(), (
+            "log must not land beside the caller"
         )
 
 

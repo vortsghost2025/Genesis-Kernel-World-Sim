@@ -534,19 +534,23 @@ def launcher_main(argv=None) -> int:
     )
 
     # Same seam as evidence/status (Defect C): the log path must resolve
-    # against the world-sim root too. It was missed by the original fix, so
-    # a relative --log landed at the repo root instead of beside the run's
-    # other artifacts. Found while running HB943. Resolved here and passed
-    # to the runner already absolute, so the detached child cannot re-resolve
-    # it against its own cwd.
+    # against the world-sim root, or a relative --log lands at the repo root
+    # while its sibling artifacts resolve under the world-sim root. Found
+    # while running HB943.
+    #
+    # The LAUNCHER owns the log. It opens the file itself and redirects the
+    # child's stdout/stderr into it. --log is deliberately NOT passed to the
+    # runner: _runner_arg_parser has no such flag, and passing one killed the
+    # child at argparse, which left the status file stuck at "not-started"
+    # and made the lockstep chain poll forever. Caught by running a chain.
     log_path = _resolve_under(Path(args.world_sim_root), args.log)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(log_path, "ab", buffering=0)
 
     cmd = [
         sys.executable, "-u", str(runner_script),
         "--expect-heartbeat", str(args.expect_heartbeat),
         "--evidence", args.evidence,
-        "--log", str(log_path),
         "--status", args.status,
         "--vault", args.vault,
         "--store-root", store_root,
