@@ -1324,9 +1324,17 @@ class FirstPairRuntime:
                     self, "_primary_failure_reason", ""
                 ):
                     self._primary_failure_reason = cycle_primary_failure
-                outcome = self._execute_action(agent_ref, output.action, hb)
-
-                # Fog: merge observation into known map and persist (10JB-2)
+                # Fog: merge observation into the known map BEFORE acting.
+                # Reachability is derived from the known map, so a tile the
+                # agent has just been SHOWN must already be there when the
+                # action is judged - otherwise the world advertises a tile
+                # and the rules refuse it one tick later. Measured at HB942:
+                # east_adam saw cont_a_gen_1_2, walked to it, and was blocked
+                # "not in runtime policy allowed tiles". This is the same seam
+                # the build path was already fixed for (see the placement
+                # authority comment in _execute_create_public_object).
+                # Fail-closed is preserved: a FogAdapterError still leaves the
+                # minimal observation unmerged and does not crash the cycle.
                 if self._fog_active():
                     try:
                         self._merge_and_persist_known_map(
@@ -1334,6 +1342,8 @@ class FirstPairRuntime:
                         )
                     except FogAdapterError:
                         pass  # Known-map persist failure noted; don't crash the cycle
+
+                outcome = self._execute_action(agent_ref, output.action, hb)
 
                 if agent_ref == self._adam_ref:
                     adam_action = output.action
