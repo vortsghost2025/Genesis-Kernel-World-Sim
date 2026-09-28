@@ -46,6 +46,8 @@ from backend.world.first_pair_persistence import (
     create_default_runtime_policy,
     derive_relationship_event_ids,
     derive_summaries_for_omitted,
+    filter_syntheses_for_injection,
+    SYNTH_METHOD_V1,
     get_adjacent_tiles,
     get_persistence_root,
     initialize_first_pair_state,
@@ -637,13 +639,31 @@ class FirstPairRuntime:
             if result.get("ok"):
                 persisted_summary_ids.append(ds.summary_id)
 
-        # Load owned summaries — include only those actually persisted
+        # Load owned summaries — include only those actually persisted.
+        # Fresh extractive derivations (this heartbeat) come first, exactly
+        # as before. Owned model syntheses (persisted by the background
+        # cadence, never in the heartbeat path) fill the remaining slots up
+        # to the existing cap, so prompt budget is unchanged. Syntheses
+        # overlapping this heartbeat's selected raw IDs are suppressed:
+        # testimony never double-presents evidence (raw wins).
         all_summaries = load_summaries(self._store)
-        agent_summaries = [
-            asdict(s) for s in all_summaries
+        fresh_summaries = [
+            s for s in all_summaries
             if s.owner_agent_id == view["agent_id"]
             and s.summary_id in persisted_summary_ids
         ]
+        owned_syntheses = [
+            s for s in all_summaries
+            if s.owner_agent_id == view["agent_id"]
+            and s.derivation_method == SYNTH_METHOD_V1
+            and s.summary_id not in persisted_summary_ids
+        ]
+        kept_syntheses = filter_syntheses_for_injection(
+            owned_syntheses,
+            selected_ids,
+            max_n=max(0, 4 - len(fresh_summaries)),
+        )
+        agent_summaries = [asdict(s) for s in fresh_summaries + kept_syntheses]
 
         # --- Update manifest with ALL metadata, then persist once ---
         sel_manifest["summary_ids"] = persisted_summary_ids

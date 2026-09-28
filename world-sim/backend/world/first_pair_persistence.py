@@ -974,7 +974,15 @@ def save_summaries(store: FirstPairPersistenceStore, summaries: list[MemorySumma
 _ALLOWED_DERIVATION_METHODS = frozenset({
     "deterministic_stub",
     "deterministic_extractive",
+    # Testimony, not evidence: a model-written rollup over covered memories.
+    # Admitted by docs/memory_synthesis_spec.md. Never outranks raw memories;
+    # every entity it names must occur verbatim in its sources (enforced in
+    # validate_summary_record, scoped to this method only).
+    "model_synthesized_v1",
 })
+
+#: Method constant so call sites and tests name one thing.
+SYNTH_METHOD_V1 = "model_synthesized_v1"
 
 
 def compute_summary_source_commitment(
@@ -1053,6 +1061,43 @@ def validate_summary_record(
         errors.append("derivation_method is required")
     elif summary.derivation_method not in _ALLOWED_DERIVATION_METHODS:
         errors.append(f"derivation_method '{summary.derivation_method}' not in allow-list")
+    if summary.derivation_method == SYNTH_METHOD_V1:
+        # Testimony must be discountable: the label names its method so any
+        # reader — agent or auditor — knows this is a claim about the past.
+        # Scoped to the synthesis method so the existing extractive records
+        # (whose "[derived from heartbeat N (type)]" labels predate this rule)
+        # keep validating exactly as before.
+        if SYNTH_METHOD_V1 not in (summary.summary or ""):
+            errors.append(
+                f"synthesized summary label must name its method "
+                f"('{SYNTH_METHOD_V1}')"
+            )
+        # Grounding: every named entity must occur verbatim in at least one
+        # covered memory. Checked here — against resolved sources, not against
+        # the model's word — so fabrication fails closed at validation.
+        resolved_for_grounding: list[dict] = []
+        if summary.covered_memory_ids and memory_list:
+            ensured_all = _ensure_memory_ids(
+                memory_list, owner_agent_id=summary.owner_agent_id
+            )
+            id_map_all = {m["memory_id"]: m for m in ensured_all}
+            resolved_for_grounding = [
+                id_map_all[mid]
+                for mid in summary.covered_memory_ids
+                if mid in id_map_all
+            ]
+        if resolved_for_grounding:
+            haystacks = [
+                str(m.get("content", "")).casefold()
+                for m in resolved_for_grounding
+            ]
+            for ent in summary.salient_entities or []:
+                needle = str(ent).casefold()
+                if not needle or not any(needle in h for h in haystacks):
+                    errors.append(
+                        f"salient entity '{ent}' occurs in no covered memory: "
+                        f"synthesis must not invent specifics"
+                    )
     if not summary.integrity_commitment:
         errors.append("integrity_commitment is required")
     else:
@@ -1223,6 +1268,160 @@ def derive_summaries_for_omitted(
         total_chars += len(summary_text)
 
     return summaries, included_ids
+
+
+def build_synthesized_summary(
+    covered_memories: list[dict],
+    owner_agent_id: str,
+    synthesizer,
+) -> tuple[MemorySummaryRecord | None, list[str]]:
+    """Build a validated model-synthesized rollup over covered memories.
+
+    `synthesizer` is an injected callable
+    `(covered: list[dict], owner_agent_id: str) -> {"text": str,
+    "salient_entities": list[str]}` — the seam where the model call lives.
+    Tests pass fakes; production wiring is an explicitly authorized
+    operation, never an import-time default, so this module can never dial
+    a provider on its own.
+
+    Returns (record, []) on success, (None, errors) on any failure.
+    Fail-closed throughout: empty coverage, foreign IDs, empty testimony,
+    and grounding violations all refuse a record rather than degrade one.
+    """
+    if not covered_memories:
+        return None, ["no covered memories: synthesis needs sources"]
+    if not owner_agent_id:
+        return None, ["owner_agent_id is required"]
+
+    # Ownership: entries arriving with IDs must re-derive under the claimed
+    # owner. Owner-bound IDs make laundering across agents fail closed here.
+    # ID-less entries (the live store shape) are assigned under the owner;
+    # cross-agent separation for those is enforced by the caller passing only
+    # the owner's list — the same trust boundary selection already uses.
+    ensured: list[dict] = []
+    for entry in covered_memories:
+        if not isinstance(entry, dict):
+            return None, ["covered memory must be a dict"]
+        existing_id = entry.get("memory_id")
+        if existing_id:
+            probe = dict(entry)
+            probe.pop("memory_id", None)
+            if _derive_memory_id(owner_agent_id, probe) != existing_id:
+                return None, [
+                    f"covered memory_id {existing_id} does not re-derive "
+                    f"under owner {owner_agent_id}: cross-agent coverage "
+                    f"refused"
+                ]
+            ensured.append(dict(entry))
+        else:
+            ensured.extend(_ensure_memory_ids([entry], owner_agent_id=owner_agent_id))
+
+    try:
+        draft = synthesizer([dict(m) for m in ensured], owner_agent_id)
+    except Exception as exc:
+        return None, [f"synthesizer raised {type(exc).__name__}: {exc}"[:200]]
+    if not isinstance(draft, dict):
+        return None, ["synthesizer must return a dict"]
+    text = draft.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return None, ["synthesizer returned empty testimony: no record built"]
+    entities = draft.get("salient_entities", [])
+    if not isinstance(entities, list) or any(
+        not isinstance(e, str) or not e.strip() for e in entities
+    ):
+        return None, ["salient_entities must be a list of non-empty strings"]
+
+    hbs = [int(m.get("heartbeat", 0)) for m in ensured]
+    covered_ids = sorted(m["memory_id"] for m in ensured)
+    # Commitment order must match validation's resolution order (covered-ID
+    # order): the commitment hashes a list, so order is material.
+    by_id = {m["memory_id"]: m for m in ensured}
+    ordered = [by_id[mid] for mid in covered_ids]
+    label = (
+        f"[derived {SYNTH_METHOD_V1} from heartbeats {min(hbs)}-{max(hbs)}] "
+        f"{text.strip()}"
+    )
+    rec = MemorySummaryRecord(
+        summary_id="",
+        owner_agent_id=owner_agent_id,
+        covered_memory_ids=covered_ids,
+        covered_heartbeat_range=[min(hbs), max(hbs)],
+        summary=label,
+        salient_entities=list(entities),
+        related_goal_ids=[],
+        related_public_object_ids=[],
+        related_message_ids=[],
+        derivation_method=SYNTH_METHOD_V1,
+        source_commitment=compute_summary_source_commitment(
+            owner_agent_id, ordered
+        ),
+    )
+    rec.summary_id = "sum-derived-" + rec.semantic_commitment()[:16]
+    rec.seal()
+    errors = validate_summary_record(rec, ensured)
+    if errors:
+        return None, errors
+    return rec, []
+
+
+def filter_syntheses_for_injection(
+    syntheses: list[MemorySummaryRecord],
+    selected_ids: set[str],
+    max_n: int = 2,
+) -> list[MemorySummaryRecord]:
+    """Raw-wins ordering for the injection path.
+
+    A synthesis whose covered memories intersect this heartbeat's selected
+    raw IDs is suppressed: testimony must never double-present evidence.
+    Survivors keep caller order and are capped, so prompt budget is bounded.
+    """
+    selected = set(selected_ids or ())
+    out: list[MemorySummaryRecord] = []
+    for synth in syntheses or []:
+        if len(out) >= max_n:
+            break
+        covered = set(synth.covered_memory_ids or ())
+        if covered & selected:
+            continue
+        out.append(synth)
+    return out
+
+
+def plan_synthesis_coverage(
+    memories: list[dict],
+    existing_summaries,
+    owner_agent_id: str,
+    max_rollups: int = 4,
+    group_size: int = 8,
+) -> list[list[dict]]:
+    """Oldest-uncovered-first coverage planner. Pure function, no I/O.
+
+    Groups memories not already covered by an existing summary into
+    heartbeat-ordered batches, bounded by max_rollups. Phased backfill with
+    no mass operation: each run covers at most max_rollups groups, oldest
+    first, and hitting the bound is the caller's log line, never silence.
+    """
+    if not memories or max_rollups <= 0:
+        return []
+    ensured = _ensure_memory_ids(
+        [dict(m) for m in memories if isinstance(m, dict)],
+        owner_agent_id=owner_agent_id,
+    )
+    covered: set[str] = set()
+    for existing in existing_summaries or []:
+        if isinstance(existing, dict):
+            ids = existing.get("covered_memory_ids") or []
+        else:
+            ids = getattr(existing, "covered_memory_ids", None) or []
+        covered.update(ids)
+    uncovered = [m for m in ensured if m.get("memory_id", "") not in covered]
+    uncovered.sort(key=lambda m: (m.get("heartbeat", 0), m.get("memory_id", "")))
+    groups: list[list[dict]] = []
+    for i in range(0, len(uncovered), max(1, group_size)):
+        if len(groups) >= max_rollups:
+            break
+        groups.append(uncovered[i:i + max(1, group_size)])
+    return groups
 
 
 # ---------------------------------------------------------------------------
