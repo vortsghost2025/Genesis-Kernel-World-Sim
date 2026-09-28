@@ -67,6 +67,14 @@ Before producing output following a context reset:
 6. **Never touch**: PatchRaccoon; Kilo/OpenCode/Wave/Hermes configs;
    runtime/daemon/scheduler/network/provider/container/Docker;
    `world-sim/data` unless explicitly authorized.
+7. **Operator voice delegated** (2026-09-27, explicit Sean authorization):
+   I may answer agents' factual `ask_human`/unheard questions directly via
+   `scripts/operator_say.py` in the operator's register — states what is
+   true or what changed, NEVER strategy, destinations, or build
+   instructions. Every answer is logged for Sean's after-the-fact veto.
+   Capability grants ride this delegation when Sean confirms them.
+   Notifications: `scripts/agent_watch.py` is kept UP (read-only watcher,
+   log + Telegram once configured).
 
 ---
 
