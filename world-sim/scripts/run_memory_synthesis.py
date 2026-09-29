@@ -279,60 +279,48 @@ def run_synthesis_pass(
     return report
 
 
-def _live_synthesizer(client, model: str):
+def _live_synthesizer(pool: list[str], base_url: str, model: str,
+                      provider_type: str = "openrouter"):
+    """Pool-backed synthesizer: rotation replaces the old single-client retry.
+
+    429 rotates to the next key, transient errors retry, exhaustion fails
+    closed — the shared `call_with_key_rotation` policy (10IV), same as
+    heartbeat transport will use. Key material never leaves this closure.
+    """
     from backend.world.first_pair_cognition_model import (
-        _TRANSPORT_BACKOFF_SECONDS,
-        _is_retryable_transport_error,
+        _client_api_key,
+        call_with_key_rotation,
     )
+    from openai import OpenAI
+
+    def make_client(key_index: int):
+        from types import SimpleNamespace
+
+        return OpenAI(base_url=base_url,
+                      api_key=_client_api_key(SimpleNamespace(
+                          provider_type=provider_type,
+                          api_key=pool[key_index])),
+                      timeout=300.0)
 
     def call(covered: list[dict], owner_id: str) -> dict:
         prompt = build_synthesis_prompt(covered, owner_id)
-        # Same transient-only retry policy as heartbeat transport (10IV):
-        # 429/timeout/5xx back off bounded; auth/config errors fail fast.
-        # Synthesis is background cadence, so a group that will not go
-        # simply fails closed and is reported.
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system",
-                         "content": "Compress the given memories. Reply with only the JSON object."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=SYNTH_TEMPERATURE,
-                    max_tokens=SYNTH_MAX_TOKENS,
-                )
-                # Empty choices on a 200: the known empty_response transient
-                # (the chain retries it per-pair). Not an exception, so it
-                # is handled here rather than in the retry classifier.
-                choices = getattr(response, "choices", None) or []
-                if not choices or not getattr(choices[0].message, "content", ""):
-                    raise _EmptySynthesisResponse("empty choices")
-                text = choices[0].message.content or ""
-                payload, errors = parse_synthesis_response(text)
-                if errors or payload is None:
-                    snippet = text.strip()[:300]
-                    raise ValueError(
-                        f"unparseable synthesis reply: {errors} raw:{snippet!r}"
-                    )
-                return payload
-            except _EmptySynthesisResponse as exc:
-                last_error = exc
-                if attempt < 2:
-                    time.sleep(_TRANSPORT_BACKOFF_SECONDS[
-                        min(attempt, len(_TRANSPORT_BACKOFF_SECONDS) - 1)
-                    ])
-            except Exception as exc:
-                last_error = exc
-                if not _is_retryable_transport_error(exc):
-                    break
-                if attempt < 2:
-                    time.sleep(_TRANSPORT_BACKOFF_SECONDS[
-                        min(attempt, len(_TRANSPORT_BACKOFF_SECONDS) - 1)
-                    ])
-        raise last_error if last_error else RuntimeError("synthesis failed")
+        messages = [
+            {"role": "system",
+             "content": "Compress the given memories. Reply with only the JSON object."},
+            {"role": "user", "content": prompt},
+        ]
+        text, err = call_with_key_rotation(
+            make_client, model, messages, pool,
+            temperature=SYNTH_TEMPERATURE, max_tokens=SYNTH_MAX_TOKENS)
+        if err is not None or not text:
+            raise RuntimeError(f"synthesis transport failed: {err}")
+        payload, errors = parse_synthesis_response(text)
+        if errors or payload is None:
+            snippet = text.strip()[:300]
+            raise ValueError(
+                f"unparseable synthesis reply: {errors} raw:{snippet!r}"
+            )
+        return payload
 
     return call
 
@@ -418,19 +406,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"SYNTHESIS REFUSED: {reason}", flush=True)
         return 1
 
-    from openai import OpenAI
+    # Credential pool for the resolved lane. Plural lists first, legacy
+    # singles as fallback — same models, same endpoints, same free-only
+    # gates; only the credential rotates. Pool size (never values) is
+    # reported so operations can see the budget.
+    from backend.world.first_pair_cognition_model import load_key_pool
 
-    from backend.world.first_pair_cognition_model import _client_api_key
-
-    client = OpenAI(base_url=config.base_url,
-                    api_key=_client_api_key(config), timeout=300.0)
+    if config.provider_type in ("openrouter", "explicit_url"):
+        pool = load_key_pool(dict(os.environ), "OPENROUTER_API_KEYS",
+                             "OPENROUTER_API_KEY", "GENESIS_FIRST_PAIR_API_KEY")
+    else:
+        pool = load_key_pool(dict(os.environ), "NVIDIA_API_KEYS",
+                             "NVIDIA_API_KEY")
+    if not pool:
+        print("SYNTHESIS REFUSED: empty credential pool", flush=True)
+        return 1
+    print(f"pool_keys={len(pool)} lane={config.provider_type}", flush=True)
     report = run_synthesis_pass(
         store, args.owner_ref, owner_id,
-        _live_synthesizer(client, config.model),
+        _live_synthesizer(pool, config.base_url, config.model,
+                          config.provider_type),
         max_rollups=args.max_rollups,
         group_size=args.group_size,
         newest_first_ratio=args.newest_first_ratio,
     )
+    report["pool_keys"] = len(pool)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = (REPORT_DIR /
                    f"synthesis_{args.owner_ref}_{int(time.time())}.json")

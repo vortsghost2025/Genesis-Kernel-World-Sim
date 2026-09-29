@@ -86,6 +86,118 @@ def _redact_secret_text(text: str, config: ProviderConfig) -> str:
         return text.replace(config.api_key, "[REDACTED]")
     return text
 
+
+def load_key_pool(env: dict, *names: str) -> list[str]:
+    """Ordered credential pool from env: comma/newline-separated lists first,
+    then legacy single keys, de-duplicated, empties dropped.
+
+    `load_key_pool(env, "OPENROUTER_API_KEYS", "OPENROUTER_API_KEY")` —
+    plural list wins position, legacy single appends if distinct. An empty
+    pool is a valid answer (caller fails closed); never a default key.
+    """
+    pool: list[str] = []
+    for name in names:
+        raw = (env.get(name) or "")
+        if not isinstance(raw, str):
+            continue
+        for part in raw.replace("\r", "\n").replace(",", "\n").split("\n"):
+            key = part.strip().strip('"').strip("'")
+            if key and key not in pool:
+                pool.append(key)
+    return pool
+
+
+def _redact_pool_keys(text: str, keys: list[str]) -> str:
+    for key in keys:
+        if key and key in text:
+            text = text.replace(key, "[REDACTED]")
+    return text
+
+
+def _extract_text(response: Any) -> str | None:
+    try:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return None
+        return getattr(choices[0].message, "content", "") or None
+    except Exception:
+        return None
+
+
+class _EmptyTransportResponse(Exception):
+    """200 with no usable content: the empty_response transient."""
+
+
+def call_with_key_rotation(make_client, model: str, messages: list[dict],
+                           keys: list[str], temperature: float,
+                           max_tokens: int) -> tuple[str | None, str | None]:
+    """One model call across a credential pool. Returns (text, None) or
+    (None, redacted_error).
+
+    Rotation policy, each step bounded:
+      * 429 → the key's quota is spent: rotate immediately, never retry it.
+      * timeout/5xx/empty-choices → transient: one same-key retry, then rotate.
+      * anything else (auth, config, model 4xx) → fail fast, no rotation.
+    Total attempts are bounded by the pool (2 per key). An empty pool fails
+    closed without touching the network. Every pool key is redacted from the
+    error, not just the active one.
+    """
+    if not keys:
+        return None, "no provider keys in pool: refusing network call"
+    last_error = "unknown transport failure"
+    per_key_budget = 2
+    for key_index, _key in enumerate(keys):
+        try:
+            client = make_client(key_index)
+        except Exception as exc:
+            last_error = f"client construction failed: {type(exc).__name__}"
+            continue
+        attempts = 0
+        while attempts < per_key_budget:
+            attempts += 1
+            try:
+                text = _extract_text(client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ))
+                if not text:
+                    raise _EmptyTransportResponse("empty choices")
+                return text, None
+            except Exception as exc:
+                # Empty responses ride the transient path (same-key retry,
+                # then rotate) — they are congestion, not spent quota.
+                # 429 alone rotates immediately: the key is spent, retrying
+                # it only burns time.
+                if type(exc).__name__ == "_EmptyTransportResponse":
+                    retryable, rotate_now = True, False
+                elif not _is_retryable_transport_error(exc):
+                    return None, _redact_pool_keys(
+                        f"{type(exc).__name__}: {exc}", keys)
+                else:
+                    retryable, rotate_now = True, _is_429(exc)
+                last_error = f"{type(exc).__name__}: {exc}"
+                if rotate_now:
+                    break
+                if attempts < per_key_budget:
+                    time.sleep(_TRANSPORT_BACKOFF_SECONDS[min(
+                        attempts - 1, len(_TRANSPORT_BACKOFF_SECONDS) - 1)])
+        last_error = _redact_pool_keys(last_error, keys)
+    return None, _redact_pool_keys(last_error, keys)
+
+
+def _is_429(exc: Exception) -> bool:
+    from openai import APIStatusError
+
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", None)
+        return status == 429
+    return "429" in str(exc) or "rate limit" in str(exc).casefold()
+
 # Contamination markers — casefolded for case-insensitive matching
 _FORBIDDEN_MARKERS = (
     "true_map",

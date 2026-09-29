@@ -169,6 +169,19 @@ class TestEmptyResponseRetry:
 
         return Client()
 
+    def _patched_synth(self, monkeypatch, clients):
+        import openai
+        made = {"n": 0}
+
+        def fake_openai(**kwargs):
+            client = clients[min(made["n"], len(clients) - 1)]
+            made["n"] += 1
+            return client
+
+        monkeypatch.setattr(openai, "OpenAI", fake_openai)
+        return runner._live_synthesizer(["k1"] * len(clients),
+                                        "https://x", "m")
+
     def test_empty_then_valid_succeeds(self, tmp_path, monkeypatch):
         monkeypatch.setattr(runner.time, "sleep", lambda s: None)
         store = _seeded_store(tmp_path, n=8)
@@ -176,7 +189,7 @@ class TestEmptyResponseRetry:
             None,  # first call: empty choices
             ['{"text": "surveyed cont_a_gen_1_2.", "salient_entities": ["cont_a_gen_1_2"]}'],
         ])
-        synth = runner._live_synthesizer(client, "test-model")
+        synth = self._patched_synth(monkeypatch, [client])
         mems = [{"heartbeat": 1, "content": "surveyed cont_a_gen_1_2",
                  "type": "reflection"}]
         out = synth(mems, ADAM_ID)
@@ -186,17 +199,17 @@ class TestEmptyResponseRetry:
     def test_persistent_empty_fails_closed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(runner.time, "sleep", lambda s: None)
         client = self._client([None, None, None, None])
-        synth = runner._live_synthesizer(client, "test-model")
+        synth = self._patched_synth(monkeypatch, [client])
         mems = [{"heartbeat": 1, "content": "x", "type": "reflection"}]
         with pytest.raises(Exception):
             synth(mems, ADAM_ID)
-        assert client.calls == 3, "bounded retries, then stop"
+        assert client.calls == 2, "bounded retries, then stop"
 
     def test_unparseable_failure_carries_raw_snippet(self, tmp_path,
                                                     monkeypatch):
         monkeypatch.setattr(runner.time, "sleep", lambda s: None)
         client = self._client([["sorry, cannot do that"]])
-        synth = runner._live_synthesizer(client, "test-model")
+        synth = self._patched_synth(monkeypatch, [client])
         mems = [{"heartbeat": 1, "content": "x", "type": "reflection"}]
         with pytest.raises(ValueError) as exc:
             synth(mems, ADAM_ID)
