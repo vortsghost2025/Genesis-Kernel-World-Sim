@@ -56,6 +56,14 @@ _RELATIONSHIP_FILE = "relationship_ledger.json"
 _CHARTER_FILE = "charter.json"
 _INVENTORY_FILE = "inventory.json"
 _MEMORY_SELECTION_MANIFEST_FILE = "memory_selection_manifest.json"
+_CONTINUITY_FILE = "continuity.json"
+
+#: Continuity slot bounds (docs/continuity_slot_spec.md). One record per
+#: agent, rendered verbatim every heartbeat. Small by design: this is
+#: mid-turn will ("step 38 of 40"), not history.
+CONTINUITY_MAX_CHARS = 500
+CONTINUITY_MAX_OPEN_QUESTIONS = 3
+CONTINUITY_STALE_AFTER = 200
 _PROVENANCE_FILE = "provenance.jsonl"
 # Noncanonical agent asks (operator sink). NEVER questions.json: no
 # authority, no signature, no path to canonical state. It exists so the
@@ -1459,6 +1467,178 @@ def plan_synthesis_coverage(
         if remaining and len(groups) < max_rollups:
             groups.append(remaining.popleft())
     return groups
+
+
+# ---------------------------------------------------------------------------
+# Continuity Slot ("what am I in the middle of?")
+# ---------------------------------------------------------------------------
+
+
+_CONTINUITY_SLOTS = ("continuing", "paused", "completed")
+
+_STOPWORDS = frozenset({
+    "the", "and", "are", "was", "were", "been", "have", "has", "had",
+    "with", "from", "that", "this", "these", "those", "then", "than",
+    "into", "over", "under", "again", "here", "there", "where", "when",
+    "what", "which", "while", "your", "yours", "their", "theirs", "ours",
+    "about", "after", "before", "between", "through", "during", "each",
+    "other", "some", "such", "only", "just", "very", "also", "will",
+    "would", "could", "should", "doing", "done", "still", "already",
+    "quite", "resting", "quietly",
+})
+
+
+def _continuity_entry(text: str, heartbeat: int) -> dict:
+    return {"text": text, "since_hb": int(heartbeat)}
+
+
+def update_continuity(record: dict, metadata: dict,
+                       heartbeat: int) -> dict:
+    """Apply one heartbeat of piggyback metadata. Pure function.
+
+    Present string slots replace; empty string clears; absent slots are
+    untouched. open_questions appends up to the cap, oldest dropped beyond
+    it. Never raises on bad shapes — callers validate first; this function
+    assumes validated input and coerces defensively.
+    """
+    record = dict(record or {})
+    if not isinstance(metadata, dict):
+        return record
+    for slot in _CONTINUITY_SLOTS:
+        if slot not in metadata:
+            continue
+        val = metadata[slot]
+        if isinstance(val, str) and val.strip():
+            record[slot] = _continuity_entry(val.strip()[:CONTINUITY_MAX_CHARS],
+                                             heartbeat)
+        elif isinstance(val, str):
+            record[slot] = None
+    questions = metadata.get("open_questions")
+    if isinstance(questions, list):
+        current = [q for q in (record.get("open_questions") or [])
+                   if isinstance(q, dict) and q.get("text")]
+        for q in questions:
+            if isinstance(q, str) and q.strip():
+                current.append(_continuity_entry(
+                    q.strip()[:CONTINUITY_MAX_CHARS], heartbeat))
+        record["open_questions"] = current[-CONTINUITY_MAX_OPEN_QUESTIONS:]
+    return record
+
+
+def prune_continuity(record: dict, current_hb: int,
+                     stale_after: int = CONTINUITY_STALE_AFTER
+                     ) -> tuple[dict, list[str]]:
+    """Drop lines older than stale_after heartbeats. Returns (record, notices).
+
+    Nothing drops silently: every dropped line produces a notice naming it.
+    Boundary (exactly stale_after old) is kept, not dropped.
+    """
+    record = dict(record or {})
+    notices: list[str] = []
+    for slot in _CONTINUITY_SLOTS:
+        entry = record.get(slot)
+        if isinstance(entry, dict) and entry.get("text"):
+            age = int(current_hb) - int(entry.get("since_hb", current_hb))
+            if age > stale_after:
+                notices.append(
+                    f"dropped stale continuity ({slot}): "
+                    f"'{entry['text']}' (unstated for {age} heartbeats)"
+                )
+                record[slot] = None
+    kept_questions = []
+    for q in record.get("open_questions") or []:
+        if not (isinstance(q, dict) and q.get("text")):
+            continue
+        age = int(current_hb) - int(q.get("since_hb", current_hb))
+        if age > stale_after:
+            notices.append(
+                f"dropped stale open question: '{q['text']}' "
+                f"(unstated for {age} heartbeats)"
+            )
+        else:
+            kept_questions.append(q)
+    record["open_questions"] = kept_questions
+    return record, notices
+
+
+def render_continuity(record: dict, current_hb: int) -> str:
+    """Render one agent's continuity record with ages. Never empty, never an
+    error block: an agent with nothing in progress gets neutral text."""
+    record = record or {}
+    lines = ["--- CURRENT CONTEXT (your own words; what you are in the "
+             "middle of) ---"]
+    shown = False
+    for slot in _CONTINUITY_SLOTS:
+        entry = record.get(slot)
+        if isinstance(entry, dict) and entry.get("text"):
+            age = int(current_hb) - int(entry.get("since_hb", current_hb))
+            lines.append(f"- {slot}: {entry['text']} ({age} heartbeats ago)")
+            shown = True
+    for q in record.get("open_questions") or []:
+        if isinstance(q, dict) and q.get("text"):
+            age = int(current_hb) - int(q.get("since_hb", current_hb))
+            lines.append(f"- open question: {q['text']} ({age} heartbeats ago)")
+            shown = True
+    if not shown:
+        lines.append("Nothing in progress that you have written down. When "
+                     "you start something multi-turn, note it in your "
+                     "continuity metadata and it will appear here every "
+                     "heartbeat until done. You are never required to.")
+    return "\n".join(lines)
+
+
+def _theme_tokens(text: str) -> list[str]:
+    import re as _re
+    return [t for t in _re.findall(r"[a-z]+", str(text).casefold())
+            if len(t) > 3 and t not in _STOPWORDS]
+
+
+def detect_recurrence(texts_a: list[str], texts_b: list[str],
+                      threshold: int = 5) -> list[str]:
+    """Shared repeated bigrams across two agents' recent texts.
+
+    A theme counts only when a bigram occurs >= threshold times in total AND
+    on both sides. One-sided repetition is habit, not agreement. Common words
+    are excluded at token level so "the world" can never qualify. Pure.
+    """
+    def _bigrams(texts: list[str]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for text in texts or []:
+            toks = _theme_tokens(text)
+            for i in range(len(toks) - 1):
+                bg = f"{toks[i]} {toks[i + 1]}"
+                counts[bg] = counts.get(bg, 0) + 1
+        return counts
+
+    a, b = _bigrams(texts_a), _bigrams(texts_b)
+    shared = [bg for bg in a
+              if bg in b and a[bg] + b[bg] >= threshold]
+    return sorted(shared)
+
+
+def load_continuity(store: FirstPairPersistenceStore, agent_ref: str) -> dict:
+    data = store._read_json(store._path(_CONTINUITY_FILE))
+    if data and data.get("type") == "continuity_record":
+        inner = data.get("data", {})
+        if isinstance(inner, dict) and isinstance(inner.get(agent_ref), dict):
+            return inner[agent_ref]
+    return {}
+
+
+def save_continuity(store: FirstPairPersistenceStore, agent_ref: str,
+                    record: dict) -> None:
+    data = store._read_json(store._path(_CONTINUITY_FILE))
+    if data and data.get("type") == "continuity_record" and isinstance(
+            data.get("data"), dict):
+        inner = data["data"]
+    else:
+        inner = {}
+    inner[agent_ref] = record
+    store._atomic_write(
+        store._path(_CONTINUITY_FILE),
+        {"type": "continuity_record", "schema_version": "continuity.1",
+         "data": inner},
+    )
 
 
 # ---------------------------------------------------------------------------

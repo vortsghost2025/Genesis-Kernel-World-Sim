@@ -69,6 +69,10 @@ class AgentContext:
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""
     charter_heartbeat: int = 0
+    # Continuity ("what am I in the middle of"): the agent's own piggyback
+    # metadata, rendered verbatim with ages. Outside selection like the
+    # charter; mid-turn will, not forever-identity.
+    continuity_section: str = ""
     # Belongings (build layer): the agent's persisted holdings, shown as-is.
     inventory: dict = field(default_factory=dict)
     # (provisions/carrying - the food and goods ledgers - are retired with
@@ -94,6 +98,9 @@ class CognitionOutput:
     observation_summary: str = ""
     decision_summary: str = ""
     uncertainty: str = ""
+    # Piggyback continuity metadata (validated, may be None). Applied by the
+    # runtime after action execution; never capable of vetoing it.
+    continuity_update: dict | None = None
 
 
 class CognitionBackend(ABC):

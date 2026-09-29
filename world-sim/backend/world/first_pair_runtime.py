@@ -46,6 +46,7 @@ from backend.world.first_pair_persistence import (
     create_default_runtime_policy,
     derive_relationship_event_ids,
     derive_summaries_for_omitted,
+    detect_recurrence,
     filter_syntheses_for_injection,
     SYNTH_METHOD_V1,
     get_adjacent_tiles,
@@ -55,6 +56,7 @@ from backend.world.first_pair_persistence import (
     list_unanswered_questions,
     load_capability_grant,
     load_charter_versions,
+    load_continuity,
     load_extra_capability_grants,
     load_goals,
     load_heartbeat_history,
@@ -72,13 +74,17 @@ from backend.world.first_pair_persistence import (
     load_runtime_policy,
     load_summaries,
     maybe_record_relationship_event,
+    prune_continuity,
     record_physics_seen,
+    render_continuity,
+    save_continuity,
     save_goals,
     save_memory,
     save_runtime_policy,
     save_world_state,
     select_human_context,
     select_private_memories,
+    update_continuity,
     validate_persistence_integrity,
 )
 from backend.world.question_proposal import QuestionProposal
@@ -685,6 +691,58 @@ class FirstPairRuntime:
         charter_text = latest_charter.charter_text if latest_charter else ""
         charter_heartbeat = latest_charter.heartbeat if latest_charter else 0
 
+        # --- Continuity ("what am I in the middle of") ---
+        # Pruned at READ time so drop notices render in the same prompt as
+        # the drop — pruning at write time would lose the notice.
+        raw_cont = load_continuity(self._store, agent_ref)
+        pruned_cont, cont_notices = prune_continuity(raw_cont, heartbeat_number)
+        if cont_notices:
+            save_continuity(self._store, agent_ref, pruned_cont)
+        continuity_section = render_continuity(pruned_cont, heartbeat_number)
+        for notice in cont_notices:
+            continuity_section += f"\n(Note: {notice})"
+        # Recurrence (read-only, runtime-computed): shared repeated themes
+        # across both agents' recent messages and records. The agent cannot
+        # see its own repetition (99% of messages are unshown each turn);
+        # this line is the only place it becomes visible.
+        other_ref = view.get("other_agent_ref", "")
+        if other_ref:
+            other_cont = load_continuity(self._store, other_ref)
+            recent_cutoff = heartbeat_number - 12
+            mine_texts: list[str] = []
+            theirs_texts: list[str] = []
+            for msg in self._world_state.public_messages or []:
+                if not isinstance(msg, dict):
+                    continue
+                try:
+                    if int(msg.get("heartbeat", 0)) < recent_cutoff:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                text = str(msg.get("message", ""))
+                if not text.strip():
+                    continue
+                if msg.get("sender_agent_id") == view["agent_id"]:
+                    mine_texts.append(text)
+                elif msg.get("sender_agent_id") == view.get("other_agent_id"):
+                    theirs_texts.append(text)
+            for slot in ("continuing", "paused", "completed"):
+                for rec_side, bucket in ((pruned_cont, mine_texts),
+                                         (other_cont, theirs_texts)):
+                    entry = rec_side.get(slot)
+                    if isinstance(entry, dict) and entry.get("text"):
+                        bucket.append(str(entry["text"]))
+            for q in pruned_cont.get("open_questions") or []:
+                if isinstance(q, dict) and q.get("text"):
+                    mine_texts.append(str(q["text"]))
+            shared = detect_recurrence(mine_texts, theirs_texts)
+            if shared:
+                other_name = view.get("other_agent_name", other_ref)
+                continuity_section += (
+                    f"\nYou and {other_name} have both mentioned recently: "
+                    f"{', '.join(shared[:3])}."
+                )
+
         # --- Physics version: can the agent notice the terms changed? ---
         # new_to_agent is True only on the first heartbeat this agent is
         # shown the current version, so the prompt can say so once.
@@ -735,6 +793,7 @@ class FirstPairRuntime:
             memory_selection_manifest=sel_manifest,
             charter_text=charter_text,
             charter_heartbeat=charter_heartbeat,
+            continuity_section=continuity_section,
             inventory=self._get_agent_inventory(agent_ref),
             physics=dict(observation["physics"]),
             operator_messages=operator_messages,
@@ -1216,6 +1275,17 @@ class FirstPairRuntime:
                     status=gu.get("status", "active"),
                     created_heartbeat=gu.get("created_heartbeat", heartbeat_number),
                 ))
+
+        # --- Continuity metadata (piggyback, never a veto) ---
+        # getattr-guarded: outputs predating the slot have no such field.
+        cont_meta = getattr(output, "continuity_update", None)
+        if isinstance(cont_meta, dict) and cont_meta:
+            updated = update_continuity(
+                load_continuity(self._store, agent_ref),
+                cont_meta,
+                heartbeat_number,
+            )
+            save_continuity(self._store, agent_ref, updated)
 
         memory_writes = output.memory_write if isinstance(output.memory_write, list) else []
         for mw in memory_writes:

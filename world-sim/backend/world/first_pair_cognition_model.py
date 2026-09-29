@@ -18,10 +18,13 @@ from backend.world.world_terms import terms_change_line
 
 from openai import OpenAI
 
-from backend.world.first_pair_cognition_interface import (
-    AgentContext,
+from backend.world.first_pair_cognition_interface import (    AgentContext,
     CognitionBackend,
     CognitionOutput,
+)
+from backend.world.first_pair_persistence import (
+    CONTINUITY_MAX_CHARS,
+    CONTINUITY_MAX_OPEN_QUESTIONS,
 )
 
 # ---------------------------------------------------------------------------
@@ -118,6 +121,13 @@ _REQUIRED_TOP_FIELDS = frozenset({
     "uncertainty",
     "decision_summary",
     "confidence",
+})
+
+# Optional top-level fields: accepted when present and well-formed, never
+# required, and malformed values are error notes that must not veto the
+# proposed action (docs/continuity_slot_spec.md §4).
+_OPTIONAL_TOP_FIELDS = frozenset({
+    "continuity_update",
 })
 
 _VALID_STATUSES = frozenset({"active", "completed", "abandoned", "in_progress"})
@@ -524,6 +534,7 @@ class ModelOutput:
     uncertainty: str = ""
     decision_summary: str = ""
     confidence: float = 0.0
+    continuity_update: dict | None = None
     validation_errors: list[str] = field(default_factory=list)
     is_valid: bool = False
 
@@ -533,7 +544,8 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
     output = ModelOutput()
 
     # --- Reject unknown top-level fields ---
-    errors.extend(_reject_unknown_fields(raw, _REQUIRED_TOP_FIELDS))
+    errors.extend(_reject_unknown_fields(
+        raw, _REQUIRED_TOP_FIELDS | _OPTIONAL_TOP_FIELDS))
 
     # --- Reject missing fields ---
     for field in _REQUIRED_TOP_FIELDS:
@@ -567,6 +579,55 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
                 output.self_model_update = smu
         else:
             errors.append("self_model_update:wrong_type")
+
+    # --- continuity_update (optional piggyback metadata) ---
+    # Malformed metadata is an error NOTE, never a veto: the proposed action
+    # below is parsed independently. Context must not be able to veto action.
+    cu = raw.get("continuity_update")
+    if cu is not None:
+        cu_errors_before = len(errors)
+        if not isinstance(cu, dict):
+            errors.append("continuity:not_a_dict")
+        else:
+            errors.extend(_reject_unknown_fields(
+                cu, frozenset({"continuing", "paused", "completed",
+                               "open_questions"}), "continuity"))
+            for slot in ("continuing", "paused", "completed"):
+                if slot in cu:
+                    val = cu[slot]
+                    if not isinstance(val, str):
+                        errors.append(f"continuity:{slot}_not_a_string")
+                    elif len(val) > CONTINUITY_MAX_CHARS:
+                        errors.append(
+                            f"continuity:{slot}_exceeds_"
+                            f"{CONTINUITY_MAX_CHARS}_chars")
+                    elif val.strip() and _casefolded_contaminated(val):
+                        errors.append(f"continuity:contaminated_{slot}")
+            if "open_questions" in cu:
+                qs = cu["open_questions"]
+                if not isinstance(qs, list):
+                    errors.append("continuity:open_questions_not_a_list")
+                elif len(qs) > CONTINUITY_MAX_OPEN_QUESTIONS:
+                    errors.append(
+                        f"continuity:too_many_open_questions_"
+                        f"(max_{CONTINUITY_MAX_OPEN_QUESTIONS})")
+                else:
+                    for i, q in enumerate(qs):
+                        if not isinstance(q, str) or not q.strip():
+                            errors.append(
+                                f"continuity:open_questions[{i}]_not_a_string")
+                        elif len(q) > CONTINUITY_MAX_CHARS:
+                            errors.append(
+                                f"continuity:open_questions[{i}]_exceeds_"
+                                f"{CONTINUITY_MAX_CHARS}_chars")
+                        elif _casefolded_contaminated(q):
+                            errors.append(
+                                f"continuity:contaminated_open_questions[{i}]")
+            if cu_errors_before == len(errors):
+                output.continuity_update = {
+                    k: cu[k] for k in ("continuing", "paused", "completed",
+                                       "open_questions") if k in cu
+                }
 
     # --- goal_updates ---
     gu_list = raw.get("goal_updates")
@@ -731,7 +792,12 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
         errors.append("confidence:wrong_type")
 
     output.validation_errors = errors
-    output.is_valid = not errors
+    # Continuity metadata never vetoes action (docs/continuity_slot_spec.md
+    # §4): its errors are recorded above and visible, but only non-continuity
+    # errors affect validity. A model stuffing garbage into its own context
+    # slot loses the slot's content, never its turn.
+    output.is_valid = not [e for e in errors
+                           if not e.startswith("continuity:")]
     return output
 
 
@@ -989,6 +1055,8 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 
 Current heartbeat: {context.heartbeat_number}
 Your position: {context.position}
+
+{context.continuity_section}
 
 Your observation:
 {json.dumps(context.observation, indent=2)}
@@ -1277,6 +1345,7 @@ class ModelCognitionBackend(CognitionBackend):
             observation_summary=validated.observation_summary,
             decision_summary=validated.decision_summary,
             uncertainty=validated.uncertainty,
+            continuity_update=validated.continuity_update,
         )
 
     def _call_with_transport_retry(
