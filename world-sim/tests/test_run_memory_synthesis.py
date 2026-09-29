@@ -71,6 +71,21 @@ class TestPromptBuilder:
         assert "salient_entities" in prompt
         assert "only" in lowered and "appear" in lowered
 
+    def test_prompt_bans_thinking_out_loud(self):
+        """Measured failure: the model preambles, burns tokens, and the JSON
+        truncates. The prompt must forbid preamble explicitly."""
+        prompt = runner.build_synthesis_prompt([_mem(1, "x")], "east_adam")
+        assert "nothing else" in prompt.lower()
+        assert "preamble" in prompt.lower()
+
+    def test_no_preamble_rule_opens_the_prompt(self):
+        """Measured failure continued: a ban at the bottom was talked past.
+        The rule leads, not just closes — primacy and recency."""
+        prompt = runner.build_synthesis_prompt([_mem(1, "x")], "east_adam")
+        head = "\n".join(prompt.splitlines()[:4]).lower()
+        assert "entire reply" in head
+        assert "json" in head
+
 
 class TestResponseParser:
     def test_valid_response_parses(self):
@@ -100,6 +115,21 @@ class TestResponseParser:
     def test_wrong_types_are_an_error(self):
         payload, errors = runner.parse_synthesis_response(
             '{"text": 42, "salient_entities": "hills"}'
+        )
+        assert payload is None
+        assert errors
+
+    def test_prose_wrapped_json_is_unwrapped(self):
+        payload, errors = runner.parse_synthesis_response(
+            'Here is the rollup:\n{"text": "surveyed.", '
+            '"salient_entities": []}\nHope that helps.'
+        )
+        assert errors == []
+        assert payload["text"] == "surveyed."
+
+    def test_prose_without_json_still_fails(self):
+        payload, errors = runner.parse_synthesis_response(
+            "I cannot comply with that request."
         )
         assert payload is None
         assert errors
@@ -161,6 +191,17 @@ class TestEmptyResponseRetry:
         with pytest.raises(Exception):
             synth(mems, ADAM_ID)
         assert client.calls == 3, "bounded retries, then stop"
+
+    def test_unparseable_failure_carries_raw_snippet(self, tmp_path,
+                                                    monkeypatch):
+        monkeypatch.setattr(runner.time, "sleep", lambda s: None)
+        client = self._client([["sorry, cannot do that"]])
+        synth = runner._live_synthesizer(client, "test-model")
+        mems = [{"heartbeat": 1, "content": "x", "type": "reflection"}]
+        with pytest.raises(ValueError) as exc:
+            synth(mems, ADAM_ID)
+        assert "raw:" in str(exc.value)
+        assert "sorry" in str(exc.value)
 
 
 class TestFreeLaneGate:

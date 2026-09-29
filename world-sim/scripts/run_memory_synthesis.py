@@ -55,8 +55,8 @@ STORES = {
     "west": WORLD_SIM / ".runtime" / "first-pair-west",
 }
 VAULT = WORLD_SIM / ".env"
-SYNTH_MAX_TOKENS = 1024
-SYNTH_TEMPERATURE = 0.2
+SYNTH_MAX_TOKENS = 2048
+SYNTH_TEMPERATURE = 0.0
 REPORT_DIR = WORLD_SIM / ".scratch" / "synthesis"
 
 
@@ -68,6 +68,8 @@ def build_synthesis_prompt(covered: list[dict], owner_ref: str) -> str:
     """The rollup request. Sources in full, invention forbidden, JSON out."""
     lines = [
         f"You are compressing {owner_ref}'s own past into durable understanding.",
+        "Your ENTIRE reply must be one JSON object and nothing else.",
+        "Do not think out loud. Do not explain. Do not preamble.",
         "Below are memory entries (heartbeat, type, content). Write a short",
         "rollup of what happened and what was learned across them.",
         "RULES:",
@@ -75,6 +77,8 @@ def build_synthesis_prompt(covered: list[dict], owner_ref: str) -> str:
         "  in the entries below. Inventing a specific is fabrication.",
         "- No emotions, beliefs, or intentions ascribed beyond what is written.",
         "- Keep the text under 800 characters.",
+        "- Your ENTIRE reply must be the JSON object and nothing else.",
+        "  Do not think out loud. Do not explain. Do not preamble.",
         "Reply with NOTHING but a JSON object of exactly this shape:",
         '{"text": "<rollup>", "salient_entities": ["<entity>", ...]}',
         "MEMORIES:",
@@ -88,16 +92,43 @@ def build_synthesis_prompt(covered: list[dict], owner_ref: str) -> str:
 
 
 def parse_synthesis_response(text: str) -> tuple[dict | None, list[str]]:
-    """Parse one model reply. Garbage is an error, never an exception."""
+    """Parse one model reply. Garbage is an error, never an exception.
+
+    Repair ladder, strictest first: pristine JSON, then fenced, then the
+    largest {...} block (models wrap replies in prose). Each step must still
+    yield the exact shape; repair never invents keys, it only unwraps.
+    """
     candidate = (text or "").strip()
-    if candidate.startswith("```"):
-        candidate = candidate.strip("`").strip()
-        if candidate.lower().startswith("json"):
-            candidate = candidate[4:].strip()
+    payload, errors = _try_parse_object(candidate)
+    if not errors:
+        return payload, []
+    fenced = _strip_fences(candidate)
+    if fenced != candidate:
+        payload, errors = _try_parse_object(fenced)
+        if not errors:
+            return payload, []
+    start, end = candidate.find("{"), candidate.rfind("}")
+    if 0 <= start < end:
+        payload, errors = _try_parse_object(candidate[start:end + 1])
+        if not errors:
+            return payload, []
+    return None, ["synthesis reply is not JSON"]
+
+
+def _strip_fences(candidate: str) -> str:
+    text = candidate.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return text
+
+
+def _try_parse_object(candidate: str) -> tuple[dict | None, list[str]]:
     try:
         payload = json.loads(candidate)
     except Exception:
-        return None, ["synthesis reply is not JSON"]
+        return None, ["not JSON"]
     if not isinstance(payload, dict):
         return None, ["synthesis reply is not an object"]
     if "text" not in payload or "salient_entities" not in payload:
@@ -204,12 +235,18 @@ def run_synthesis_pass(
         report["uncovered_remaining"] = uncovered_total
         return report
     for group in groups:
+        hbs = sorted({m.get("heartbeat", 0) for m in group})
         try:
             draft = synthesizer(group, owner_id)
         except Exception as exc:
+            # Record the message, not just the type: for unparseable replies
+            # it carries the raw snippet, which is the only evidence of what
+            # the model actually emitted. Truncated — reports are diagnostics,
+            # not archives.
             report["failed"].append({
-                "heartbeats": sorted({m.get("heartbeat", 0) for m in group}),
-                "errors": [f"synthesizer raised {type(exc).__name__}"],
+                "heartbeats": hbs,
+                "errors": [f"synthesizer raised {type(exc).__name__}: "
+                           f"{str(exc)[:400]}"],
             })
             continue
         if not isinstance(draft, dict):
@@ -274,7 +311,10 @@ def _live_synthesizer(client, model: str):
                 text = choices[0].message.content or ""
                 payload, errors = parse_synthesis_response(text)
                 if errors or payload is None:
-                    raise ValueError(f"unparseable synthesis reply: {errors}")
+                    snippet = text.strip()[:300]
+                    raise ValueError(
+                        f"unparseable synthesis reply: {errors} raw:{snippet!r}"
+                    )
                 return payload
             except _EmptySynthesisResponse as exc:
                 last_error = exc
