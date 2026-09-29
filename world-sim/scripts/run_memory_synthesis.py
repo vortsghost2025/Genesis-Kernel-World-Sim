@@ -55,6 +55,7 @@ STORES = {
     "west": WORLD_SIM / ".runtime" / "first-pair-west",
 }
 VAULT = WORLD_SIM / ".env"
+DEADKEYS = WORLD_SIM / ".env.deadkeys"
 SYNTH_MAX_TOKENS = 2048
 SYNTH_TEMPERATURE = 0.0
 REPORT_DIR = WORLD_SIM / ".scratch" / "synthesis"
@@ -280,7 +281,7 @@ def run_synthesis_pass(
 
 
 def _live_synthesizer(pool: list[str], base_url: str, model: str,
-                      provider_type: str = "openrouter"):
+                      provider_type: str = "openrouter", on_dead_key=None):
     """Pool-backed synthesizer: rotation replaces the old single-client retry.
 
     429 rotates to the next key, transient errors retry, exhaustion fails
@@ -311,7 +312,8 @@ def _live_synthesizer(pool: list[str], base_url: str, model: str,
         ]
         text, err = call_with_key_rotation(
             make_client, model, messages, pool,
-            temperature=SYNTH_TEMPERATURE, max_tokens=SYNTH_MAX_TOKENS)
+            temperature=SYNTH_TEMPERATURE, max_tokens=SYNTH_MAX_TOKENS,
+            on_dead_key=on_dead_key)
         if err is not None or not text:
             raise RuntimeError(f"synthesis transport failed: {err}")
         payload, errors = parse_synthesis_response(text)
@@ -421,16 +423,36 @@ def main(argv: list[str] | None = None) -> int:
     if not pool:
         print("SYNTHESIS REFUSED: empty credential pool", flush=True)
         return 1
-    print(f"pool_keys={len(pool)} lane={config.provider_type}", flush=True)
+    from backend.world.first_pair_cognition_model import key_fingerprint
+
+    denied_before = load_denylist()
+    pool_full = len(pool)
+    pool = [k for k in pool if key_fingerprint(k) not in denied_before]
+    print(f"pool_keys={len(pool)} lane={config.provider_type} "
+          f"denied_skipped={pool_full - len(pool)}", flush=True)
+    if not pool:
+        print("SYNTHESIS REFUSED: entire pool denylisted", flush=True)
+        return 1
+    newly_dead: list[str] = []
+
+    def _note_dead(key_index: int) -> None:
+        try:
+            fp = key_fingerprint(pool[key_index])
+            if record_dead_key(DEADKEYS, fp):
+                newly_dead.append(fp)
+        except Exception:
+            pass
+
     report = run_synthesis_pass(
         store, args.owner_ref, owner_id,
         _live_synthesizer(pool, config.base_url, config.model,
-                          config.provider_type),
+                          config.provider_type, on_dead_key=_note_dead),
         max_rollups=args.max_rollups,
         group_size=args.group_size,
         newest_first_ratio=args.newest_first_ratio,
     )
     report["pool_keys"] = len(pool)
+    report["newly_dead"] = len(newly_dead)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = (REPORT_DIR /
                    f"synthesis_{args.owner_ref}_{int(time.time())}.json")
@@ -448,6 +470,26 @@ def _fallback_model_name(config) -> str:
 
     fallback = resolve_fallback_provider(config)
     return fallback.model if fallback else "NONE"
+
+
+def load_denylist(path: Path = DEADKEYS) -> set[str]:
+    """Dead-key fingerprints, one per line. Missing file = empty set.
+    Fingerprints are irreversible: this file can be read freely."""
+    try:
+        return {ln.strip() for ln in Path(path).read_text(
+            encoding="utf-8").splitlines() if ln.strip()}
+    except OSError:
+        return set()
+
+
+def record_dead_key(path: Path, fingerprint: str) -> bool:
+    """Append one fingerprint. Returns True if newly added."""
+    existing = load_denylist(path)
+    if not fingerprint or fingerprint in existing:
+        return False
+    with open(path, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(fingerprint + "\n")
+    return True
 
 
 if __name__ == "__main__":

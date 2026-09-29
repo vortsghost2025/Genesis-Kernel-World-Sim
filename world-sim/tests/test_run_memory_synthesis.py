@@ -359,3 +359,25 @@ class TestLivePass:
         )
         # Newest groups first: [11,12],[9,10] then oldest [1,2].
         assert ranges == [(1, 2), (9, 10), (11, 12)], ranges
+
+
+class TestDenylistFile:
+    def test_round_trip(self, tmp_path):
+        path = tmp_path / ".env.deadkeys"
+        assert runner.load_denylist(path) == set()
+        assert runner.record_dead_key(path, "abc123") is True
+        assert runner.record_dead_key(path, "abc123") is False
+        assert runner.load_denylist(path) == {"abc123"}
+
+    def test_filters_pool_end_to_end(self, tmp_path):
+        from backend.world.first_pair_cognition_model import (
+            key_fingerprint,
+            load_key_pool,
+        )
+
+        path = tmp_path / ".env.deadkeys"
+        runner.record_dead_key(path, key_fingerprint("dead-1"))
+        denied = runner.load_denylist(path)
+        env = {"OPENROUTER_API_KEYS": "live-1,dead-1"}
+        assert load_key_pool(env, "OPENROUTER_API_KEYS",
+                             denylist=denied) == ["live-1"]

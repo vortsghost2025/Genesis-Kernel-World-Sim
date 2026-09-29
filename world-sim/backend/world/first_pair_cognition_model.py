@@ -87,13 +87,17 @@ def _redact_secret_text(text: str, config: ProviderConfig) -> str:
     return text
 
 
-def load_key_pool(env: dict, *names: str) -> list[str]:
+def load_key_pool(env: dict, *names: str,
+                  denylist: set[str] | None = None) -> list[str]:
     """Ordered credential pool from env: comma/newline-separated lists first,
     then legacy single keys, de-duplicated, empties dropped.
 
     `load_key_pool(env, "OPENROUTER_API_KEYS", "OPENROUTER_API_KEY")` —
     plural list wins position, legacy single appends if distinct. An empty
     pool is a valid answer (caller fails closed); never a default key.
+
+    `denylist` holds fingerprints (see `key_fingerprint`) of dead keys.
+    Denied keys are skipped silently — reporting counts, never values.
     """
     pool: list[str] = []
     for name in names:
@@ -104,6 +108,8 @@ def load_key_pool(env: dict, *names: str) -> list[str]:
             key = part.strip().strip('"').strip("'")
             if key and key not in pool:
                 pool.append(key)
+    if denylist:
+        pool, _skipped = _filter_denied(pool, denylist)
     return pool
 
 
@@ -112,6 +118,22 @@ def _redact_pool_keys(text: str, keys: list[str]) -> str:
         if key and key in text:
             text = text.replace(key, "[REDACTED]")
     return text
+
+
+def key_fingerprint(key: str) -> str:
+    """Irreversible identity for a credential: sha256 hex. Safe to persist
+    in denylists, reports, and logs — no key material is recoverable from
+    it, and equality still detects the same key."""
+    import hashlib
+
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _filter_denied(keys: list[str], denylist: set[str] | None) -> tuple[list[str], int]:
+    if not denylist:
+        return list(keys), 0
+    kept = [k for k in keys if key_fingerprint(k) not in denylist]
+    return kept, len(keys) - len(kept)
 
 
 def _extract_text(response: Any) -> str | None:
@@ -130,14 +152,18 @@ class _EmptyTransportResponse(Exception):
 
 def call_with_key_rotation(make_client, model: str, messages: list[dict],
                            keys: list[str], temperature: float,
-                           max_tokens: int) -> tuple[str | None, str | None]:
+                           max_tokens: int,
+                           on_dead_key=None) -> tuple[str | None, str | None]:
     """One model call across a credential pool. Returns (text, None) or
     (None, redacted_error).
 
     Rotation policy, each step bounded:
       * 429 → the key's quota is spent: rotate immediately, never retry it.
       * timeout/5xx/empty-choices → transient: one same-key retry, then rotate.
-      * anything else (auth, config, model 4xx) → fail fast, no rotation.
+      * 401/403 → the key is DEAD: `on_dead_key(key_index)` fires so the
+        caller can persist the fingerprint, then rotate. Only pool
+        exhaustion fails closed.
+      * anything else → fail fast, no rotation.
     Total attempts are bounded by the pool (2 per key). An empty pool fails
     closed without touching the network. Every pool key is redacted from the
     error, not just the active one.
@@ -179,6 +205,11 @@ def call_with_key_rotation(make_client, model: str, messages: list[dict],
                     retryable, rotate_now = True, False
                 elif isinstance(exc, _SE):
                     retryable, rotate_now = True, True
+                    if _status_is_dead(exc) and on_dead_key is not None:
+                        try:
+                            on_dead_key(key_index)
+                        except Exception:
+                            pass  # bookkeeping must never break transport
                 elif not _is_retryable_transport_error(exc):
                     return None, _redact_pool_keys(
                         f"{type(exc).__name__}: {exc}", keys)
@@ -192,6 +223,21 @@ def call_with_key_rotation(make_client, model: str, messages: list[dict],
                         attempts - 1, len(_TRANSPORT_BACKOFF_SECONDS) - 1)])
         last_error = _redact_pool_keys(last_error, keys)
     return None, _redact_pool_keys(last_error, keys)
+
+
+def _status_is_dead(exc: Exception) -> bool:
+    """401/403: the credential itself is rejected. Distinct from 429 (quota
+    will reset) and 5xx (provider is ill). Only dead keys are denylisted —
+    a spent key must come back next run."""
+    from openai import APIStatusError
+
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", None)
+        return status in (401, 403)
+    return False
 
 
 def _is_429(exc: Exception) -> bool:

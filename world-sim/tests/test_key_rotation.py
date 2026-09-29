@@ -205,6 +205,58 @@ class TestRotation:
         assert seen == [0, 1]
         assert err
 
+
+class TestDenylist:
+    def test_fingerprint_is_stable_hex(self):
+        from backend.world.first_pair_cognition_model import key_fingerprint
+
+        fp = key_fingerprint("sk-or-test")
+        assert len(fp) == 64
+        assert fp == key_fingerprint("sk-or-test")
+        assert all(c in "0123456789abcdef" for c in fp)
+
+    def test_fingerprint_reveals_nothing(self):
+        from backend.world.first_pair_cognition_model import key_fingerprint
+
+        fp = key_fingerprint("sk-or-test")
+        assert "sk-or-test" not in fp
+        assert "test" not in fp.replace("e", "").replace("t", "")
+
+    def test_denied_keys_filtered_silently(self):
+        from backend.world.first_pair_cognition_model import (
+            key_fingerprint,
+            load_key_pool,
+        )
+
+        env = {"OPENROUTER_API_KEYS": "live-1,dead-1,live-2"}
+        denied = {key_fingerprint("dead-1")}
+        assert load_key_pool(env, "OPENROUTER_API_KEYS",
+                             denylist=denied) == ["live-1", "live-2"]
+
+    def test_dead_callback_fires_only_on_dead_status(self, monkeypatch):
+        import backend.world.first_pair_cognition_model as cm
+        monkeypatch.setattr(cm.time, "sleep", lambda s: None)
+        dead: list = []
+        seen: list = []
+        scripts = [[_status_error(429)], [_status_error(401)],
+                   [_FakeResp("ok")]]
+        text, err = call_with_key_rotation(
+            _factory(scripts, seen), "m", [{"role": "user", "content": "x"}],
+            ["spent", "dead", "live"], temperature=0.0, max_tokens=10,
+            on_dead_key=dead.append)
+        assert err is None and text == "ok"
+        assert dead == [1], "429 is spent quota, not death; 401 is death"
+
+    def test_no_callback_no_crash(self, monkeypatch):
+        import backend.world.first_pair_cognition_model as cm
+        monkeypatch.setattr(cm.time, "sleep", lambda s: None)
+        seen: list = []
+        scripts = [[_status_error(401)], [_FakeResp("ok")]]
+        text, err = call_with_key_rotation(
+            _factory(scripts, seen), "m", [{"role": "user", "content": "x"}],
+            ["dead", "live"], temperature=0.0, max_tokens=10)
+        assert err is None and text == "ok"
+
     def test_key_material_never_in_errors(self, monkeypatch):
         import backend.world.first_pair_cognition_model as cm
         monkeypatch.setattr(cm.time, "sleep", lambda s: None)
