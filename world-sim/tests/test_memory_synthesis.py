@@ -162,6 +162,33 @@ class TestEntityGrounding:
         assert rec is None
         assert any("Evelyn" in e for e in errors)
 
+    def test_heartbeat_shorthand_grounds(self):
+        """'hb271' names heartbeat 271, which memories record as
+        'heartbeat 271'. Same fact, different shape — rejecting it burns
+        model calls on groups that can never pass. Measured live."""
+
+        def synth(covered: list[dict], owner_agent_id: str) -> dict:
+            return {
+                "text": "At hb271 gathered wild_berries at cont_a_gen_1_2.",
+                "salient_entities": ["hb271", "cont_a_gen_1_2"],
+            }
+
+        mems = [_mem(271, "Gathered wild_berries at cont_a_gen_1_2.")]
+        rec, errors = build_synthesized_summary(mems, ADAM, synth)
+        assert errors == [], errors
+        assert rec is not None
+
+    def test_heartbeat_shorthand_cannot_match_other_digits(self):
+        """hb271 grounds heartbeat 271 only — never a tile, name, or count."""
+
+        def synth(covered: list[dict], owner_agent_id: str) -> dict:
+            return {"text": "At hb999 did things.", "salient_entities": ["hb999"]}
+
+        mems = [_mem(271, "Gathered wild_berries at cont_a_gen_1_2.")]
+        rec, errors = build_synthesized_summary(mems, ADAM, synth)
+        assert rec is None
+        assert any("hb999" in e for e in errors)
+
 
 class TestBuilderGuards:
     def test_synthesizer_receives_only_covered_memories(self):
@@ -268,6 +295,50 @@ class TestCoveragePlanner:
 
     def test_nothing_uncovered_returns_nothing(self):
         assert plan_synthesis_coverage([], [], ADAM) == []
+
+
+class TestInterleavedOrder:
+    """Outsider review: pure oldest-first builds a perfect model of the past
+    while the present goes illegible. Newest memories are more likely
+    relevant; oldest carry founding narrative. Interleave 2-newest : 1-oldest
+    so recent context stays dense while history still fills."""
+
+    def test_two_newest_then_one_oldest(self):
+        mems = [_mem(hb, f"event {hb}") for hb in range(1, 13)]
+        groups = plan_synthesis_coverage(mems, [], ADAM, max_rollups=6,
+                                         group_size=2, newest_first_ratio=2)
+        hbs = [[m["heartbeat"] for m in g] for g in groups]
+        assert hbs[0] == [11, 12], hbs
+        assert hbs[1] == [9, 10], hbs
+        assert hbs[2] == [1, 2], hbs
+
+    def test_ratio_continues_across_cycles(self):
+        mems = [_mem(hb, f"event {hb}") for hb in range(1, 19)]
+        groups = plan_synthesis_coverage(mems, [], ADAM, max_rollups=6,
+                                         group_size=2, newest_first_ratio=2)
+        hbs = [[m["heartbeat"] for m in groups[i]] for i in range(6)]
+        assert hbs == [[17, 18], [15, 16], [1, 2], [13, 14], [11, 12], [3, 4]]
+
+    def test_default_remains_oldest_first(self):
+        """No caller passes the ratio yet; the default must not move."""
+        mems = [_mem(hb, f"event {hb}") for hb in range(1, 9)]
+        groups = plan_synthesis_coverage(mems, [], ADAM, max_rollups=2,
+                                         group_size=2)
+        assert [[m["heartbeat"] for m in g] for g in groups] == [[1, 2], [3, 4]]
+
+    def test_interleave_skips_covered_on_both_ends(self):
+        from backend.world.first_pair_persistence import _ensure_memory_ids
+        mems = _ensure_memory_ids(
+            [_mem(hb, f"event {hb}") for hb in range(1, 9)], owner_agent_id=ADAM
+        )
+        covered_ids = {m["memory_id"] for m in mems[:2]}
+        covered_ids.update(m["memory_id"] for m in mems[-2:])
+        groups = plan_synthesis_coverage(
+            mems, [{"covered_memory_ids": covered_ids}],
+            ADAM, max_rollups=4, group_size=2, newest_first_ratio=2,
+        )
+        hbs = sorted(m["heartbeat"] for g in groups for m in g)
+        assert hbs == [3, 4, 5, 6]
 
 
 class TestHeartbeatPathUntouched:

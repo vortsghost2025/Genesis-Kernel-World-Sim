@@ -332,3 +332,17 @@ class TestLivePass:
                                            _good_synth, max_rollups=1,
                                            group_size=4)
         json.dumps(report)
+
+    def test_ratio_passthrough_orders_newest_first(self, tmp_path):
+        store = _seeded_store(tmp_path, n=12)
+        report = runner.run_synthesis_pass(store, "east_adam", ADAM_ID,
+                                           _good_synth, max_rollups=3,
+                                           group_size=2, newest_first_ratio=2)
+        assert report["appended"] == 3
+        from backend.world.first_pair_persistence import load_summaries
+        ranges = sorted(
+            tuple(s.covered_heartbeat_range)
+            for s in load_summaries(store) if s.owner_agent_id == ADAM_ID
+        )
+        # Newest groups first: [11,12],[9,10] then oldest [1,2].
+        assert ranges == [(1, 2), (9, 10), (11, 12)], ranges

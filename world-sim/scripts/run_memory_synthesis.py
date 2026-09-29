@@ -193,6 +193,7 @@ def run_synthesis_pass(
     synthesizer,
     max_rollups: int = 2,
     group_size: int = 8,
+    newest_first_ratio: int = 0,
 ) -> dict:
     """One bounded pass: plan, synthesize, validate, append. Returns a report.
 
@@ -228,6 +229,7 @@ def run_synthesis_pass(
         owner_id,
         max_rollups=max_rollups,
         group_size=group_size,
+        newest_first_ratio=newest_first_ratio,
     )
     report["groups_considered"] = len(groups)
     if not groups:
@@ -344,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--owner-id", default=None)
     p.add_argument("--max-rollups", type=int, default=2)
     p.add_argument("--group-size", type=int, default=8)
+    p.add_argument("--newest-first-ratio", type=int, default=2,
+                   help="interleave N newest groups per 1 oldest (0 = oldest-first)")
     p.add_argument("--vault", default=str(VAULT))
     p.add_argument("--apply", action="store_true",
                    help="perform the pass; without it, dry-run only")
@@ -374,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             owner_id,
             max_rollups=args.max_rollups,
             group_size=args.group_size,
+            newest_first_ratio=args.newest_first_ratio,
         )
         print(f"DRY-RUN {args.owner_ref}: {len(groups)} group(s) would be "
               f"synthesized, 0 model calls made, 0 writes performed.",
@@ -424,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         _live_synthesizer(client, config.model),
         max_rollups=args.max_rollups,
         group_size=args.group_size,
+        newest_first_ratio=args.newest_first_ratio,
     )
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = (REPORT_DIR /

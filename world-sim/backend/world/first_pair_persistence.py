@@ -1091,9 +1091,27 @@ def validate_summary_record(
                 str(m.get("content", "")).casefold()
                 for m in resolved_for_grounding
             ]
+            # Heartbeat references normalize: memories record "heartbeat 271"
+            # while a rollup may write "hb271". Same fact, different shape —
+            # rejecting it would burn model calls on groups that can never
+            # pass. The normalization is digits-only, so "hb271" can only
+            # ever match heartbeat 271, never a tile or a name.
+            covered_hbs = {
+                str(m.get("heartbeat", "")) for m in resolved_for_grounding
+            }
+            import re as _re
+
+            def _grounded(entity: str) -> bool:
+                needle = str(entity).casefold()
+                if not needle:
+                    return False
+                if any(needle in h for h in haystacks):
+                    return True
+                hb_ref = _re.fullmatch(r"hb\s*(\d+)", needle)
+                return bool(hb_ref and hb_ref.group(1) in covered_hbs)
+
             for ent in summary.salient_entities or []:
-                needle = str(ent).casefold()
-                if not needle or not any(needle in h for h in haystacks):
+                if not _grounded(ent):
                     errors.append(
                         f"salient entity '{ent}' occurs in no covered memory: "
                         f"synthesis must not invent specifics"
@@ -1393,6 +1411,7 @@ def plan_synthesis_coverage(
     owner_agent_id: str,
     max_rollups: int = 4,
     group_size: int = 8,
+    newest_first_ratio: int = 0,
 ) -> list[list[dict]]:
     """Oldest-uncovered-first coverage planner. Pure function, no I/O.
 
@@ -1400,6 +1419,13 @@ def plan_synthesis_coverage(
     heartbeat-ordered batches, bounded by max_rollups. Phased backfill with
     no mass operation: each run covers at most max_rollups groups, oldest
     first, and hitting the bound is the caller's log line, never silence.
+
+    `newest_first_ratio=N` interleaves N newest groups per 1 oldest group
+    (2 means newest, newest, oldest, repeat). Rationale
+    (docs/memory_synthesis_spec.md): newest-uncovered memories are more
+    likely relevant to current selection, while oldest carry founding
+    narrative — pure oldest-first builds a perfect past while the present
+    goes illegible. 0 (default) preserves the original oldest-first order.
     """
     if not memories or max_rollups <= 0:
         return []
@@ -1416,11 +1442,22 @@ def plan_synthesis_coverage(
         covered.update(ids)
     uncovered = [m for m in ensured if m.get("memory_id", "") not in covered]
     uncovered.sort(key=lambda m: (m.get("heartbeat", 0), m.get("memory_id", "")))
+    step = max(1, group_size)
+    chunks = [uncovered[i:i + step] for i in range(0, len(uncovered), step)]
+    if newest_first_ratio <= 0:
+        return chunks[:max(0, max_rollups)]
+    # Interleave newest-first: N newest chunks, then 1 oldest, repeat.
+    # Chunks are oldest-first; pop newest from the end, oldest from the front.
+    from collections import deque as _deque
+    remaining = _deque(chunks)
     groups: list[list[dict]] = []
-    for i in range(0, len(uncovered), max(1, group_size)):
-        if len(groups) >= max_rollups:
-            break
-        groups.append(uncovered[i:i + max(1, group_size)])
+    while remaining and len(groups) < max_rollups:
+        for _ in range(newest_first_ratio):
+            if not remaining or len(groups) >= max_rollups:
+                break
+            groups.append(remaining.pop())
+        if remaining and len(groups) < max_rollups:
+            groups.append(remaining.popleft())
     return groups
 
 
