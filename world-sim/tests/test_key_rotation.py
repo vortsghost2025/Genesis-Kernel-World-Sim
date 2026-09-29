@@ -94,6 +94,43 @@ class TestPoolParsing:
                              "OPENROUTER_API_KEY") == []
 
 
+class TestCleanEnvPropagation:
+    """The pool must survive build_clean_env: the proof child and the live
+    process both consume the clean env, so a plural stuck in the vault file
+    is a pool of one at runtime. Measured live."""
+
+    def test_plurals_ride_from_vault_only(self, tmp_path):
+        from backend.world.canonical_heartbeat_runner import build_clean_env
+
+        vault = tmp_path / ".env"
+        vault.write_text(
+            "NVIDIA_NIM_API_KEY=nv-single\n"
+            "OPENROUTER_API_KEY=or-single\n"
+            "OPENROUTER_API_KEYS=or-a,or-b\n"
+            "NVIDIA_API_KEYS=nv-a,nv-b,nv-c\n",
+            encoding="utf-8")
+        env = build_clean_env(vault)
+        assert load_key_pool(env, "OPENROUTER_API_KEYS",
+                             "OPENROUTER_API_KEY") == ["or-a", "or-b",
+                                                       "or-single"]
+        assert load_key_pool(env, "NVIDIA_API_KEYS",
+                             "NVIDIA_API_KEY") == ["nv-a", "nv-b", "nv-c",
+                                                   "nv-single"]
+
+    def test_absent_plurals_leave_singles_unchanged(self, tmp_path):
+        from backend.world.canonical_heartbeat_runner import build_clean_env
+
+        vault = tmp_path / ".env"
+        vault.write_text(
+            "NVIDIA_NIM_API_KEY=nv-single\n"
+            "OPENROUTER_API_KEY=or-single\n",
+            encoding="utf-8")
+        env = build_clean_env(vault)
+        assert "OPENROUTER_API_KEYS" not in env
+        assert load_key_pool(env, "OPENROUTER_API_KEYS",
+                             "OPENROUTER_API_KEY") == ["or-single"]
+
+
 class TestRotation:
     def test_429_rotates_immediately(self, monkeypatch):
         import backend.world.first_pair_cognition_model as cm
@@ -142,16 +179,31 @@ class TestRotation:
         assert err, "exhaustion must report, not pretend"
         assert seen == [0, 1]
 
-    def test_auth_error_fails_fast_without_rotation(self, monkeypatch):
+    def test_auth_error_rotates_dead_key(self, monkeypatch):
+        """A 401 on one key is a dead credential, not a config error — the
+        pool exists so one dead key never stops the run. Measured live:
+        harvested keys 401'd ('User not found') while the legacy key worked."""
         import backend.world.first_pair_cognition_model as cm
         monkeypatch.setattr(cm.time, "sleep", lambda s: None)
         seen: list = []
         scripts = [[_status_error(401)], [_FakeResp("ok")]]
         text, err = call_with_key_rotation(
             _factory(scripts, seen), "m", [{"role": "user", "content": "x"}],
-            ["k1", "k2"], temperature=0.0, max_tokens=10)
+            ["dead-key", "live-key"], temperature=0.0, max_tokens=10)
+        assert err is None and text == "ok"
+        assert seen == [0, 1]
+
+    def test_all_dead_pool_fails_closed(self, monkeypatch):
+        import backend.world.first_pair_cognition_model as cm
+        monkeypatch.setattr(cm.time, "sleep", lambda s: None)
+        seen: list = []
+        scripts = [[_status_error(401)], [_status_error(401)]]
+        text, err = call_with_key_rotation(
+            _factory(scripts, seen), "m", [{"role": "user", "content": "x"}],
+            ["dead-1", "dead-2"], temperature=0.0, max_tokens=10)
         assert text is None
-        assert seen == [0], "auth failure is config, not congestion"
+        assert seen == [0, 1]
+        assert err
 
     def test_key_material_never_in_errors(self, monkeypatch):
         import backend.world.first_pair_cognition_model as cm

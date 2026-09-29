@@ -168,10 +168,17 @@ def call_with_key_rotation(make_client, model: str, messages: list[dict],
             except Exception as exc:
                 # Empty responses ride the transient path (same-key retry,
                 # then rotate) — they are congestion, not spent quota.
-                # 429 alone rotates immediately: the key is spent, retrying
-                # it only burns time.
+                # Any API STATUS error rotates: 429 (spent quota), 5xx after
+                # its same-key retry, and 4xx including 401. A 401 on one key
+                # is a dead key, not a config error — the pool exists exactly
+                # so one dead credential never stops the run. Only non-status
+                # exceptions (unknown shapes) fail fast.
+                from openai import APIStatusError as _SE
+
                 if type(exc).__name__ == "_EmptyTransportResponse":
                     retryable, rotate_now = True, False
+                elif isinstance(exc, _SE):
+                    retryable, rotate_now = True, True
                 elif not _is_retryable_transport_error(exc):
                     return None, _redact_pool_keys(
                         f"{type(exc).__name__}: {exc}", keys)

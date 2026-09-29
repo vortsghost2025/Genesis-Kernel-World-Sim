@@ -173,6 +173,13 @@ def build_clean_env(vault_path: Path) -> dict:
     env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = EVE_MODEL
     env["GENESIS_FIRST_PAIR_MODEL_WEST_ADAM"] = ADAM_MODEL
     env["GENESIS_FIRST_PAIR_MODEL_WEST_EVE"] = EVE_MODEL
+    # Credential pools ride from the VAULT only, never ambient: rotation
+    # across operator keys without letting ambient values hijack the lane.
+    # Absent plurals simply leave single-key behavior unchanged.
+    for plural in ("OPENROUTER_API_KEYS", "NVIDIA_API_KEYS"):
+        val = vault.get(plural, "").strip()
+        if val:
+            env[plural] = val
     return env
 
 
