@@ -150,28 +150,93 @@ def scan_stuck(pair: str, store: Path) -> list[dict]:
     return out
 
 
+def _is_test_build(obj: dict) -> bool:
+    """A 'Test build:' object is science, not a show moment. West Eve's
+    material matrix (HB 960-1034) produced 27 of these in one run; each
+    fired a separate [HIGH] alert. They are one story, not 27."""
+    return str(obj.get("public_description") or "").lstrip().lower().startswith(
+        "test build"
+    )
+
+
+TEST_WINDOW = 50  # heartbeats per coalescing window
+
+
+def _test_window_key(pair: str, heartbeat: int | None) -> str:
+    """One summary alert per pair per window, ever. Self-limiting: a matrix
+    run spanning many heartbeats lands in at most a few windows, and the
+    dedupe ledger holds each key forever."""
+    return f"{pair}:buildtests:{int(heartbeat or 0) // TEST_WINDOW}"
+
+
+def _agent_name(store: Path, creator_id) -> str:
+    """Resolve creator_agent_id to a name via identity.json. The old watcher
+    printed 'agent=unknown' on every build — the operator could not tell who
+    was doing anything. Unresolvable creators degrade to 'someone', never
+    an empty string."""
+    try:
+        ident = read_json(store / "identity.json").get("data", {})
+        if creator_id == ident.get("adam_agent_id"):
+            return "Adam"
+        if creator_id == ident.get("eve_agent_id"):
+            return "Eve"
+    except Exception:
+        pass
+    return "someone" if creator_id else "unknown"
+
+
 def scan_first_build(pair: str, store: Path) -> list[dict]:
-    """An agent built something. The show moment."""
+    """An agent built something. The show moment.
+
+    Real builds stay per-object and high — those ARE the news. Test builds
+    coalesce into one routine summary per window: count, range, and the
+    words 'no reply needed', because the operator's Telegram is a phone
+    screen, not a log file.
+    """
     path = store / "world_state.json"
     if not path.is_file():
         return []
     data = read_json(path).get("data", {})
-    out = []
+    real: list[tuple[str, dict]] = []
+    tests: list[dict] = []
     for obj_id, obj in (data.get("public_objects") or {}).items():
         if not isinstance(obj, dict):
             continue
         if not obj.get("materials"):
             continue  # pre-build-layer objects carry no materials
+        if _is_test_build(obj):
+            tests.append(obj)
+        else:
+            real.append((obj_id, obj))
+    out: list[dict] = []
+    for obj_id, obj in real:
+        name = _agent_name(store, obj.get("creator_agent_id"))
         out.append({
             "kind": "first_build",
             "key": f"{pair}:build:{obj_id}",
             "severity": "high",
             "pair": pair,
-            "agent": "unknown",
+            "agent": name,
             "heartbeat": obj.get("created_heartbeat"),
-            "title": f"{pair} pair built: {obj.get('object_type')}",
+            "title": f"{name} built a {obj.get('object_type')}",
             "body": (obj.get("public_description") or "")[:220],
-            "reply_hint": f"object_id={obj_id} materials={obj.get('materials')}",
+            "reply_hint": f"object {obj_id}",
+        })
+    if tests:
+        hbs = [int(t.get("created_heartbeat") or 0) for t in tests]
+        out.append({
+            "kind": "build_tests",
+            "key": _test_window_key(pair, min(hbs)),
+            "severity": "low",
+            "pair": pair,
+            "agent": "-",
+            "heartbeat": max(hbs),
+            "title": f"{pair} pair is running experiments",
+            "body": (
+                f"{len(tests)} 'Test build' objects (hb {min(hbs)}-{max(hbs)}): "
+                "systematic material testing. Science, not construction. "
+                "No reply needed."
+            ),
         })
     return out
 
@@ -270,14 +335,30 @@ def dedupe(signals: list[dict], fired: dict) -> tuple[list[dict], dict]:
 
 
 def render(sig: dict) -> str:
-    lines = [
-        f"[{sig['severity'].upper()}] {sig['title']}",
-        f"pair={sig['pair']} agent={sig['agent']} hb={sig['heartbeat']}",
-    ]
+    """Plain sentences for a phone screen. No key=value telemetry, no raw
+    materials dicts, no bracket noise. The durable log keeps reply hints;
+    Telegram gets the human version."""
+    sev = (sig.get("severity") or "info").lower()
+    label = {"high": "High", "low": "Routine"}.get(sev, "")
+    lines: list[str] = []
+    head = str(sig.get("title") or "")
+    if label:
+        head = f"{label} — {head}"
+    lines.append(head)
+    ctx: list[str] = []
+    agent = sig.get("agent")
+    if agent and str(agent) not in ("-", "", "unknown"):
+        ctx.append(f"by {agent}")
+    pair = sig.get("pair")
+    if pair and str(pair) != "-":
+        ctx.append(f"{pair} pair")
+    hb = sig.get("heartbeat")
+    if hb not in (None, "", "-"):
+        ctx.append(f"hb {hb}")
+    if ctx:
+        lines.append(" · ".join(ctx))
     if sig.get("body"):
-        lines.append(sig["body"])
-    if sig.get("reply_hint"):
-        lines.append(f"-> {sig['reply_hint']}")
+        lines.append(str(sig["body"]))
     return "\n".join(lines)
 
 
@@ -314,8 +395,11 @@ def send_telegram(sig: dict, token: str, chat_id: str, timeout: float = 15.0) ->
 def log_alert(sig: dict, path: Path | None = None) -> None:
     path = Path(path) if path is not None else Path(ALERT_LOG)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # reply_hint stays in the durable log (full fidelity) even though render
+    # keeps it off Telegram — the log is the record, the phone is the nudge.
+    hint = f"\n-> {sig['reply_hint']}" if sig.get("reply_hint") else ""
     with open(path, "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"--- {_utc_now()}\n{render(sig)}\n")
+        fh.write(f"--- {_utc_now()}\n{render(sig)}{hint}\n")
 
 
 def deliver(signals: list[dict], dry_run: bool = False, env: dict | None = None) -> dict:
