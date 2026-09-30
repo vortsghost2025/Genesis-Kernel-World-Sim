@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -129,6 +130,62 @@ def key_fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+# Denylist of dead credentials, fingerprints only. Lives beside the sim
+# vault, gitignored. The cognition path reads it on every runner start
+# (each heartbeat is a fresh process) and appends to it when a credential
+# proves dead, so a revoked key is paid for once, not once per heartbeat.
+# Anchored to this module, not the working directory: the detached runner
+# is launched from the repo root, one level above the sim.
+_DEADKEYS_PATH = Path(__file__).resolve().parents[2] / ".env.deadkeys"
+
+
+def load_denylist_file(path: Path | None = None) -> set[str]:
+    """Fingerprints of credentials known dead. Unreadable file is an empty
+    denylist, never a reason to refuse work: the worst case of ignoring it
+    is retrying a key that fails, which rotation already handles."""
+    p = Path(path) if path else Path(_DEADKEYS_PATH)
+    try:
+        return {line.strip() for line in p.read_text(encoding="utf-8").splitlines()
+                if line.strip()}
+    except OSError:
+        return set()
+
+
+def record_dead_key_file(key: str, path: Path | None = None) -> bool:
+    """Append a dead credential's fingerprint. Returns True when newly
+    written. Never writes, logs, or returns key material."""
+    fp = key_fingerprint(key)
+    p = Path(path) if path else Path(_DEADKEYS_PATH)
+    existing = load_denylist_file(p)
+    if fp in existing:
+        return False
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(fp + "\n")
+        return True
+    except OSError:
+        return False
+
+
+def build_lane_key_pool(provider_type: str,
+                        denylist: set[str] | None = None) -> list[str]:
+    """Credential pool for a provider lane, ordered, denylisted, deduped.
+
+    `openrouter` reads OPENROUTER_API_KEYS then the singular
+    OPENROUTER_API_KEY; `nvidia` reads NVIDIA_API_KEYS then
+    NVIDIA_API_KEY. An empty result is a valid answer and the caller fails
+    closed — there is never a default or invented key.
+    """
+    names = {
+        "openrouter": ("OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"),
+        "nvidia": ("NVIDIA_API_KEYS", "NVIDIA_API_KEY"),
+    }.get(provider_type, ())
+    if not names:
+        return []
+    return load_key_pool(os.environ, *names, denylist=denylist)
+
+
 def _filter_denied(keys: list[str], denylist: set[str] | None) -> tuple[list[str], int]:
     if not denylist:
         return list(keys), 0
@@ -148,6 +205,35 @@ def _extract_text(response: Any) -> str | None:
 
 class _EmptyTransportResponse(Exception):
     """200 with no usable content: the empty_response transient."""
+
+
+def _content_failure(response: Any) -> str | None:
+    """Classify a SERVED response that carries no usable content.
+
+    A lane that answers 200 with an empty body has failed, and it failed in
+    the one way that used to skip the fallback entirely (2026-09-30:
+    `empty_response` for 33 consecutive heartbeats while the degradation
+    path sat unused two branches below). Returns the failure class, or None
+    when the response carries content a repair round can work with.
+
+    Distinguishes the token cap (`finish_reason == "length"`) from a mute
+    provider: the first is a budget fact, the second is a lane fact, and
+    they read differently in the evidence.
+    """
+    try:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return "no_choices_in_response"
+        choice = choices[0]
+        raw_text = getattr(choice.message, "content", None)
+        finish_reason = getattr(choice, "finish_reason", None)
+    except Exception:
+        return "no_choices_in_response"
+    if not raw_text or not str(raw_text).strip():
+        if finish_reason == "length":
+            return "max_tokens_truncated_response"
+        return "empty_response"
+    return None
 
 
 def call_with_key_rotation(make_client, model: str, messages: list[dict],
@@ -1387,6 +1473,7 @@ class ModelCognitionBackend(CognitionBackend):
         config: ProviderConfig,
         fallback_config: ProviderConfig | None = None,
         fallback_client: Any = None,
+        key_pool: list[str] | None = None,
     ) -> ModelCognitionBackend:
         self = cls.__new__(cls)
         self._agent_ref = agent_ref
@@ -1398,6 +1485,26 @@ class ModelCognitionBackend(CognitionBackend):
         self._last_serving_provider_type = config.provider_type
         self._last_fallback_used = False
         self._last_primary_failure = ""
+        # Credential pool for this lane. Built once per runner process (each
+        # heartbeat is a fresh process) from the sim vault, minus every
+        # fingerprint already known dead. This is the wiring that was
+        # missing on 2026-09-30: the pool existed but only the synthesis
+        # backfill used it, so the heartbeat's single key hit its daily free
+        # cap and the pair went silent for 46 heartbeats with three healthy
+        # credentials sitting unused.
+        #
+        # `key_pool` is explicit: pass a list to pin the credentials this
+        # backend may use (tests pin it, production lets it come from the
+        # vault). Passing [] means "no rotation, use the injected client",
+        # which is why a fake client is never silently replaced by a real
+        # one built from ambient environment credentials.
+        self._denylist_path = _DEADKEYS_PATH
+        self._key_pool_denylist = load_denylist_file(self._denylist_path)
+        self._key_pool = (list(key_pool) if key_pool is not None else
+                          build_lane_key_pool(
+                              config.provider_type,
+                              denylist=self._key_pool_denylist))
+        self._key_pool_dead: list[str] = []
         return self
 
     @property
@@ -1547,10 +1654,44 @@ class ModelCognitionBackend(CognitionBackend):
         use_model = model if model is not None else self._model
         use_config = config if config is not None else self._config
         retryable_lane = use_config.provider_type in ("nvidia", "openrouter")
+        # Credential rotation. The primary lane carries a pool (see
+        # build_lane_key_pool): a spent or revoked key must MOVE to the next
+        # credential, not be retried into the same wall. This is what was
+        # missing on 2026-09-30, when the pair's single key hit its daily
+        # free cap and the world went silent for 46 heartbeats while three
+        # healthy keys sat unused. The fallback lane passes an explicit
+        # client and keeps the single-credential behavior.
+        pool_attr = getattr(self, "_key_pool", None)
+        has_pool = pool_attr is not None
+        dead = set(getattr(self, "_key_pool_denylist", set()) or set())
+        # The denylist holds FINGERPRINTS; the pool holds raw credentials.
+        # Comparing them directly would deny nothing, so a dead key would be
+        # retried forever. Fingerprint every candidate, as _filter_denied does.
+        raw_pool = [k for k in (pool_attr or []) if k]
+        pool = [k for k in raw_pool
+                if key_fingerprint(k) not in dead and k != use_config.api_key]
+        # A pool that exists with credentials in it, yet nothing usable left
+        # after denylisting, means every credential on this lane is known
+        # dead: fail closed rather than spend a request on one we have
+        # already written off. An EMPTY pool is not that case - it means this
+        # process has no vault credentials and the lane is running on the
+        # single configured key, which is the historical behavior and stays.
+        if client is None and raw_pool and not pool:
+            return None, "no usable provider keys in pool: refusing network call"
+        cursor = 0
         attempts_used = 0
         while True:
             attempts_used += 1
             budget[0] -= 1
+            if client is None and pool:
+                key = pool[cursor % len(pool)]
+                try:
+                    use_client = OpenAI(base_url=use_config.base_url,
+                                        api_key=key, timeout=300.0)
+                except Exception as exc:
+                    last_error = (f"client construction failed: "
+                                  f"{type(exc).__name__}")
+                    return None, last_error
             try:
                 response = use_client.chat.completions.create(
                     model=use_model,
@@ -1561,8 +1702,31 @@ class ModelCognitionBackend(CognitionBackend):
                 return response, None
             except Exception as e:
                 raw_message = _redact_secret_text(str(e), use_config)
+                # Every pool credential is redacted, not just the configured
+                # one: with rotation the ACTIVE key is usually not
+                # use_config.api_key, and a provider error that echoes it
+                # would otherwise put live key material in the store.
+                raw_message = _redact_pool_keys(
+                    raw_message, [k for k in pool if k] +
+                    [use_config.api_key or ""])
                 safe_error = sanitize_provider_error(Exception(raw_message))
                 last_error = f"{safe_error} (transport attempts: {attempts_used})"
+                # A dead credential is remembered, never retried: the next
+                # heartbeat's process must not pay for it again.
+                if _status_is_dead(e) and pool:
+                    dead_key = pool[cursor % len(pool)]
+                    if getattr(self, "_denylist_path", None) is not None:
+                        record_dead_key_file(dead_key, self._denylist_path)
+                    self._key_pool_denylist = (
+                        set(getattr(self, "_key_pool_denylist", set()) or set())
+                        | {key_fingerprint(dead_key)})
+                    self._key_pool_dead = list(
+                        getattr(self, "_key_pool_dead", []) or []) + [dead_key]
+                # Rotation advances on a spent quota (429) and on a dead
+                # credential (401/403). Both mean "this key cannot serve,
+                # try another" — the reason the wall moved past them.
+                if pool and _is_429(e) or (pool and _status_is_dead(e)):
+                    cursor += 1
                 if (
                     not retryable_lane
                     or budget[0] <= 0
@@ -1653,16 +1817,47 @@ class ModelCognitionBackend(CognitionBackend):
             self._last_primary_failure = err or "primary_failed"
             return None, err
 
-        raw_text = response.choices[0].message.content if response.choices else None
-        finish_reason = (
-            getattr(response.choices[0], "finish_reason", None)
-            if response.choices
-            else None
-        )
-        if not raw_text or not raw_text.strip():
-            if finish_reason == "length":
-                return None, "max_tokens_truncated_response"
-            return None, "empty_response"
+        # Content-level failure is a LANE failure. A 200 carrying no usable
+        # content must reach the fallback lane exactly as a transport error
+        # does - on 2026-09-30 this was the first symptom of the outage
+        # (33 heartbeats of empty_response) and it returned early here,
+        # leaving the degradation path unused while the world went mute.
+        content_err = _content_failure(response)
+        if (content_err is not None and self._fallback_config is not None
+                and not self._last_fallback_used):
+            self._last_primary_failure = content_err
+            fb_budget = [_MAX_TRANSPORT_ATTEMPTS]
+            fb_response, fb_err = self._fallback_transport(
+                [
+                    {"role": "system", "content": system_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=_MAX_COMPLETION_TOKENS,
+                budget=fb_budget,
+            )
+            fb_content_err = (_content_failure(fb_response)
+                              if fb_response is not None else None)
+            if fb_response is not None and fb_content_err is None:
+                response = fb_response
+                err = None
+                serving_config = self._fallback_config
+                serving_client = self._fallback_client
+                serving_budget = fb_budget
+                self._last_fallback_used = True
+                self._last_serving_provider_type = \
+                    self._fallback_config.provider_type
+                content_err = None
+            elif fb_response is None:
+                return None, f"{content_err} | fallback: {fb_err}"
+            else:
+                # Both lanes answered with nothing usable. Say so plainly
+                # rather than attributing the failure to one lane.
+                return None, (f"{content_err} | fallback: {fb_content_err}")
+        if content_err is not None:
+            return None, content_err
+
+        choices = response.choices
+        raw_text = choices[0].message.content if choices else None
 
         raw_json = _extract_json(raw_text)
         if raw_json is None:

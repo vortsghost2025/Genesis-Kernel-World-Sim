@@ -38,6 +38,72 @@ LEDGER = WATCH_SCRATCH / "runs.json"
 STALL_BUDGET_S = 1800
 POLL_S = 120
 
+# Inert-heartbeat budget. The tick measures the CLOCK, not the world: a
+# chain whose model route is dead keeps ticking and keeps logging "OK"
+# while both agents take no action at all. Proven on 2026-09-30 - the
+# nvidia/* routes began returning 502/403 upstream, and HB1198-1243 ran 46
+# consecutive heartbeats with zero actions while the chain reported success
+# and this watcher reported "complete". Five consecutive fully-inert
+# heartbeats (~10-15 min at the live cadence) is past any transient: a
+# single 429 or one dead key is a dead heartbeat, not a dead world.
+INERT_TAIL_THRESHOLD = 5
+
+
+def run_health(heartbeats: list[dict]) -> dict:
+    """Is the sim actually living, or just the clock?
+
+    A heartbeat is INERT when no agent acted — `action_taken` absent, or
+    present with every agent entry null. Anything either agent did counts
+    as life, so a run where one agent is silent but the other works is
+    alive, not frozen.
+
+    Returns {verdict, inert_tail, last_active_heartbeat, heartbeats_seen}.
+    `verdict` is "frozen" once the inert tail reaches
+    INERT_TAIL_THRESHOLD, "healthy" while short of it, and "unknown" when
+    there is no history at all: absence of evidence is not evidence of a
+    dead world, and this monitor has already learned that a monitor which
+    invents death from its own read failure is worse than silent.
+    """
+    rows = [r for r in heartbeats if isinstance(r, dict)]
+    if not rows:
+        return {"verdict": "unknown", "inert_tail": 0,
+                "last_active_heartbeat": None, "heartbeats_seen": 0}
+
+    def acted(row: dict) -> bool:
+        acts = row.get("action_taken") or {}
+        if not isinstance(acts, dict):
+            return False
+        return any(isinstance(a, dict) and a.get("action_type") not in
+                   (None, "", "no_action") for a in acts.values())
+
+    inert_tail = 0
+    last_active = None
+    for row in rows:
+        n = row.get("heartbeat_number")
+        if acted(row):
+            inert_tail = 0
+            last_active = n
+        else:
+            inert_tail += 1
+    verdict = "frozen" if inert_tail >= INERT_TAIL_THRESHOLD else "healthy"
+    return {"verdict": verdict, "inert_tail": inert_tail,
+            "last_active_heartbeat": last_active,
+            "heartbeats_seen": len(rows)}
+
+
+def load_heartbeats(pair: str, limit: int = 60) -> list[dict]:
+    """Most recent heartbeat records for a pair, oldest-first.
+
+    Reads the store's own heartbeat ledger. Returns [] when unreadable —
+    never a fabricated history.
+    """
+    data = _read_json(STORES.get(pair, STORES["east"]) / "heartbeat.json")
+    rows = data.get("data", data)
+    if not isinstance(rows, list):
+        return []
+    rows = [r for r in rows if isinstance(r, dict)]
+    return rows[-limit:] if limit else rows
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -100,7 +166,15 @@ def classify(tick: int | None, target_end: int, chain_alive: bool,
 
 
 def terminal_message(state: str, pair: str, tick: int | None, target_end: int,
-                     reason: str = "") -> str:
+                     reason: str = "", inert_tail: int | None = None) -> str:
+    if state == "frozen":
+        span = f" for the last {inert_tail} heartbeats" if inert_tail else ""
+        return (f"Genesis: the agents have stopped acting{span}. {pair} is at "
+                f"HB{tick} of a run targeting {target_end}, and NEITHER agent "
+                f"has taken an action. The clock is still advancing; the "
+                f"world is not. This is a model/provider failure, not a "
+                f"result about the agents - these heartbeats are not "
+                f"evidence. Needs a human look.")
     if state == "complete":
         return (f"Genesis: census run complete. {pair} reached HB{target_end} "
                 f"(100 heartbeats, no action needed).")
@@ -188,12 +262,21 @@ def monitor_once(pair: str, start: int, end: int,
     # Movement clock: newest evidence/status mtime in the lockstep dir.
     move_age = _seconds_since_last_evidence()
     state = classify(tick, end, alive, move_age)
+    health = run_health(load_heartbeats(pair))
+    # A run that produced no actions is not succeeding, whether or not it
+    # has reached its target. Reaching the end is a property of the clock;
+    # the agents acting is a property of the world. Proven on 2026-09-30,
+    # when 46 dead heartbeats were reported to the operator as a completed
+    # census and nobody knew the sim had been frozen since HB1198.
+    if health["verdict"] == "frozen":
+        state = "frozen"
     result: dict = {"state": state, "tick": tick, "chain_alive": alive,
-                    "run": run_key}
-    if state in ("complete", "stopped", "stalled") and not already_sent(
-            run_key, state):
-        reason = "" if state == "complete" else last_stop_reason()
-        msg = terminal_message(state, pair, tick, end, reason)
+                    "run": run_key, "health": health}
+    if state in ("complete", "stopped", "stalled", "frozen") and \
+            not already_sent(run_key, state):
+        reason = "" if state in ("complete", "frozen") else last_stop_reason()
+        msg = terminal_message(state, pair, tick, end, reason,
+                               inert_tail=health["inert_tail"])
         ok, detail = send_telegram_text(msg)
         result["notified"] = ok
         result["notify_detail"] = detail

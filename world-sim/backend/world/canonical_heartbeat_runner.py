@@ -52,10 +52,25 @@ CREATE_NO_WINDOW = 0x08000000
 # drift apart. The fallback MUST end in ':free' - the guard rejects anything
 # else. Both lanes are free, so a provider failure degrades availability
 # rather than cost.
-PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-FALLBACK_MODEL = "z-ai/glm-5.2:free"
-ADAM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
-EVE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+#
+# MODEL ERA 2 (2026-09-30). Era 1 was nvidia/nemotron-3-ultra-550b-a55b:free
+# and is DEAD UPSTREAM, not quota-blocked: all three nvidia/* routes on
+# OpenRouter return 502 wrapping NVIDIA's 403 "Authorization failed"
+# (measured: 3/3 nvidia routes, 0.2-0.4s, every request size). This froze
+# the pair for 46 consecutive heartbeats (HB1198-1243) while the chain
+# reported "OK" and the watcher reported "complete" - the failure was
+# invisible from every human surface.
+#
+# Both models below were verified against the REAL contract before being
+# named here: each was called with both east agents' live contexts
+# (319k and 367k char prompts) and its output passed
+# validate_model_output with a real proposed action
+# (.scratch/contract_probe.json). A 200 is not evidence; a validated
+# action is. Re-verify with that same probe before trusting either.
+PRIMARY_MODEL = "dots-studio/dots-3-note-preview:free"
+FALLBACK_MODEL = "inclusionai/ling-3.0-flash-sante:free"
+ADAM_MODEL = "dots-studio/dots-3-note-preview:free"
+EVE_MODEL = "dots-studio/dots-3-note-preview:free"
 
 # Single source of truth for the lane endpoint. build_clean_env() writes this
 # and resolution_proof() asserts the resolver honored it, so the configured
