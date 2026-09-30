@@ -97,7 +97,10 @@ class TestRetiredMechanicsAreGone:
         assert GATHER_YIELD == 1
 
     def test_version_moved_to_the_new_era(self):
-        assert PHYSICS_VERSION == "epistemic.1.1"
+        # epistemic.2: the enclosure (docs/world_walls_spec.md). Bumped
+        # deliberately — the version test pins the CURRENT era, and the
+        # gate (new_to_agent) re-arms once per agent to announce it.
+        assert PHYSICS_VERSION == "epistemic.2"
 
     def test_runtime_has_no_pressure_step(self):
         rt = FirstPairRuntime(heartbeat_limit=1, store=_fresh_store(Path(".")))
@@ -312,10 +315,12 @@ class TestTermsChangelog:
     def test_changelog_gives_no_strategy(self):
         """A changelog states facts. It must not tell an agent what to do."""
         from backend.world.world_terms import terms_change_line
-        line = terms_change_line("epistemic.1").lower()
-        for directive in ("you should", "you must", "try to", "build a",
-                          "gather more", "in order to"):
-            assert directive not in line, f"changelog gives advice: {directive!r}"
+        for version in ("epistemic.1", PHYSICS_VERSION):
+            line = terms_change_line(version).lower()
+            for directive in ("you should", "you must", "try to", "build a",
+                              "gather more", "in order to"):
+                assert directive not in line, (
+                    f"changelog for {version} gives advice: {directive!r}")
 
     def test_unknown_version_is_empty_not_invented(self):
         from backend.world.world_terms import terms_change_line
@@ -328,7 +333,12 @@ class TestTermsChangelog:
         prompt = build_system_prompt(rt._build_context("east_adam", 1))
         assert "terms have changed" in prompt
         assert "No longer true" in prompt
-        assert "food counter" in prompt
+        # epistemic.2: the enclosure announcement (world_walls_spec §3).
+        # Pins the CURRENT changelog — when the version moves again, this
+        # pin moves with it, deliberately.
+        assert "too deep to wade" in prompt
+        assert "too dark to enter" in prompt
+        assert "built and left standing" in prompt
 
     def test_prompt_does_not_repeat_the_changelog_every_heartbeat(self, tmp_path):
         store = _fresh_store(tmp_path)

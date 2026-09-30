@@ -310,14 +310,127 @@ def cognition_safe_observation(
     return observation
 
 
+# --- World walls (docs/world_walls_spec.md) -----------------------------
+# One rule, three keys: a public object whose object_type or object_id names
+# a key and which stands adjacent to a barrier tile of the matching biome
+# opens travel to that barrier tile — for everyone, because a raft standing
+# in the world is a public fact. The wall itself is made of MISSING EDGES
+# (blocks_travel alone does not gate derive_topology), so the unlock works
+# by synthesizing the edges the wall removed.
+BARRIER_UNLOCK_KEYS = {
+    # barrier biome        -> object key (object_type or object_id)
+    "deep_lake": "raft",
+    "dark_thicket": "campfire",
+    "deep_ravine": "bridge",
+}
+
+
+def _barrier_tiles_by_biome(true_map: dict[str, Any]) -> dict[str, dict]:
+    """Barrier tiles by tile_id: biome-locked, blocks_travel true."""
+    out: dict[str, dict] = {}
+    for t in true_map.get("tiles", []):
+        if not isinstance(t, dict):
+            continue
+        biome = t.get("biome")
+        if biome in BARRIER_UNLOCK_KEYS and t.get("blocks_travel"):
+            out[t.get("tile_id", "")] = t
+    return out
+
+
+def _geo_neighbors(tile: dict, coord_index: dict) -> list[str]:
+    """4-connected neighbor tile ids via coordinate lookup — not id-string
+    arithmetic, which breaks on named tiles (public-shared-center, origin
+    tiles) and any future naming. The true map stores travel edges
+    4-connected and bidirectional; the unlock synthesizes edges in the same
+    shape."""
+    coords = tile.get("coordinates") or {}
+    x, y = coords.get("x"), coords.get("y")
+    if x is None or y is None:
+        return []
+    return [coord_index[(x + dx, y + dy)]
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+            if (x + dx, y + dy) in coord_index]
+
+
+def _synthesized_unlock_edges(true_map: dict[str, Any],
+                              public_objects: list[dict]) -> list[dict]:
+    """Edges a standing key object adds: object's tile -> adjacent barrier
+    of the matching biome -> that barrier's non-barrier neighbors.
+
+    The barrier never links sideways to other barriers (locked or not):
+    each wall tile answers only to a key standing next to IT. Fog still
+    governs downstream — both endpoints must be known for an edge to act.
+    """
+    if not public_objects:
+        return []
+    barriers = _barrier_tiles_by_biome(true_map)
+    if not barriers:
+        return []
+    tiles_by_id = {t.get("tile_id"): t
+                   for t in true_map.get("tiles", []) if isinstance(t, dict)}
+    coord_index = {}
+    for t in true_map.get("tiles", []):
+        if not isinstance(t, dict):
+            continue
+        c = t.get("coordinates") or {}
+        if c.get("x") is not None and c.get("y") is not None:
+            coord_index[(c["x"], c["y"])] = t.get("tile_id")
+    edges: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(a: str, b: str) -> None:
+        for pair in ((a, b), (b, a)):
+            if pair not in seen:
+                seen.add(pair)
+                edges.append({"from_tile_id": pair[0],
+                              "to_tile_id": pair[1]})
+
+    for obj in public_objects:
+        if not isinstance(obj, dict):
+            continue
+        key_claim = " ".join([
+            str(obj.get("object_type") or ""),
+            str(obj.get("object_id") or ""),
+        ]).casefold()
+        stand_tile = obj.get("tile_id")
+        if not stand_tile or stand_tile not in tiles_by_id:
+            continue
+        for biome, key in BARRIER_UNLOCK_KEYS.items():
+            if key not in key_claim:
+                continue
+            for nb_id in _geo_neighbors(tiles_by_id[stand_tile],
+                                        coord_index):
+                barrier = barriers.get(nb_id)
+                if not barrier or barrier.get("biome") != biome:
+                    continue
+                # The key stands adjacent: barrier opens to its non-barrier
+                # neighbors (both shores). Sideways barrier links stay gone.
+                for open_id in _geo_neighbors(barrier, coord_index):
+                    neighbor = tiles_by_id.get(open_id)
+                    if neighbor is None or open_id in barriers:
+                        continue
+                    if neighbor.get("blocks_travel"):
+                        continue  # never bridge onto unrelated blocked land
+                    _add(stand_tile, nb_id)
+                    _add(nb_id, open_id)
+                break
+    return edges
+
+
 def derive_topology(
     true_map: dict[str, Any],
     known_maps: list[dict[str, Any]],
+    public_objects: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Derive a runtime policy topology from known tiles ∩ travel edges.
 
     Returns {allowed_tile_ids, tiles (with adjacency), movement_allowed,
     one_edge_per_heartbeat} matching the living policy topology shape.
+
+    `public_objects` (flat records from world state) synthesize unlock edges
+    per BARRIER_UNLOCK_KEYS: a raft by deep water opens the water, a
+    campfire by a dark thicket opens the thicket, a bridge by a ravine
+    opens the ravine — for every agent, because objects are public.
     """
     known_union: set[str] = set()
     for km in known_maps:
@@ -327,8 +440,10 @@ def derive_topology(
     known_union.update(_HISTORICAL_HABITAT_TILES)
 
     # Filter travel edges: both endpoints must be known
+    all_edges = list(true_map.get("travel_edges", []))
+    all_edges.extend(_synthesized_unlock_edges(true_map, public_objects or []))
     active_edges: list[tuple[str, str]] = []
-    for edge in true_map.get("travel_edges", []):
+    for edge in all_edges:
         from_id = edge.get("from_tile_id", "")
         to_id = edge.get("to_tile_id", "")
         if from_id in known_union and to_id in known_union:

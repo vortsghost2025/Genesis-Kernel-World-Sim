@@ -51,4 +51,8 @@ GATHER_YIELD = 1
 # False forever and the message never reached the only agents it was
 # written for - verified live, they kept burning berries at HB842-846.
 # The bump re-arms the gate once for every agent.
-PHYSICS_VERSION = "epistemic.1.1"
+# epistemic.2 is a REAL physics change (docs/world_walls_spec.md): the
+# enclosure. The world is now bounded near the explored frontier by deep
+# water west and east, a dark thicket north, a ravine south. The changelog
+# entry states the removals and the one rule addition, nothing else.
+PHYSICS_VERSION = "epistemic.2"

@@ -19,6 +19,7 @@ venv/
 Thumbs.db
 data/**/*.json
 data/**/*.jsonl
+data/**/*.pre-walls-bak
 data/audio/
 data/stream/
 data/scenes/

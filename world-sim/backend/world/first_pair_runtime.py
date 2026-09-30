@@ -380,7 +380,10 @@ class FirstPairRuntime:
                 load_known_map(self._store.root, ref)
                 for ref in (self._adam_ref, self._eve_ref)
             ]
-            topology = derive_topology(true_map, known_maps)
+            topology = derive_topology(
+                true_map, known_maps,
+                public_objects=self._public_object_list(),
+            )
             for tile in topology["tiles"]:
                 if tile["tile_id"] == current_pos:
                     return tile["adjacent"]
@@ -395,9 +398,40 @@ class FirstPairRuntime:
                 load_known_map(self._store.root, ref)
                 for ref in (self._adam_ref, self._eve_ref)
             ]
-            topology = derive_topology(true_map, known_maps)
+            topology = derive_topology(
+                true_map, known_maps,
+                public_objects=self._public_object_list(),
+            )
             return topology["allowed_tile_ids"]
         return self._runtime_policy.topology.get("allowed_tile_ids", [])
+
+    def _public_object_list(self) -> list[dict]:
+        """Flat public-object records for the wall-unlock seam.
+
+        The prompt already reads world_public_objects the same flat way;
+        this is the same data through the same shape, so the unlock rule
+        and the anchor section can never disagree about what stands where.
+        """
+        return [
+            obj for obj in (self._world_state.public_objects or {}).values()
+            if isinstance(obj, dict)
+        ]
+
+    def _known_hazards_for(self, agent_ref: str, tile_id: str) -> list[str]:
+        """Hazards the mover has personally observed on a tile, from its own
+        known map. Empty when the tile is unknown — an unseen wall gives no
+        names, a seen one tells the truth."""
+        if not tile_id:
+            return []
+        try:
+            km = load_known_map(self._store.root, agent_ref)
+            tile = (km.get("known_tiles") or {}).get(tile_id)
+            if not isinstance(tile, dict):
+                return []
+            return [h for h in (tile.get("observed_hazards") or [])
+                    if isinstance(h, str) and h.strip()]
+        except Exception:
+            return []
 
     def _merge_and_persist_known_map(
         self, agent_ref: str, observation: dict[str, Any], tick: int
@@ -1005,6 +1039,18 @@ class FirstPairRuntime:
         target = action.get("target_tile")
         allowed = self._get_effective_allowed_tiles()
         if target not in allowed:
+            # A wall teaches nothing if the refusal is opaque. Name the
+            # barrier's own hazard (world_walls_spec §2) — state what is
+            # true, never what to do. Unknown/unseen targets keep the
+            # generic reason.
+            hazards = self._known_hazards_for(agent_ref, target)
+            if hazards:
+                return {
+                    "status": "blocked",
+                    "reason": (
+                        f"Cannot move to {target}: {', '.join(hazards)}"
+                    ),
+                }
             return {"status": "blocked", "reason": f"Tile {target} not in runtime policy allowed tiles"}
 
         current_pos = self._world_state.tile_occupancy.get(agent_ref)

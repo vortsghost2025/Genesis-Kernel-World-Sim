@@ -38,8 +38,21 @@ TERMS_CHANGELOG: dict[str, str] = {
 # already happened.
 TERMS_CHANGELOG["epistemic.1.1"] = TERMS_CHANGELOG["epistemic.1"]
 
-CURRENT_TERMS = "epistemic.1.1"
-PREVIOUS_TERMS = "epistemic.1"
+# epistemic.2: the enclosure (docs/world_walls_spec.md). A real physics
+# change, stated as removals and one rule, never as advice. The last two
+# sentences state the unlock mechanic the same way the operator's
+# food-mechanics answers stated theirs: what the rules are, not what to do.
+TERMS_CHANGELOG["epistemic.2"] = (
+    "No longer true: that the land continues in every direction. To the "
+    "west and east the water is now too deep to wade. To the north the "
+    "thicket is too dark to enter. To the south the ground drops away "
+    "into darkness. Walking stops at these. Some things, built and left "
+    "standing, can change what can be crossed - the world does not say "
+    "which. Test what you conclude."
+)
+
+CURRENT_TERMS = "epistemic.2"
+PREVIOUS_TERMS = "epistemic.1.1"
 
 
 def terms_change_line(version: str) -> str:
