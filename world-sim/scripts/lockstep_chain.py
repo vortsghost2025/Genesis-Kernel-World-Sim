@@ -329,12 +329,57 @@ def main() -> int:
         count, tick, _ = store_state(pair)
         print(f"PREFLIGHT {pair}: count={count} tick={tick} "
               f"(needs {start - 1} to start at {start})", flush=True)
+        # Record the run so a boot has something to reason about. The
+        # machine rebooted mid-census on 2026-09-30 and nobody found out
+        # for hours; recover_runs.py can only resume a run it knows about.
+        try:
+            from recover_runs import record_run_state
+            record_run_state(pair, start, end, os.getpid())
+        except Exception as exc:
+            print(f"  run-state not recorded: {type(exc).__name__}",
+                  flush=True)
 
-    for hb in range(start, end + 1):
-        if not run_tick(hb):
+    # Store lock: refuse to run beside another writer on the same store.
+    # Interleaving two chains into one heartbeat ledger produces a record
+    # that looks plausible and is wrong, and no later check can detect it.
+    lock_paths = []
+    for pair in pairs:
+        try:
+            sys.path.insert(0, str(WORLD_SIM / "scripts"))
+            from recover_runs import acquire_store_lock
+            got = acquire_store_lock(pair, os.getpid())
+        except Exception as exc:
+            print(f"LOCK {pair}: unavailable ({type(exc).__name__}: {exc}) "
+                  f"- refusing to run beside a possible second writer",
+                  flush=True)
             return 1
-        if snapshots and hb % SNAPSHOT_EVERY == 0:
-            push_snapshot()
+        if got is None:
+            print(f"LOCK {pair}: held by a live chain - refusing to start. "
+                  f"Two writers on one store would corrupt the heartbeat "
+                  f"ledger. If no chain is actually running, delete "
+                  f"{WORLD_SIM / '.scratch' / 'lockstep' / f'chain_{pair}.lock'}",
+                  flush=True)
+            for p in lock_paths:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return 1
+        lock_paths.append(got)
+        print(f"LOCK {pair}: acquired (pid {os.getpid()})", flush=True)
+
+    try:
+        for hb in range(start, end + 1):
+            if not run_tick(hb):
+                return 1
+            if snapshots and hb % SNAPSHOT_EVERY == 0:
+                push_snapshot()
+    finally:
+        for p in lock_paths:
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     for pair in PAIRS:
         count, tick, occ = store_state(pair)
