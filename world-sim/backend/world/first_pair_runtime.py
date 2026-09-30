@@ -1303,6 +1303,26 @@ class FirstPairRuntime:
     def _apply_cognition_output(
         self, agent_ref: str, output: Any, heartbeat_number: int
     ) -> None:
+        # --- Free speech (docs/free_messaging_spec.md) ---
+        # Delivered here, beside the action's own bookkeeping, so speaking
+        # costs no part of the cycle. Delivery is deliberately independent
+        # of the action's outcome: a refusal ("water_too_deep_to_wade") is
+        # the most speakable thing that can happen to an agent, and a
+        # message about it must not be swallowed by it. A malformed
+        # message is dropped silently rather than allowed to disturb the
+        # action, which has already been executed by this point.
+        free_msg = getattr(output, "message", None)
+        if isinstance(free_msg, dict) and free_msg.get("message"):
+            self._execute_leave_public_message(
+                agent_ref,
+                {
+                    "action_type": "leave_public_message",
+                    "message": free_msg.get("message"),
+                    "recipient": free_msg.get("recipient") or "all",
+                },
+                heartbeat_number,
+            )
+
         goal_updates = output.goal_updates if isinstance(output.goal_updates, list) else []
         for gu in goal_updates:
             if not isinstance(gu, dict):

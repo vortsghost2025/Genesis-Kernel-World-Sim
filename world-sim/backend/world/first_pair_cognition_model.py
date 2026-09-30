@@ -379,7 +379,14 @@ _REQUIRED_TOP_FIELDS = frozenset({
 # proposed action (docs/continuity_slot_spec.md §4).
 _OPTIONAL_TOP_FIELDS = frozenset({
     "continuity_update",
+    "message",
 })
+
+# A free message is exactly the shape `leave_public_message` already takes,
+# minus the action_type: {"recipient", "message"}. Bounded like the action
+# it shadows — one message, and not an essay.
+_MESSAGE_FIELDS = frozenset({"recipient", "message"})
+_MAX_MESSAGE_CHARS = 2000
 
 _VALID_STATUSES = frozenset({"active", "completed", "abandoned", "in_progress"})
 _VALID_URGENCY = frozenset({"low", "medium", "high"})
@@ -782,6 +789,11 @@ class ModelOutput:
     proposed_action: dict | None = None
     memory_candidates: list[dict] = field(default_factory=list)
     questions_for_humans: list[dict] = field(default_factory=list)
+    # Free speech (docs/free_messaging_spec.md). One optional message per
+    # heartbeat that rides ALONGSIDE proposed_action instead of consuming
+    # the single action slot — the budget problem that ended their
+    # communication after 360 messages.
+    message: dict | None = None
     uncertainty: str = ""
     decision_summary: str = ""
     confidence: float = 0.0
@@ -962,6 +974,37 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
     elif "memory_candidates" in raw:
         errors.append("memory_candidates:wrong_type")
 
+    # --- message (free speech, docs/free_messaging_spec.md) ---
+    # Optional and additive. Validated like the action it shadows: same
+    # field set, same bound, same "malformed must not veto the action"
+    # rule that governs continuity_update.
+    msg_raw = raw.get("message")
+    if msg_raw is not None:
+        if not isinstance(msg_raw, dict):
+            errors.append("message:not_a_dict")
+        else:
+            msg_errors: list[str] = []
+            msg_errors.extend(_reject_unknown_fields(msg_raw, _MESSAGE_FIELDS,
+                                                     "message"))
+            for f in ("recipient", "message"):
+                if f not in msg_raw or not isinstance(msg_raw[f], str):
+                    msg_errors.append(f"message:missing_or_invalid_{f}")
+            body = msg_raw.get("message")
+            if isinstance(body, str):
+                if not body.strip():
+                    msg_errors.append("message:empty")
+                else:
+                    err = _check_length(body, _MAX_MESSAGE_CHARS,
+                                        "message:message")
+                    if err:
+                        msg_errors.append(err)
+            errors.extend(msg_errors)
+            if not msg_errors:
+                output.message = {
+                    "recipient": msg_raw["recipient"] or "all",
+                    "message": msg_raw["message"],
+                }
+
     # --- questions_for_humans ---
     qs_raw = raw.get("questions_for_humans")
     if isinstance(qs_raw, list):
@@ -1069,6 +1112,17 @@ Available actions:
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently
+"""
+
+# Free speech. One optional top-level field, documented in the contract and
+# nowhere else. Deliberately carries no guidance about when to use it: the
+# world states what the fields are, never what an agent should do with them
+# (docs/free_messaging_spec.md §3). It sits beside the action, not inside
+# it, so speaking no longer competes with acting for one slot.
+_MESSAGE_FIELD_DESC = """
+Optional: "message" — {"recipient": "<agent_ref or 'all'>", "message": "<text>"}.
+At most one per cycle. It is left in the world in addition to your action
+for this cycle; it does not replace it and is not one of your actions.
 """
 
 
@@ -1351,7 +1405,7 @@ Unresolved questions you have asked:
 Answers you have received:
 {answered_str}
 {_AVAILABLE_ACTIONS_DESC}
-
+{_MESSAGE_FIELD_DESC}
 You must respond with a single JSON object containing exactly these fields:
 - observation_summary (string): a concise summary of what you observe
 - self_model_update (string or null): an optional update to your internal self-model
@@ -1612,6 +1666,7 @@ class ModelCognitionBackend(CognitionBackend):
             memory_write=memory_write,
             goal_updates=goal_updates,
             questions_raised=questions,
+            message=validated.message,
             internal_reasoning="; ".join(reasoning_parts) if reasoning_parts else "No cognition details.",
             confidence=validated.confidence,
             observation_summary=validated.observation_summary,

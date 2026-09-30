@@ -101,6 +101,11 @@ class CognitionOutput:
     # Piggyback continuity metadata (validated, may be None). Applied by the
     # runtime after action execution; never capable of vetoing it.
     continuity_update: dict | None = None
+    # Free speech (docs/free_messaging_spec.md): at most one message per
+    # cycle, delivered IN ADDITION to the action rather than in place of it.
+    # Absent on every output predating the field, which is why the runtime
+    # reads it with getattr.
+    message: dict | None = None
 
 
 class CognitionBackend(ABC):

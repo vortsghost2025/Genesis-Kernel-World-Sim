@@ -33,6 +33,9 @@ STORES = {
 WATCH_SCRATCH = WORLD_SIM / ".scratch" / "chain_watch"
 LEDGER = WATCH_SCRATCH / "runs.json"
 
+ADAM_REF = "east_adam"
+EVE_REF = "east_eve"
+
 # A heartbeat lands every ~2-3 min; 30 min without movement while the chain
 # is supposed to be running means dead-or-wedged, not slow.
 STALL_BUDGET_S = 1800
@@ -103,6 +106,152 @@ def load_heartbeats(pair: str, limit: int = 60) -> list[dict]:
         return []
     rows = [r for r in rows if isinstance(r, dict)]
     return rows[-limit:] if limit else rows
+
+
+# --- Progress pings -------------------------------------------------------
+# The terminal messages answer "is it broken". These answer "is it
+# happening" - the question a person waiting on a long run actually has.
+# Sent by this process, because the person waiting is not required to be
+# awake for the world to report on itself.
+
+_PROGRESS_EVERY = 25
+
+_AGENT_LABELS = {
+    "east_adam": "Adam", "east_eve": "Eve",
+    "west_adam": "Adam", "west_eve": "Eve",
+}
+
+
+def _tile_xy(tile: str) -> tuple[int, int] | None:
+    """(x, y) from a gen tile id, or None when the shape is unfamiliar."""
+    try:
+        parts = str(tile).split("_")
+        return int(parts[-2]), int(parts[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _row_tile(row: dict, who: str) -> str:
+    """Where an agent stood, read from the store's real shape.
+
+    `position` is an empty string on every row in this store's history -
+    the location is in `observation[agent_ref].tile_id`. Reading the empty
+    field is what made the first live render say "0 tiles nowhere".
+    """
+    obs = row.get("observation")
+    if isinstance(obs, dict):
+        entry = obs.get(who)
+        if isinstance(entry, dict):
+            tid = entry.get("tile_id")
+            if isinstance(tid, str) and tid:
+                return tid
+    pos = row.get("position")
+    if isinstance(pos, dict):
+        tid = pos.get(who)
+        if isinstance(tid, str) and tid:
+            return tid
+    return ""
+
+
+def window_summary(heartbeats: list[dict], since_hb: int, to_hb: int) -> dict:
+    """What each agent did between two heartbeats.
+
+    Counts real move/gather actions from the ledger rather than inferring
+    activity from position, and derives a compass direction from net
+    displacement. A missing location yields "nowhere" - never a guess.
+    """
+    window = [r for r in heartbeats
+              if since_hb < (r.get("heartbeat_number") or 0) <= to_hb]
+    out: dict[str, dict] = {}
+    for row in window:
+        for who in (ADAM_REF, EVE_REF):
+            acts = (row.get("action_taken") or {}).get(who)
+            if isinstance(acts, dict):
+                at = acts.get("action_type")
+                if at in ("move", "gather"):
+                    rec = out.setdefault(who, _blank_agent())
+                    rec[at + "s"] += 1
+            tile = _row_tile(row, who)
+            if tile:
+                rec = out.setdefault(who, _blank_agent())
+                rec["_first_tile"] = rec.get("_first_tile") or tile
+                rec["_last_tile"] = tile
+    for who, rec in out.items():
+        first = _tile_xy(rec.pop("_first_tile", ""))
+        last = _tile_xy(rec.pop("_last_tile", ""))
+        if first and last:
+            rec["net_tiles"] = abs(last[0] - first[0]) + abs(last[1] - first[1])
+            rec["direction"] = _compass(first, last)
+            rec["at"] = f"{last[0]},{last[1]}"
+        else:
+            rec["net_tiles"] = 0
+            rec["direction"] = "nowhere"
+            rec["at"] = None
+    return out
+
+
+def _blank_agent() -> dict:
+    return {"moves": 0, "gathers": 0, "net_tiles": 0, "direction": "nowhere",
+            "at": None}
+
+
+def _compass(first: tuple[int, int], last: tuple[int, int]) -> str:
+    dx, dy = last[0] - first[0], last[1] - first[1]
+    if dx == 0 and dy == 0:
+        return "nowhere"
+    if abs(dx) >= abs(dy):
+        return "east" if dx > 0 else "west"
+    return "north" if dy > 0 else "south"
+
+
+def progress_message(pair: str, since_hb: int, target_end: int, summary: dict,
+                     tick: int | None, messages: int, objects_built: int,
+                     questions: int, first_message: str = "") -> str:
+    """One short paragraph a person can read on a phone.
+
+    Plain sentences by construction: agent names, counts, compass
+    directions. No ids, no field names, no dumps - the run monitor's
+    terminal messages are the ones that carry diagnostics, and they carry
+    them once.
+    """
+    bits = []
+    for who in (ADAM_REF, EVE_REF):
+        rec = summary.get(who)
+        if not rec:
+            continue
+        name = _AGENT_LABELS.get(who, who)
+        if rec["moves"] and rec["direction"] != "nowhere":
+            where = (f", now at {rec['at']}" if rec["at"] else "")
+            bits.append(f"{name} made {rec['moves']} moves, net "
+                        f"{rec['net_tiles']} tiles {rec['direction']}{where}")
+        elif rec["moves"]:
+            bits.append(f"{name} made {rec['moves']} moves without going "
+                        f"anywhere in particular")
+        elif rec["gathers"]:
+            bits.append(f"{name} spent this stretch gathering "
+                        f"({rec['gathers']} times)")
+        else:
+            bits.append(f"{name} did nothing")
+    who_line = "; ".join(bits) if bits else "no agent activity recorded"
+
+    tail = []
+    if messages:
+        tail.append(f"they have sent {messages} message"
+                    f"{'s' if messages != 1 else ''} to each other")
+    else:
+        tail.append("they have sent no messages to each other")
+    if objects_built:
+        tail.append(f"built {objects_built} object"
+                    f"{'s' if objects_built != 1 else ''}")
+    if questions:
+        tail.append(f"asked the operator {questions} question"
+                    f"{'s' if questions != 1 else ''}")
+
+    msg = (f"Genesis: {pair} is {tick - since_hb + 1} of {target_end - since_hb + 1} "
+           f"heartbeats in. {who_line}. {'; '.join(tail).capitalize()}.")
+    if first_message:
+        msg += f' The first one said: "{first_message[:140]}"'
+    return msg
 
 
 def _utc_now() -> str:
@@ -312,6 +461,65 @@ def announce_start(pair: str, start: int, end: int) -> dict:
     return {"announced": ok, "detail": detail}
 
 
+def window_counts(pair: str, since_hb: int, to_hb: int) -> tuple[int, int, int, str]:
+    """(messages, objects, questions, first message text) created in a window.
+
+    Read from the world state, not inferred. A message is worth quoting:
+    when they finally speak, the words matter more than the count.
+    """
+    data = _read_json(STORES.get(pair, STORES["east"]) / "world_state.json")
+    inner = data.get("data", data)
+
+    def _hb_of(rec: dict) -> int:
+        for k in ("heartbeat", "created_heartbeat"):
+            v = rec.get(k)
+            if isinstance(v, int):
+                return v
+        return 0
+
+    def _in_window(rec: dict) -> bool:
+        h = _hb_of(rec)
+        return since_hb < h <= to_hb
+
+    msgs = [m for m in (inner.get("public_messages") or [])
+            if isinstance(m, dict) and _in_window(m)]
+    objs = [o for o in (inner.get("public_objects") or {}).values()
+            if isinstance(o, dict) and _in_window(o)]
+    asks = [q for q in (inner.get("questions_raised") or inner.get("questions") or [])
+            if isinstance(q, dict) and _in_window(q)]
+    first = str(msgs[0].get("message", "")) if msgs else ""
+    return len(msgs), len(objs), len(asks), first
+
+
+def maybe_send_progress(pair: str, start: int, end: int, tick: int | None,
+                        every: int = _PROGRESS_EVERY) -> dict:
+    """Send a progress ping once per `every` heartbeats crossed.
+
+    Deduplicated in the ledger by window index, so a poll that crosses the
+    same boundary twice sends once, and a re-run of the watcher mid-run
+    does not re-send pings already delivered.
+    """
+    if not tick or tick < start or every <= 0:
+        return {"sent": False, "reason": "not_due"}
+    index = (tick - start) // every
+    if index < 1:
+        return {"sent": False, "reason": "not_due"}
+    run_key = f"{pair}:{start}-{end}"
+    state = f"progress:{index}"
+    if already_sent(run_key, state):
+        return {"sent": False, "reason": "already_sent"}
+    since = start + index * every - every
+    beats = load_heartbeats(pair, limit=max(every * 3, 80))
+    summary = window_summary(beats, since, tick)
+    n_msgs, n_objs, n_asks, first = window_counts(pair, since, tick)
+    msg = progress_message(pair, since, end, summary, tick, n_msgs, n_objs,
+                           n_asks, first_message=first)
+    ok, detail = send_telegram_text(msg)
+    if ok:
+        mark_sent(run_key, state)
+    return {"sent": ok, "index": index, "detail": detail, "message": msg}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--pair", default="east")
@@ -321,6 +529,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--once", action="store_true")
     p.add_argument("--announce", action="store_true")
     p.add_argument("--status", action="store_true")
+    p.add_argument("--progress-every", type=int, default=_PROGRESS_EVERY,
+                   help="heartbeats between progress pings (0 disables)")
     args = p.parse_args(argv)
     if args.status:
         print(json.dumps(_load_ledger(), indent=2))
@@ -333,15 +543,22 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(monitor_once(args.pair, args.start, args.end,
                                       args.chain_pid), indent=2))
         return 0
-    print(f"CHAIN_WATCH=UP run={args.pair}:{args.start}-{args.end}",
-          flush=True)
+    print(f"CHAIN_WATCH=UP run={args.pair}:{args.start}-{args.end} "
+          f"progress_every={args.progress_every}", flush=True)
     while True:
         try:
             out = monitor_once(args.pair, args.start, args.end, args.chain_pid)
-            if out.get("state") in ("complete", "stopped", "stalled") \
+            if out.get("state") in ("complete", "stopped", "stalled", "frozen") \
                     and out.get("notified"):
                 print(f"[{_utc_now()}] terminal {out['state']} notified",
                       flush=True)
+            elif args.progress_every:
+                prog = maybe_send_progress(args.pair, args.start, args.end,
+                                          out.get("tick"),
+                                          every=args.progress_every)
+                if prog.get("sent"):
+                    print(f"[{_utc_now()}] progress #{prog['index']} notified",
+                          flush=True)
         except Exception as exc:
             print(f"CHAIN_WATCH_ERROR {type(exc).__name__}: {exc}", flush=True)
         time.sleep(POLL_S)
