@@ -449,6 +449,36 @@ def completion_digest(pair: str, start: int, end: int) -> str:
     return verdict + "."
 
 
+def wake_operator(brief: str, run_key: str) -> dict:
+    """Resume the operator session with a completed run's verdict.
+
+    Telegram is the alarm. `opencode run -c` is the turn: it resumes the
+    current session with full context, so the operator's report on what
+    just finished is made by the thing that read it. This exists because
+    the pattern Sean name-checked - a scheduled turn brings the agent back
+    with information - was already live here for ask/stuck signals, and
+    completion had no door on the same bell.
+
+    Fires once per run, keyed by the same ledger that dedupes Telegram:
+    a wake that wasn't sent is not 'sent-but-maybe'. A run that never
+    completes never wakes.
+    """
+    import os
+    import subprocess
+    if already_sent(run_key, "woken"):
+        return {"woken": False, "reason": "already_woken"}
+    DETACHED = (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000)
+    cmd = ["opencode", "run", "-c",
+           "--title", f"genesis census verdict ({run_key})", brief]
+    try:
+        subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=DETACHED)
+        mark_sent(run_key, "woken")
+        return {"woken": True, "brief_len": len(brief)}
+    except Exception as exc:
+        return {"woken": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+
 def monitor_once(pair: str, start: int, end: int,
                  chain_pid: int | None) -> dict:
     run_key = f"{pair}:{start}-{end}"
@@ -479,6 +509,24 @@ def monitor_once(pair: str, start: int, end: int,
         result["notify_detail"] = detail
         if ok:
             mark_sent(run_key, state)
+            # Wake the operator session on ends-of-run, not only Telegram:
+            # a completed census or a frozen one both mean it is time to
+            # look. Frozen wakes because "why did nothing happen" is
+            # diagnosis work, which belongs in a turned session with the
+            # full context, not on a phone screen.
+            if state in ("complete", "frozen"):
+                brief = (
+                    f"Genesis census run ended. Pair: {pair}, "
+                    f"run {start}-{end}. State: {state}. "
+                    f"{terminal_message(state, pair, tick, end, reason)}"
+                )
+                if state == "complete":
+                    brief += (
+                        f" Verdict for this run: "
+                        f"{completion_digest(pair, start, end)}"
+                    )
+                wake = wake_operator(brief, run_key)
+                result["woken"] = wake.get("woken", False)
     else:
         result["notified"] = False
     return result
