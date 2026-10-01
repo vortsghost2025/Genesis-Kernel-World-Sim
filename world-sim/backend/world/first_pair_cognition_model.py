@@ -6,7 +6,6 @@ All calls are bounded, validated, and never leak private cross-agent memory.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -288,9 +287,9 @@ def call_with_key_rotation(make_client, model: str, messages: list[dict],
                 from openai import APIStatusError as _SE
 
                 if type(exc).__name__ == "_EmptyTransportResponse":
-                    retryable, rotate_now = True, False
+                    rotate_now = False
                 elif isinstance(exc, _SE):
-                    retryable, rotate_now = True, True
+                    rotate_now = True
                     if _status_is_dead(exc) and on_dead_key is not None:
                         try:
                             on_dead_key(key_index)
@@ -300,7 +299,7 @@ def call_with_key_rotation(make_client, model: str, messages: list[dict],
                     return None, _redact_pool_keys(
                         f"{type(exc).__name__}: {exc}", keys)
                 else:
-                    retryable, rotate_now = True, _is_429(exc)
+                    rotate_now = _is_429(exc)
                 last_error = f"{type(exc).__name__}: {exc}"
                 if rotate_now:
                     break
@@ -811,9 +810,9 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
         raw, _REQUIRED_TOP_FIELDS | _OPTIONAL_TOP_FIELDS))
 
     # --- Reject missing fields ---
-    for field in _REQUIRED_TOP_FIELDS:
-        if field not in raw:
-            errors.append(f"missing_field:{field}")
+    for f in _REQUIRED_TOP_FIELDS:
+        if f not in raw:
+            errors.append(f"missing_field:{f}")
 
     # --- observation_summary ---
     obs = raw.get("observation_summary")
@@ -1763,7 +1762,6 @@ class ModelCognitionBackend(CognitionBackend):
         # healthy keys sat unused. The fallback lane passes an explicit
         # client and keeps the single-credential behavior.
         pool_attr = getattr(self, "_key_pool", None)
-        has_pool = pool_attr is not None
         dead = set(getattr(self, "_key_pool_denylist", set()) or set())
         # The denylist holds FINGERPRINTS; the pool holds raw credentials.
         # Comparing them directly would deny nothing, so a dead key would be

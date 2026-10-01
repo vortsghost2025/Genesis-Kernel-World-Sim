@@ -43,17 +43,17 @@ from backend.world.first_pair_persistence import (
     append_heartbeat,
     append_memory_selection_manifest,
     append_summary,
-    create_default_runtime_policy,
+
     derive_relationship_event_ids,
     derive_summaries_for_omitted,
     detect_recurrence,
     filter_syntheses_for_injection,
     SYNTH_METHOD_V1,
     get_adjacent_tiles,
-    get_persistence_root,
+
     initialize_first_pair_state,
-    list_answered_questions_for_agent,
-    list_unanswered_questions,
+
+
     load_capability_grant,
     load_charter_versions,
     load_continuity,
@@ -80,7 +80,6 @@ from backend.world.first_pair_persistence import (
     save_continuity,
     save_goals,
     save_memory,
-    save_runtime_policy,
     save_world_state,
     select_human_context,
     select_private_memories,
