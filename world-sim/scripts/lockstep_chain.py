@@ -29,6 +29,12 @@ import sys
 import time
 from pathlib import Path
 
+# CREATE_NO_WINDOW: the chain spawns a detached runner every heartbeat on
+# Windows. Without it each spawn flashes a console on the operator's screen,
+# every few tens of seconds, for the whole run. A background process whose
+# existence reaches the foreground is not background.
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 WORLD_SIM = Path(__file__).resolve().parent.parent
 REPO_ROOT = WORLD_SIM.parent
 RUNNER = WORLD_SIM / "scripts" / "launch_canonical_heartbeat_detached.py"
@@ -102,6 +108,7 @@ def attempt_heartbeat(pair: str, hb: int) -> bool:
         capture_output=True,
         text=True,
         timeout=30,
+        creationflags=CREATE_NO_WINDOW,
     )
     if proc.returncode != 0:
         print(f"HB{hb} {pair}: LAUNCH FAIL — {proc.stderr[:200]}", flush=True)
@@ -154,6 +161,7 @@ def push_snapshot() -> None:
         r = subprocess.run(
             [sys.executable, str(EXPORTER), "--slim", "--out", str(SNAPSHOT_OUT)],
             cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=300,
+            creationflags=CREATE_NO_WINDOW,
         )
         if r.returncode != 0:
             print(f"SNAPSHOT: export failed — {r.stderr[:150]}", flush=True)
@@ -161,6 +169,7 @@ def push_snapshot() -> None:
         scp = subprocess.run(
             ["scp", str(SNAPSHOT_OUT), f"{PUBLIC_VPS}:/tmp/viewer_data.js"],
             capture_output=True, text=True, timeout=120,
+            creationflags=CREATE_NO_WINDOW,
         )
         if scp.returncode != 0:
             print(f"SNAPSHOT: scp failed — {scp.stderr[:150]}", flush=True)
@@ -169,6 +178,7 @@ def push_snapshot() -> None:
             ["ssh", PUBLIC_VPS,
              "docker cp /tmp/viewer_data.js genesis-viewer:/app/web/viewer_data.js"],
             capture_output=True, text=True, timeout=120,
+            creationflags=CREATE_NO_WINDOW,
         )
         if ssh.returncode == 0:
             print("SNAPSHOT: pushed to public show", flush=True)
@@ -185,6 +195,7 @@ def print_inbox() -> None:
         r = subprocess.run(
             [sys.executable, str(WORLD_SIM / "scripts" / "operator_inbox.py")],
             cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=120,
+            creationflags=CREATE_NO_WINDOW,
         )
         if r.returncode == 0:
             print("--- OPERATOR INBOX " + "-" * 40, flush=True)
