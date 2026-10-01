@@ -449,34 +449,106 @@ def completion_digest(pair: str, start: int, end: int) -> str:
     return verdict + "."
 
 
-def wake_operator(brief: str, run_key: str) -> dict:
-    """Resume the operator session with a completed run's verdict.
-
-    Telegram is the alarm. `opencode run -c` is the turn: it resumes the
-    current session with full context, so the operator's report on what
-    just finished is made by the thing that read it. This exists because
-    the pattern Sean name-checked - a scheduled turn brings the agent back
-    with information - was already live here for ask/stuck signals, and
-    completion had no door on the same bell.
-
-    Fires once per run, keyed by the same ledger that dedupes Telegram:
-    a wake that wasn't sent is not 'sent-but-maybe'. A run that never
-    completes never wakes.
-    """
-    import os
+def spawn_local_opencode(brief: str, run_key: str) -> dict:
+    """Resume THIS session with opencode run -c. The door that was already
+    wired: inherits full session context; failure mode is process spawn."""
     import subprocess
-    if already_sent(run_key, "woken"):
-        return {"woken": False, "reason": "already_woken"}
     DETACHED = (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000)
     cmd = ["opencode", "run", "-c",
            "--title", f"genesis census verdict ({run_key})", brief]
     try:
         subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, creationflags=DETACHED)
-        mark_sent(run_key, "woken")
-        return {"woken": True, "brief_len": len(brief)}
+        return {"woken": True, "target": "local"}
     except Exception as exc:
         return {"woken": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def spawn_headless_kilo(brief: str, run_key: str) -> dict:
+    """Wake through the control plane's headless-Kilo endpoint.
+
+    The headless box runs a Kilo server that survives this machine's
+    restarts. A POST to /api/headless-kilo delivers the brief to whatever
+    session is registered there - auto-approved, as Sean said, so the
+    brief itself is the only budget. Never routes to this silently: every
+    failure becomes a local fallback.
+    """
+    import json as _json
+    import urllib.request
+
+    url = os.environ.get("GENESIS_HEADLESS_URL", "").strip()
+    if not url:
+        return {"woken": False, "reason": "GENESIS_HEADLESS_URL unset"}
+    body = _json.dumps({"run": run_key, "brief": brief}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return {"woken": r.status < 400, "target": "headless",
+                    "status": r.status}
+    except Exception as exc:
+        return {"woken": False, "target": "headless",
+                "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def wake_operator(brief: str, run_key: str) -> dict:
+    """Resume an operator session with a completed run's verdict.
+
+    Telegram is the alarm; the turn is the report. Which door the wake
+    knocks on is one env var, and a miss on the headless side falls back
+    to local so the answer that wanted to arrive does not vanish.
+
+    Wakes happen once per run, by the same ledger that dedupes Telegram:
+    a wake that isn't recorded as sent never 'stayed sent by accident'.
+    """
+    import os
+    if already_sent(run_key, "woken"):
+        return {"woken": False, "reason": "already_woken"}
+
+    target = os.environ.get("GENESIS_WAKE_TARGET", "local").strip().lower()
+    note = ""
+    if target == "headless":
+        out = spawn_headless_kilo(brief, run_key)
+        if out.get("woken"):
+            mark_sent(run_key, "woken")
+            return out
+        out = spawn_local_opencode(brief, run_key)
+        out["via_fallback"] = True
+        out["headless_error"] = out.pop("reason", "")
+        if out.get("woken"):
+            mark_sent(run_key, "woken")
+        return out
+    if target != "local":
+        note = f"GENESIS_WAKE_TARGET={target!r} unrecognized; using local"
+    out = spawn_local_opencode(brief, run_key)
+    if note:
+        out["note"] = note
+    if out.get("woken"):
+        mark_sent(run_key, "woken")
+    return out
+
+
+def wake_brief_headless(pair: str, start: int, end: int, state: str,
+                        verdict: str) -> str:
+    """The only thing Kilo's auto-approve guards: what the brief tells it.
+
+    The turn on the headless box exists to READ the state and REPORT it.
+    Sean said auto-approve is enabled there, so the brief is the budget and
+    the budget is this: look, answer, stop. A wake is never the thing that
+    starts a heartbeat; a report is never the thing that edits a store.
+    """
+    return (
+        f"Genesis census run has ended. Pair: {pair}, run HB{start}-{end}. "
+        f"State: {state}. Verdict: {verdict}\n\n"
+        "Do exactly this, then stop:\n"
+        "1. Read world-sim/.scratch/lockstep/ to look at the run's "
+        "evidence files.\n"
+        "2. Report the answer to the operator: what the agents did, whether "
+        "they spoke, whether the record's silence finally broke.\n"
+        "3. Stop. You are being asked to look and report, not to act.\n\n"
+        "Do not resume a run, begin new heartbeats, or alter any file. "
+        "Heartbeat changes remain one-per-explicit-authorization."
+    )
 
 
 def monitor_once(pair: str, start: int, end: int,
