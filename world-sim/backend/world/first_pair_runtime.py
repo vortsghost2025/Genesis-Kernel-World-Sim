@@ -636,6 +636,26 @@ class FirstPairRuntime:
         rel_events = load_relationship_events(self._store)
         rel_memory_ids = derive_relationship_event_ids(rel_events)
 
+        # --- Legible staleness (docs/legible_staleness_spec.md) ---
+        # Computed from the record itself, recomputed every heartbeat. The
+        # last thing the frame could not show was the record's age; with
+        # it, silence is a measurable fact with an age that grows.
+        all_msgs = self._world_state.public_messages or []
+        msg_hbs = [int(m["heartbeat"]) for m in all_msgs
+                   if isinstance(m, dict)
+                   and isinstance(m.get("heartbeat"), int)]
+        last_msg_hb = max(msg_hbs) if msg_hbs else None
+        coloc_hbs = [int(e.heartbeat) for e in rel_events
+                     if str(getattr(e, "event_type", "")) == "co_location"
+                     and isinstance(e.heartbeat, int)]
+        last_coloc_hb = max(coloc_hbs) if coloc_hbs else None
+        public_record_age = {
+            "now": heartbeat_number,
+            "message_count": len(all_msgs),
+            "last_message_hb": last_msg_hb,
+            "last_colocation_hb": last_coloc_hb,
+        }
+
         # Select bounded memories with owner-bound IDs and dynamic identities
         selected_mems, sel_manifest = select_private_memories(
             memories=memory_list,
@@ -824,6 +844,7 @@ class FirstPairRuntime:
             selected_private_memories=selected_mems,
             derived_memory_summaries=agent_summaries,
             public_relationship_events=rel_events_export,
+            public_record_age=public_record_age,
             memory_selection_manifest=sel_manifest,
             charter_text=charter_text,
             charter_heartbeat=charter_heartbeat,

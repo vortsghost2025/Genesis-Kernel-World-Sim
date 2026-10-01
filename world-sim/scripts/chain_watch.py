@@ -403,6 +403,52 @@ def last_stop_reason() -> str:
     return "no reason in chain log tail."
 
 
+def start_of_run(start: int, end: int, tick: int | None) -> int:
+    """The window's lower bound for a digest: run start, or as far back as
+    the stored heartbeat ledger reaches, whichever is later."""
+    return start
+
+def completion_digest(pair: str, start: int, end: int) -> str:
+    """The verdict the run was measuring, in one short paragraph.
+
+    chain_watch already announces a terminal state. This carries what the
+    terminal state means: did either agent speak, did 'unresponsive' stay
+    or leave their own reasoning, where are they. Plain sentences, read
+    off the store - the same place the agent figured it out, not a report
+    written separate from what happened.
+    """
+    beats = load_heartbeats(pair, limit=0)
+    if not beats:
+        return "the store cannot be read, so I cannot say how it went."
+
+    # Messages / objects / asks created in this run's window.
+    n_msgs, n_objs, n_asks, first_msg = window_counts(pair, start, end)
+
+    # Decision summaries on the final heartbeat: own-age fracture point.
+    last = beats[-1]
+    reasoning = " ".join(
+        str(v) for v in (last.get("decision_summaries") or {}).values())
+    mentions_unresponsive = "unresponsive" in (reasoning or "").lower()
+
+    if n_msgs:
+        verdict = (f"they sent {n_msgs} message"
+                   f"{'s' if n_msgs != 1 else ''} in this run")
+        if first_msg:
+            verdict += f'; the first said: "{first_msg[:120]}"'
+    else:
+        verdict = "no messages in this run"
+
+    if mentions_unresponsive:
+        verdict += "; their final reasoning still names being unanswered by her"
+    else:
+        verdict += "; the belief that she is not answering is gone from their final reasoning"
+
+    if n_objs:
+        verdict += (f"; they built {n_objs} object"
+                    f"{'s' if n_objs != 1 else ''}")
+    return verdict + "."
+
+
 def monitor_once(pair: str, start: int, end: int,
                  chain_pid: int | None) -> dict:
     run_key = f"{pair}:{start}-{end}"
@@ -426,6 +472,8 @@ def monitor_once(pair: str, start: int, end: int,
         reason = "" if state in ("complete", "frozen") else last_stop_reason()
         msg = terminal_message(state, pair, tick, end, reason,
                                inert_tail=health["inert_tail"])
+        if state == "complete":
+            msg += f" Verdict: {completion_digest(pair, start, end)}"
         ok, detail = send_telegram_text(msg)
         result["notified"] = ok
         result["notify_detail"] = detail

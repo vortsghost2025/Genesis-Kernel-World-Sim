@@ -1094,6 +1094,46 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
                            if not e.startswith("continuity:")]
     return output
 
+def _public_record_age_line(record: dict | None) -> str:
+    """The public record stating its own age (docs/legible_staleness_spec.md).
+
+    Two numbers, computed from the record itself, every heartbeat: the
+    newest public message and the newest co-location event, each carried
+    with how many heartbeats have passed since. Facts only. The moment the
+    record's silence becomes *measured* is the moment an agent can treat it
+    as a thing to check rather than a state to have.
+    """
+    if not isinstance(record, dict):
+        return ""
+    now = record.get("now")
+    count = record.get("message_count", 0)
+    last_msg = record.get("last_message_hb")
+    last_co = record.get("last_colocation_hb")
+    if not isinstance(now, int) or now <= 0:
+        return ""
+    if not isinstance(count, int) or count < 0:
+        count = 0
+
+    parts: list[str] = []
+    if count == 0:
+        parts.append("no messages yet")
+    elif isinstance(last_msg, int) and last_msg > 0:
+        age = max(0, now - last_msg)
+        msg_noun = "message" if count == 1 else "messages"
+        parts.append(
+            f"{count} {msg_noun}, the most recent at heartbeat {last_msg} "
+            f"- {age} heartbeats ago"
+        )
+    if isinstance(last_co, int) and last_co > 0:
+        co_age = max(0, now - last_co)
+        parts.append(
+            f"the most recent co-location event is from heartbeat {last_co} "
+            f"- {co_age} heartbeats ago"
+        )
+    if not parts:
+        return ""
+    return "Public record: " + "; ".join(parts) + "."
+
 
 # ---------------------------------------------------------------------------
 # Prompt builder
@@ -1188,6 +1228,11 @@ def build_system_prompt(context: AgentContext) -> str:
         if context.public_relationship_events
         else "[]"
     )
+    # Legible staleness (docs/legible_staleness_spec.md). The record says
+    # how old its own newest entry is, every heartbeat, from itself - the
+    # part of the frame that was invisible when "Eve is unresponsive" was
+    # written into HB1436 as a cause instead of a question.
+    public_record_line = _public_record_age_line(context.public_record_age)
 
     # Movement grant note (truthful to context)
     if context.current_runtime_capabilities:
@@ -1377,6 +1422,7 @@ IMPORTANT: The memories shown above are a selected subset of your full private m
 Note: These summaries are derived interpretations linked to raw evidence. They may compress older experiences. Each summary references specific raw memory IDs.
 
 --- PUBLIC RELATIONSHIP EVENTS ---
+{public_record_line}
 {rel_events_str}
 
 Note: These are observable public interaction events recorded from validated world outcomes. No emotional scores, trust ratings, or social attachment values are assigned.

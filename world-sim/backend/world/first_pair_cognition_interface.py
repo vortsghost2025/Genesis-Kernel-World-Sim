@@ -65,6 +65,13 @@ class AgentContext:
     derived_memory_summaries: list = field(default_factory=list)
     public_relationship_events: list = field(default_factory=list)
     memory_selection_manifest: dict = field(default_factory=dict)
+    # Legible staleness (docs/legible_staleness_spec.md). The record of
+    # public messages and co-location events, carried with its own age
+    # each heartbeat: now, message_count, last_message_hb,
+    # last_colocation_hb. Computed from the store at context time; absent
+    # on old contexts, which is why the renderer reads it with None-safe
+    # guards rather than assuming presence.
+    public_record_age: dict | None = None
     # Charter (self-authored identity persistence): injected verbatim every
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""
