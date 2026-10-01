@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
+REPO_ROOT = WORLD_SIM.parent
 sys.path.insert(0, str(WORLD_SIM))
 
 STORES = {
@@ -468,24 +470,32 @@ def spawn_headless_kilo(brief: str, run_key: str) -> dict:
     """Wake through the control plane's headless-Kilo endpoint.
 
     The headless box runs a Kilo server that survives this machine's
-    restarts. A POST to /api/headless-kilo delivers the brief to whatever
-    session is registered there - auto-approved, as Sean said, so the
-    brief itself is the only budget. Never routes to this silently: every
-    failure becomes a local fallback.
+    restarts. The control plane exposes it at POST /api/headless-kilo,
+    expecting {sessionId, prompt}. The registered session is the one
+    on-duty; targeting any other session is not allowed by the server,
+    which is itself the guard that keeps a wake from landing on the
+    wrong front door. Never routes to this silently: every failure
+    becomes a local fallback.
     """
     import json as _json
     import urllib.request
 
     url = os.environ.get("GENESIS_HEADLESS_URL", "").strip()
     if not url:
-        return {"woken": False, "reason": "GENESIS_HEADLESS_URL unset"}
-    body = _json.dumps({"run": run_key, "brief": brief}).encode("utf-8")
+        return {"woken": False, "target": "headless",
+                "reason": "GENESIS_HEADLESS_URL unset"}
+    body = _json.dumps({"sessionId": "ses_fdb9a44eeffetfAO8gFCz95VXH",
+                        "prompt": brief}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={
         "Content-Type": "application/json", "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=600) as r:
             return {"woken": r.status < 400, "target": "headless",
                     "status": r.status}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:150]
+        return {"woken": False, "target": "headless",
+                "reason": f"HTTP {exc.code}: {detail}"}
     except Exception as exc:
         return {"woken": False, "target": "headless",
                 "reason": f"{type(exc).__name__}: {exc}"}
