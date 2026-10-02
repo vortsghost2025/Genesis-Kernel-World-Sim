@@ -1331,19 +1331,44 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Missing or empty capability_id"}
         if not cap_reason or not isinstance(cap_reason, str) or not cap_reason.strip():
             return {"status": "rejected", "reason": "Missing or empty capability_reason"}
+        # Only honest grant results here: never a success that changed
+        # nothing. If the requested capability already appears in the grant
+        # ledger, the call changes nothing and must say so plainly. If it
+        # appears never, it must also say so plainly. No case returns
+        # success without consequence.
+        old_grants = {r.get("capability_id")
+                      for r in (self._world_state.capability_requests or [])
+                      if isinstance(r, dict)}
+        if cap_id in old_grants:
+            return {
+                "status": "already_present",
+                "capability_id": cap_id,
+                "reason": (
+                    f"Request for '{cap_id}' is a repeat - it already appears "
+                    f"in your grant history and adds nothing."
+                ),
+            }
         record = {
             "capability_id": cap_id,
             "requesting_agent_id": view["agent_id"],
             "reason": cap_reason,
             "heartbeat": heartbeat_number,
-            "status": "pending",
+            "status": "not_achieved",
             "requested_at_utc": datetime.now(timezone.utc).isoformat(),
+            "outcome": (
+                f"Not granted. The action you asked for does not exist in this "
+                f"world's action set and no additional action appears in "
+                f"your contract."
+            ),
         }
         self._world_state.capability_requests.append(record)
         return {
-            "status": "success",
+            "status": "not_achieved",
             "capability_id": cap_id,
-            "reason": cap_reason,
+            "reason": (
+                f"Request was accepted and delivered no action. Nothing "
+                f"appeared because no such action exists in your contract."
+            ),
         }
 
     def _execute_modify_world(self, agent_ref: str, action: dict) -> dict:
