@@ -605,6 +605,38 @@ class FirstPairRuntime:
             )
         ]
 
+        # --- Legible action outcome report (docs/action_outcome_visibility)
+        # The store knows what happened; the record only shows it when failures
+        # happen. Eve at HB1651 invented "three consecutive failed stone
+        # gathers" and concluded universal breakage, while the store records
+        # success. This line is the store speaking back, by name and heartbeat,
+        # so memory can't invent failure wholesale.
+        recent_failures = []
+        try:
+            hist = load_heartbeat_history(self._store)
+            for rec in reversed(hist):
+                if len(recent_failures) >= 2:
+                    break
+                n = rec.get("heartbeat_number")
+                if n is None or n > heartbeat_number:
+                    continue
+                acts = rec.get("action_taken") or {}
+                outcomes = rec.get("action_outcomes") or {}
+                act = acts.get(agent_ref)
+                out = outcomes.get(agent_ref)
+                if not isinstance(act, dict) or not isinstance(out, dict):
+                    continue
+                status = out.get("status", "")
+                if isinstance(status, str) and ("fail" in status or status == "no_action"):
+                    recent_failures.append({
+                        "heartbeat": n,
+                        "action": act.get("action_type", "?"),
+                        "action_detail": act.get("resource_kind", ""),
+                        "outcome": out,
+                    })
+        except Exception:
+            pass
+
         # Co-location: other agents at same tile
         other_agents_here = []
         if self._world_state.tile_occupancy:
@@ -838,6 +870,7 @@ class FirstPairRuntime:
             available_moves=available_moves,
             current_runtime_capabilities=caps,
             current_tile_occupants=other_agents_here,
+            recent_action_failures=recent_failures,
             visible_public_messages=visible_msgs,
             relevant_human_answers=human_answered,
             selected_private_memories=selected_mems,

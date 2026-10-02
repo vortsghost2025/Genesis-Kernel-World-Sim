@@ -1093,6 +1093,36 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
                            if not e.startswith("continuity:")]
     return output
 
+def _recent_action_failure_line(context: AgentContext) -> str:
+    """A plain sentence: which of the agent's most recent actions failed,
+    when, and why — or empty when none.
+
+    Specifically not a warning ("do not gather"). Eve's diagnostic at
+    HB1651 ("23 failed stone gathers") is a fantasy she invented after the
+    store kept no record she could read at the trial's pace. This line
+    describes the store, not what she should do about it. It is a short
+    two-line message: at most two failures rendered, most recent first,
+    so the record stays legible at the scale that matters.
+    """
+    fails = context.recent_action_failures
+    if not fails:
+        return ""
+    parts = []
+    for f in fails[-2:]:
+        hb = f.get("heartbeat", "?")
+        at = f.get("action", "?")
+        oc = f.get("outcome") or {}
+        status = oc.get("status", "?") if isinstance(oc, dict) else str(oc)
+        reason = (oc.get("reason") or oc.get("detail") or
+                  oc.get("reason_code") or "")
+        bits = f"heartbeat {hb}, gather: {status}"
+        if reason:
+            bits += f" ({str(reason)[:120]})"
+        parts.append(bits)
+    noun = "action did not succeed" if len(parts) == 1 else "actions did not succeed"
+    return f"The last {'time' if len(parts) == 1 else 'times'} this heartbeat's {noun}: " + "; ".join(parts) + "."
+
+
 def _public_record_age_line(record: dict | None) -> str:
     """The public record stating its own age (docs/legible_staleness_spec.md).
 
@@ -1232,6 +1262,11 @@ def build_system_prompt(context: AgentContext) -> str:
     # part of the frame that was invisible when "Eve is unresponsive" was
     # written into HB1436 as a cause instead of a question.
     public_record_line = _public_record_age_line(context.public_record_age)
+    # Legible failure report (docs/action_outcome_visibility_spec.md): the
+    # recent-store outcomes of the two action types that can fail in this
+    # world's terms. Absent from the prompt when there are none, because a
+    # property of this world that is *not* claimed is also not invented.
+    action_report = _recent_action_failure_line(context)
 
     # Movement grant note (truthful to context)
     if context.current_runtime_capabilities:
@@ -1422,6 +1457,7 @@ Note: These summaries are derived interpretations linked to raw evidence. They m
 
 --- PUBLIC RELATIONSHIP EVENTS ---
 {public_record_line}
+{action_report}
 {rel_events_str}
 
 Note: These are observable public interaction events recorded from validated world outcomes. No emotional scores, trust ratings, or social attachment values are assigned.

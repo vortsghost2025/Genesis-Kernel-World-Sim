@@ -72,6 +72,11 @@ class AgentContext:
     # on old contexts, which is why the renderer reads it with None-safe
     # guards rather than assuming presence.
     public_record_age: dict | None = None
+    # Reliability report (docs/legible_staleness_spec, prior to which no
+    # failure in the model's recent actions was visible). The evidence is
+    # what actually happened: a refusal printed in the same brief that
+    # describes the world.
+    recent_action_failures: list = field(default_factory=list)
     # Charter (self-authored identity persistence): injected verbatim every
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""
