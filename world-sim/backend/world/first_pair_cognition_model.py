@@ -496,11 +496,13 @@ def resolve_provider() -> ProviderConfig:
 def resolve_fallback_provider(primary: ProviderConfig) -> ProviderConfig | None:
     """Resolve an optional single fallback lane for graceful degradation.
 
-    Reads ``GENESIS_FIRST_PAIR_FALLBACK_MODEL``. The fallback lane is the
-    OTHER credentialled provider when both are configured: an NVIDIA primary
-    falls back to OpenRouter (``OPENROUTER_API_KEY``), an OpenRouter primary
-    falls back to NVIDIA (``NVIDIA_API_KEY``). Any other primary lane falls
-    back to NVIDIA first, then OpenRouter.
+    Reads ``GENESIS_FIRST_PAIR_FALLBACK_MODEL``. A ``:free`` model id is
+    OpenRouter convention and rides the OpenRouter lane whenever an
+    OpenRouter credential exists (10JH: it is invalid on NVIDIA direct,
+    where it 404s); without one there is no viable lane and this
+    returns ``None``. A non-``:free`` id keeps the legacy lanes: the
+    other credentialled provider, NVIDIA first. An NVIDIA primary still
+    falls back to OpenRouter (``OPENROUTER_API_KEY``).
 
     FREE-ONLY GUARD: an OpenRouter fallback model must be explicitly free
     (model id ending in ``:free``). A paid OpenRouter fallback fails closed
@@ -515,6 +517,17 @@ def resolve_fallback_provider(primary: ProviderConfig) -> ProviderConfig | None:
         return None
     nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
     or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    # 10JH: a `:free` id is OpenRouter convention and is invalid on the
+    # NVIDIA direct lane (measured Oct-02: fallback 404s under an
+    # `explicit_url` primary). Route `:free` ids to OpenRouter whenever
+    # credentialled; without an OpenRouter credential there is no viable
+    # lane, so resolve to None rather than offering a lane that 404s.
+    if model.endswith(":free"):
+        if not or_key:
+            return None
+        return ProviderConfig(
+            "openrouter", "https://openrouter.ai/api/v1", model, or_key
+        )
     if primary.provider_type != "nvidia" and nv_key:
         return ProviderConfig(
             "nvidia", "https://integrate.api.nvidia.com/v1", model, nv_key

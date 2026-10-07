@@ -53,13 +53,19 @@ CREATE_NO_WINDOW = 0x08000000
 # else. Both lanes are free, so a provider failure degrades availability
 # rather than cost.
 #
-# MODEL ERA 2 (2026-09-30). Era 1 was nvidia/nemotron-3-ultra-550b-a55b:free
-# and is DEAD UPSTREAM, not quota-blocked: all three nvidia/* routes on
-# OpenRouter return 502 wrapping NVIDIA's 403 "Authorization failed"
-# (measured: 3/3 nvidia routes, 0.2-0.4s, every request size). This froze
-# the pair for 46 consecutive heartbeats (HB1198-1243) while the chain
-# reported "OK" and the watcher reported "complete" - the failure was
-# invisible from every human surface.
+# MODEL ERA 3 (2026-10-07). Era 2 was dots-studio/dots-3-note-preview:free
+# and is ADAM-INVALID upstream: Eve validates but Adam's output carries
+# extra goal_updates fields (related_question_id, metadata) that the
+# contract rejects, so the primary can never serve both agents (measured
+# Oct-07 contract probe on real 340k/401k-char contexts). Era 1 was
+# nvidia/nemotron-3-ultra-550b-a55b:free and is DEAD UPSTREAM, not
+# quota-blocked: all three nvidia/* routes on OpenRouter return 502
+# wrapping NVIDIA's 403 "Authorization failed" (measured: 3/3 nvidia
+# routes, 0.2-0.4s, every request size). Era 2 froze the pair for 46
+# consecutive heartbeats (HB1198-1243) while the chain reported "OK" and
+# the watcher reported "complete" - the failure was invisible from every
+# human surface. Era 2's tail (east HB1881-1900, west HB1275-1327) was
+# the Oct-02 free-tier daily quota wall, now reset.
 #
 # Both models below were verified against the REAL contract before being
 # named here: each was called with both east agents' live contexts
@@ -67,10 +73,10 @@ CREATE_NO_WINDOW = 0x08000000
 # validate_model_output with a real proposed action
 # (.scratch/contract_probe.json). A 200 is not evidence; a validated
 # action is. Re-verify with that same probe before trusting either.
-PRIMARY_MODEL = "dots-studio/dots-3-note-preview:free"
+PRIMARY_MODEL = "inclusionai/ling-3.0-flash-sante:free"
 FALLBACK_MODEL = "inclusionai/ling-3.0-flash-sante:free"
-ADAM_MODEL = "dots-studio/dots-3-note-preview:free"
-EVE_MODEL = "dots-studio/dots-3-note-preview:free"
+ADAM_MODEL = "inclusionai/ling-3.0-flash-sante:free"
+EVE_MODEL = "inclusionai/ling-3.0-flash-sante:free"
 
 # Single source of truth for the lane endpoint. build_clean_env() writes this
 # and resolution_proof() asserts the resolver honored it, so the configured
