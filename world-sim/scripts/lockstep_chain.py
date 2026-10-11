@@ -325,6 +325,84 @@ def parse_args(argv: list[str]) -> tuple[int, int, tuple[str, ...], bool]:
     return int(positional[0]), int(positional[1]), pairs, snapshots
 
 
+# Route health preflight: don't start a run on a dead route.
+# Three freezes (Sept 30, Oct 2, Oct 10) were all the same shape: the
+# configured model died upstream and every heartbeat ran inert until the
+# frozen-detection killed the chain. The preflight is one tiny request
+# per lane BEFORE the loop starts.
+
+def route_health_verdict(primary_ok: bool, fallback_ok: bool,
+                          fallback_dead_reason: str = "") -> dict:
+    """Pure decision: should a run start given the health of both lanes?
+
+    go: at least one lane can serve.
+    refuse: both are dead, and 100 inert heartbeats is not a result.
+    """
+    if primary_ok and fallback_ok:
+        return {"action": "go", "note": "both lanes healthy"}
+    if primary_ok:
+        return {"action": "go", "note": "primary healthy; fallback dead"}
+    if fallback_ok:
+        return {"action": "go",
+                "note": f"primary dead; fallback will serve"}
+    return {"action": "refuse",
+            "note": f"both lanes dead - refusing to start a run that "
+                    f"would produce inert heartbeats. "
+                    f"{fallback_dead_reason}"}
+
+
+def probe_route_health() -> dict:
+    """One tiny request per lane. Returns the verdict dict.
+
+    Reads the model constants from the runner module (the same ones
+    the heartbeat will use) and sends an 8-token probe to each. Never
+    raises: a probe failure is data, not a crash.
+    """
+    import json as _json
+    import os
+    import urllib.request
+    from backend.world.canonical_heartbeat_runner import (
+        PRIMARY_MODEL, FALLBACK_MODEL,
+    )
+
+    env = {}
+    vault = WORLD_SIM / ".env"
+    if vault.is_file():
+        for line in vault.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip()
+    key = env.get("OPENROUTER_API_KEY", "")
+    if not key:
+        return route_health_verdict(False, False, "no OPENROUTER_API_KEY in vault")
+
+    def _probe(model):
+        payload = _json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": "ok"}],
+            "max_tokens": 4, "temperature": 0,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=payload,
+            headers={"Authorization": f"Bearer {key}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status < 400, ""
+        except Exception as e:
+            return False, f"{type(e).__name__}: {str(e)[:100]}"
+
+    p_ok, p_err = _probe(PRIMARY_MODEL)
+    f_ok, f_err = _probe(FALLBACK_MODEL)
+    v = route_health_verdict(p_ok, f_ok, f_err or p_err)
+    v["primary"] = {"model": PRIMARY_MODEL, "ok": p_ok, "error": p_err[:120]}
+    v["fallback"] = {"model": FALLBACK_MODEL, "ok": f_ok, "error": f_err[:120]}
+    return v
+
+
 def main() -> int:
     # Crash trace: a separate file that survives stdout/stderr loss.
     # Both chains die simultaneously after 1-2 heartbeats when started
@@ -375,6 +453,30 @@ def _main_inner(_trace=None) -> int:
         except Exception as exc:
             print(f"  run-state not recorded: {type(exc).__name__}",
                   flush=True)
+
+    # Route health preflight: don't walk onto the ice. Three freezes
+    # (Sept 30, Oct 2, Oct 10) were all the same shape - the configured
+    # model died upstream and every heartbeat ran inert until the
+    # frozen-detection killed the chain. The net catches you after
+    # you've fallen; this is not falling.
+    try:
+        sys.path.insert(0, str(WORLD_SIM))
+        health = probe_route_health()
+        print(f"ROUTE HEALTH: {health['action']} - {health['note']}",
+              flush=True)
+        if _trace:
+            _trace(f"route_health: {health['action']} {health['note']}")
+        if health["action"] == "refuse":
+            print("HARD STOP: refusing to run on a dead route.", flush=True)
+            print(f"  primary:  {health.get('primary', {})}", flush=True)
+            print(f"  fallback: {health.get('fallback', {})}", flush=True)
+            return 1
+    except Exception as exc:
+        # The preflight itself must never block a run: if the check
+        # errors, warn and continue. The frozen-detection is still the
+        # safety net behind this.
+        print(f"ROUTE HEALTH: check failed ({type(exc).__name__}) - "
+              f"continuing; frozen-detection is the net", flush=True)
 
     # Store lock: refuse to run beside another writer on the same store.
     # Interleaving two chains into one heartbeat ledger produces a record

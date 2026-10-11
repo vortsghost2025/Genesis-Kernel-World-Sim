@@ -1106,6 +1106,27 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
                            if not e.startswith("continuity:")]
     return output
 
+def _public_build_record_line(record: dict | None) -> str:
+    """The record of what stands in the world, and who placed the newest.
+
+    Same register as the staleness line: a fact from the store, never an
+    instruction about what to do with it. Absent when the world holds no
+    builds - zero is not a fact worth naming.
+    """
+    if not isinstance(record, dict):
+        return ""
+    count = record.get("object_count", 0)
+    if not isinstance(count, int) or count <= 0:
+        return ""
+    last_hb = record.get("last_built_hb")
+    builder = record.get("last_builder", "someone")
+    noun = "object" if count == 1 else "objects"
+    parts = [f"The world holds {count} {noun}"]
+    if isinstance(last_hb, int) and last_hb > 0:
+        parts.append(f"the most recent was built at heartbeat {last_hb} by {builder}")
+    return "; ".join(parts) + "."
+
+
 def _recent_action_failure_line(context: AgentContext) -> str:
     """A plain sentence: which of the agent's most recent actions failed,
     when, and why — or empty when none.
@@ -1280,6 +1301,11 @@ def build_system_prompt(context: AgentContext) -> str:
     # world's terms. Absent from the prompt when there are none, because a
     # property of this world that is *not* claimed is also not invented.
     action_report = _recent_action_failure_line(context)
+    # Build record (docs/object_visibility_spec.md §3): what stands in
+    # the world and who placed the newest. Same register as staleness -
+    # a fact, never an instruction.
+    build_report = _public_build_record_line(getattr(
+        context, "public_build_record", None))
 
     # Movement grant note (truthful to context)
     if context.current_runtime_capabilities:
@@ -1471,6 +1497,7 @@ Note: These summaries are derived interpretations linked to raw evidence. They m
 --- PUBLIC RELATIONSHIP EVENTS ---
 {public_record_line}
 {action_report}
+{build_report}
 {rel_events_str}
 
 Note: These are observable public interaction events recorded from validated world outcomes. No emotional scores, trust ratings, or social attachment values are assigned.

@@ -77,6 +77,9 @@ class AgentContext:
     # what actually happened: a refusal printed in the same brief that
     # describes the world.
     recent_action_failures: list = field(default_factory=list)
+    # Build record (docs/object_visibility_spec.md §3): what stands in
+    # the world and who placed the newest. Same register as staleness.
+    public_build_record: dict | None = None
     # Charter (self-authored identity persistence): injected verbatim every
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""

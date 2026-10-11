@@ -361,7 +361,10 @@ class FirstPairRuntime:
                 known_map, position, agent_ref, heartbeat_number, true_map=true_map
             )
         obs = cognition_safe_observation(
-            true_map, position, known_map, None, objects_here, agent_ref
+            true_map, position, known_map, None, objects_here, agent_ref,
+            public_objects=list(
+                (self._world_state.public_objects or {}).values()
+            ) if isinstance(self._world_state.public_objects, dict) else [],
         )
         reports = project_unsettled_reports(known_map)
         if reports:
@@ -828,6 +831,32 @@ class FirstPairRuntime:
                     f"{', '.join(shared[:3])}."
                 )
 
+        # --- Build record (docs/object_visibility_spec.md §3) ---
+        # What stands in the world and who placed the newest - visible to
+        # both agents without walking there. Same register as staleness:
+        # a fact from the store, never an instruction.
+        all_objects = list((self._world_state.public_objects or {}).values()) \
+            if isinstance(self._world_state.public_objects, dict) else []
+        builder_names = {}
+        try:
+            if self._identity_record:
+                builder_names = {
+                    self._identity_record.adam_agent_id: "Adam",
+                    self._identity_record.eve_agent_id: "Eve",
+                }
+        except Exception:
+            builder_names = {}
+        public_build_record = {}
+        if all_objects:
+            latest = max(all_objects,
+                         key=lambda o: (o or {}).get("created_heartbeat") or 0)
+            public_build_record = {
+                "object_count": len(all_objects),
+                "last_built_hb": (latest or {}).get("created_heartbeat"),
+                "last_builder": builder_names.get(
+                    (latest or {}).get("creator_agent_id"), "someone"),
+            }
+
         # --- Physics version: can the agent notice the terms changed? ---
         # new_to_agent is True only on the first heartbeat this agent is
         # shown the current version, so the prompt can say so once.
@@ -871,6 +900,7 @@ class FirstPairRuntime:
             current_runtime_capabilities=caps,
             current_tile_occupants=other_agents_here,
             recent_action_failures=recent_failures,
+            public_build_record=public_build_record,
             visible_public_messages=visible_msgs,
             relevant_human_answers=human_answered,
             selected_private_memories=selected_mems,

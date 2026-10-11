@@ -219,6 +219,7 @@ def cognition_safe_observation(
     conditions: dict[str, Any] | None,
     objects_here: list[dict[str, Any]],
     agent_ref: str = "",
+    public_objects: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a cognition-safe observation from fog data.
 
@@ -227,11 +228,15 @@ def cognition_safe_observation(
 
     The projection scrubs implementation terms and includes only
     radius-visible tiles with safe terrain/biome/landmark details.
+    `public_objects` extends the sightline: any tile carrying a public
+    object within Chebyshev distance 2 becomes visible with its full
+    details (docs/object_visibility_spec.md).
     """
     position = build_world_position_from_tile(true_map, tile_id)
     position["agent_id"] = agent_ref
 
-    raw = build_local_observation(true_map, position, known_map, conditions)
+    raw = build_local_observation(true_map, position, known_map, conditions,
+                                  public_objects=public_objects)
     visible_ids = raw.get("visible_tile_ids", [])
     visible_tiles_raw = raw.get("visible_tiles", [])
     visible_landmarks_raw = raw.get("visible_landmarks", [])

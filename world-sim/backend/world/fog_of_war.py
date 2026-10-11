@@ -294,11 +294,54 @@ def build_local_observation(
     position: dict[str, Any],
     known_map: dict[str, Any],
     conditions: dict[str, Any] | None = None,
+    public_objects: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     radius = int((conditions or {}).get("radius", 1))
     visible_tile_ids = get_visible_tile_ids(true_map, position, radius, conditions)
     tiles_by_id = {tile.get("tile_id"): tile for tile in true_map.get("tiles", [])}
     landmarks_by_id = {landmark.get("landmark_id"): landmark for landmark in true_map.get("landmarks", [])}
+
+    # Object sightline extension (docs/object_visibility_spec.md):
+    # a standing thing is visible farther than flat ground. Any tile
+    # carrying a public object within Chebyshev distance 2 becomes
+    # visible, with full details, on the same continent. The rule is
+    # type-blind - every object is a landmark, which is the same physics
+    # the wall unlock already applies to rafts and campfires. This gives
+    # the 90+ objects west Eve built a reason to exist: something you
+    # placed on a tile makes that tile legible to anyone within two
+    # steps, not just those standing on it.
+    if public_objects:
+        origin = position.get("coordinates") or {}
+        pos_continent = position.get("continent_id")
+        ox, oy = origin.get("x"), origin.get("y")
+        if ox is not None and oy is not None:
+            existing = set(visible_tile_ids)
+            for obj in public_objects:
+                if not isinstance(obj, dict):
+                    continue
+                tile_id = obj.get("tile_id")
+                if not tile_id or tile_id in existing:
+                    continue
+                tile = tiles_by_id.get(tile_id)
+                if not tile:
+                    continue
+                if tile.get("continent_id") != pos_continent:
+                    continue
+                coords = tile.get("coordinates") or {}
+                tx, ty = coords.get("x"), coords.get("y")
+                if tx is None or ty is None:
+                    continue
+                if max(abs(tx - ox), abs(ty - oy)) <= 2:
+                    visible_tile_ids.append(tile_id)
+                    existing.add(tile_id)
+            visible_tile_ids = sorted(
+                set(visible_tile_ids),
+                key=lambda tid: (
+                    max(abs((tiles_by_id[tid].get("coordinates") or {}).get("x", 0) - ox),
+                        abs((tiles_by_id[tid].get("coordinates") or {}).get("y", 0) - oy)),
+                    tid,
+                ),
+            )
 
     visible_tiles = []
     visible_landmarks = []
