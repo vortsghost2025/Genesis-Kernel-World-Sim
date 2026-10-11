@@ -326,6 +326,32 @@ def parse_args(argv: list[str]) -> tuple[int, int, tuple[str, ...], bool]:
 
 
 def main() -> int:
+    # Crash trace: a separate file that survives stdout/stderr loss.
+    # Both chains die simultaneously after 1-2 heartbeats when started
+    # together (never when started alone), with zero bytes of stderr.
+    # The trace file is the one channel that cannot be swallowed by a
+    # process death.
+    _trace_path = EVIDENCE_DIR / f"chain_trace_{os.getpid()}.log"
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _trace(msg: str) -> None:
+        try:
+            with _trace_path.open("a", encoding="utf-8", newline="\n") as fh:
+                fh.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+        except OSError:
+            pass
+
+    _trace(f"chain start pid={os.getpid()} argv={sys.argv[1:]}")
+    try:
+        return _main_inner(_trace)
+    except BaseException as exc:
+        _trace(f"FATAL {type(exc).__name__}: {exc}")
+        import traceback
+        _trace(traceback.format_exc()[:2000])
+        raise
+
+
+def _main_inner(_trace=None) -> int:
     start, end, pairs, snapshots = parse_args(sys.argv[1:])
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -381,8 +407,14 @@ def main() -> int:
 
     try:
         for hb in range(start, end + 1):
+            if _trace:
+                _trace(f"run_tick {hb} begin")
             if not run_tick(hb):
+                if _trace:
+                    _trace(f"run_tick {hb} returned False - HARD STOP")
                 return 1
+            if _trace:
+                _trace(f"run_tick {hb} ok")
             if snapshots and hb % SNAPSHOT_EVERY == 0:
                 push_snapshot()
     finally:
