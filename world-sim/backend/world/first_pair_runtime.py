@@ -1688,8 +1688,15 @@ class FirstPairRuntime:
         world_mutations: list[dict] | None = None,
         observations: dict | None = None,
     ) -> None:
-        save_world_state(self._store, self._world_state)
-
+        # The heartbeat ledger is written FIRST, the world state (tick)
+        # LAST. A crash between these two writes then leaves the ledger
+        # ahead of the tick - the truthful direction: the record proves
+        # the heartbeat happened and recovery rolls the tick forward.
+        # The previous order (tick first, ledger second) left the tick
+        # ahead on crash, which claimed progress the ledger could not
+        # prove; repairing that meant rolling history back and hoping
+        # nothing was double-applied. It happened twice: HB1328 and
+        # HB1646, both during power loss.
         shared_memory = {
             self._adam_ref: list(self._adam_memory),
             self._eve_ref: list(self._eve_memory),
@@ -1731,6 +1738,12 @@ class FirstPairRuntime:
             action_outcomes=action_outcomes,
         )
         append_heartbeat(self._store, hb_record)
+
+        # The tick advances only after the ledger entry it names is on
+        # disk. This is the second half of the HB1328/HB1646 fix: the
+        # world state may lag the ledger by one write on a crash, never
+        # lead it.
+        save_world_state(self._store, self._world_state)
 
     def _persist_questions_without_stale_overwrite(self) -> None:
         """Reconcile canonical questions WITHOUT writing back local state.
