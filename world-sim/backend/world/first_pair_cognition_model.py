@@ -401,6 +401,7 @@ _VALID_ACTIONS = frozenset({
     "gather",
     "revise_charter",
     "build",
+    "use_object",
 })
 
 
@@ -627,6 +628,12 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     "build": frozenset({
         "action_type", "object_id", "object_type", "description",
         "tile_id", "materials",
+    }),
+    # use_object: deposit/extract require materials, inspect does not.
+    # The schema accepts the union; the runtime rejects an operation
+    # that is missing its own required field.
+    "use_object": frozenset({
+        "action_type", "target_object_id", "operation", "materials",
     }),
 }
 
@@ -1215,6 +1222,7 @@ Available actions:
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently
+- use_object: interact with a public object on your current tile (requires: target_object_id, operation; operation "deposit" also requires materials dict, "extract" also requires materials dict, "inspect" requires only the target) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains
 """
 
 # Free speech. One optional top-level field, documented in the contract and

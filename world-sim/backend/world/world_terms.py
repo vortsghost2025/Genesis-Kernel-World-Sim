@@ -51,8 +51,21 @@ TERMS_CHANGELOG["epistemic.2"] = (
     "which. Test what you conclude."
 )
 
-CURRENT_TERMS = "epistemic.2"
-PREVIOUS_TERMS = "epistemic.1.1"
+# epistemic.3: objects hold things (docs/object_interaction_spec.md).
+# A real physics change, stated as removals and one addition, never as
+# advice. Eve at HB1864 asked for this mechanic by name: "put materials
+# into an object and get something back out."
+TERMS_CHANGELOG["epistemic.3"] = (
+    "No longer true: that objects are inert records. Objects can now "
+    "hold materials. A new action, use_object, deposits materials from "
+    "your belongings into an object, extracts materials from an object "
+    "back into your belongings, and inspects what an object contains. "
+    "Any object on your current tile can hold things, regardless of "
+    "what it is called or who built it."
+)
+
+CURRENT_TERMS = "epistemic.3"
+PREVIOUS_TERMS = "epistemic.2"
 
 
 def terms_change_line(version: str) -> str:

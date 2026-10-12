@@ -930,6 +930,8 @@ class FirstPairRuntime:
             return self._execute_create_public_object(agent_ref, action, heartbeat_number)
         if action_type == "inspect_public_object":
             return self._execute_inspect_public_object(action)
+        if action_type == "use_object":
+            return self._execute_use_object(agent_ref, action, heartbeat_number)
         if action_type == "modify_owned_public_object":
             return self._execute_modify_owned_public_object(agent_ref, action, heartbeat_number)
         if action_type == "leave_public_message":
@@ -1203,6 +1205,89 @@ class FirstPairRuntime:
         if obj is None or not isinstance(obj, dict):
             return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
         return {"status": "success", "object": obj}
+
+    def _execute_use_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Interact with a public object on the agent's tile.
+
+        docs/object_interaction_spec.md. Eve at HB1864 asked for exactly
+        this: "put materials into an object and get something back out."
+        Three operations: deposit (inventory -> contents), extract
+        (contents -> inventory), inspect (read contents). Any object can
+        hold contents — type-blind, same principle as the sightline
+        extension. The object must be on the agent's current tile.
+        """
+        obj_id = action.get("target_object_id")
+        if not obj_id or not isinstance(obj_id, str):
+            return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
+        obj = self._world_state.public_objects.get(obj_id)
+        if obj is None or not isinstance(obj, dict):
+            return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
+
+        position = (self._world_state.tile_occupancy or {}).get(agent_ref)
+        if position and obj.get("tile_id") != position:
+            return {"status": "rejected",
+                    "reason": f"Object is on {obj.get('tile_id')}, not your current tile"}
+
+        operation = action.get("operation", "inspect")
+        if operation not in ("deposit", "extract", "inspect"):
+            return {"status": "rejected",
+                    "reason": f"Unknown operation: {operation}. Use deposit, extract, or inspect."}
+
+        # Initialize contents if the object predates the field
+        if "contents" not in obj or not isinstance(obj.get("contents"), dict):
+            obj["contents"] = {}
+
+        if operation == "inspect":
+            return {"status": "success", "object_id": obj_id,
+                    "contents": dict(obj["contents"]),
+                    "object_type": obj.get("object_type", "")}
+
+        materials = action.get("materials")
+        if not isinstance(materials, dict) or not materials:
+            return {"status": "rejected",
+                    "reason": f"{operation} requires a materials dict like "
+                              f'{{"stone": 2}}'}
+
+        if operation == "deposit":
+            from backend.world.first_pair_persistence import add_to_inventory
+            inventory = self._get_agent_inventory(agent_ref)
+            for kind, amount in materials.items():
+                if not isinstance(amount, int) or isinstance(amount, bool) or amount < 1:
+                    return {"status": "rejected",
+                            "reason": f"Invalid amount for {kind}: {amount}"}
+                held = inventory.get(kind, 0)
+                if held < amount:
+                    return {"status": "rejected",
+                            "reason": f"Not enough {kind}: you hold {held}, "
+                                      f"tried to deposit {amount}"}
+            # All checks pass; move the materials via the persistence layer
+            for kind, amount in materials.items():
+                add_to_inventory(self._store, agent_ref, kind, -amount)
+                obj["contents"][kind] = obj["contents"].get(kind, 0) + amount
+            return {"status": "success",
+                    "detail": f"Deposited {materials} into {obj_id}",
+                    "contents": dict(obj["contents"])}
+
+        if operation == "extract":
+            from backend.world.first_pair_persistence import add_to_inventory
+            for kind, amount in materials.items():
+                if not isinstance(amount, int) or isinstance(amount, bool) or amount < 1:
+                    return {"status": "rejected",
+                            "reason": f"Invalid amount for {kind}: {amount}"}
+                contained = obj["contents"].get(kind, 0)
+                if contained < amount:
+                    return {"status": "rejected",
+                            "reason": f"Not enough {kind} in object: holds "
+                                      f"{contained}, tried to extract {amount}"}
+            # All checks pass; move the materials via the persistence layer
+            for kind, amount in materials.items():
+                obj["contents"][kind] = obj["contents"].get(kind, 0) - amount
+                add_to_inventory(self._store, agent_ref, kind, amount)
+            return {"status": "success",
+                    "detail": f"Extracted {materials} from {obj_id}",
+                    "contents": dict(obj["contents"])}
+
+        return {"status": "rejected", "reason": f"Unhandled operation: {operation}"}
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)

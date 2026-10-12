@@ -55,4 +55,8 @@ GATHER_YIELD = 1
 # enclosure. The world is now bounded near the explored frontier by deep
 # water west and east, a dark thicket north, a ravine south. The changelog
 # entry states the removals and the one rule addition, nothing else.
-PHYSICS_VERSION = "epistemic.2"
+# epistemic.3 is a REAL physics change (docs/object_interaction_spec.md):
+# objects hold things. Eve at HB1864 asked for exactly this mechanic.
+# No longer true: that objects are inert records. The use_object action
+# is in the contract.
+PHYSICS_VERSION = "epistemic.3"
