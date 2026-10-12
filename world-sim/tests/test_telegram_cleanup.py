@@ -61,8 +61,8 @@ class TestNoStackedHeaders:
 
 
 class TestFrequency:
-    def test_default_interval_is_50(self):
-        """25 was four pings per 100-heartbeat window per pair = 8 per
-        window. 50 halves it. The operator asked for less spam."""
-        assert cw._PROGRESS_EVERY == 50, (
-            f"default interval is {cw._PROGRESS_EVERY}, expected 50")
+    def test_default_interval_is_off(self):
+        """Progress pings are off by default. 80 notifications in one
+        overnight trained the operator to ignore the channel. The
+        record is in the store; the phone rings when something ends."""
+        assert cw._PROGRESS_EVERY == 0

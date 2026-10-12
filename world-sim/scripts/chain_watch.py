@@ -116,7 +116,11 @@ def load_heartbeats(pair: str, limit: int = 60) -> list[dict]:
 # Sent by this process, because the person waiting is not required to be
 # awake for the world to report on itself.
 
-_PROGRESS_EVERY = 50
+# Progress pings are OFF by default. Sean's phone had 80 notifications
+# from one overnight run. The monitor's job is to tell him when
+# something ENDS or when an agent ASKS — not to count heartbeats.
+# --progress-every N opts back in if he ever wants them.
+_PROGRESS_EVERY = 0
 
 _AGENT_LABELS = {
     "east_adam": "Adam", "east_eve": "Eve",
@@ -632,6 +636,16 @@ def _seconds_since_last_evidence() -> float:
 
 
 def announce_start(pair: str, start: int, end: int) -> dict:
+    """Start announcements are OFF by default (80-notification fix).
+
+    Starting a run is not something the operator needs on his phone.
+    Ending one is. An agent asking is. Silence means running. The
+    --announce flag is kept for the boot script's log but sends nothing
+    unless GENESIS_ANNOUNCE_STARTS is set in the environment.
+    """
+    import os
+    if not os.environ.get("GENESIS_ANNOUNCE_STARTS"):
+        return {"announced": False, "reason": "start announcements off by default"}
     run_key = f"{pair}:{start}-{end}"
     if already_sent(run_key, "started"):
         return {"announced": False, "reason": "already announced"}
