@@ -342,9 +342,10 @@ def render(sig: dict) -> str:
     label = {"high": "High", "low": "Routine"}.get(sev, "")
     lines: list[str] = []
     head = str(sig.get("title") or "")
-    if label:
+    if label and head:
         head = f"{label} — {head}"
-    lines.append(head)
+    if head:
+        lines.append(head)
     ctx: list[str] = []
     agent = sig.get("agent")
     if agent and str(agent) not in ("-", "", "unknown"):

@@ -116,7 +116,7 @@ def load_heartbeats(pair: str, limit: int = 60) -> list[dict]:
 # Sent by this process, because the person waiting is not required to be
 # awake for the world to report on itself.
 
-_PROGRESS_EVERY = 25
+_PROGRESS_EVERY = 50
 
 _AGENT_LABELS = {
     "east_adam": "Adam", "east_eve": "Eve",
@@ -208,13 +208,16 @@ def _compass(first: tuple[int, int], last: tuple[int, int]) -> str:
 
 def progress_message(pair: str, since_hb: int, target_end: int, summary: dict,
                      tick: int | None, messages: int, objects_built: int,
-                     questions: int, first_message: str = "") -> str:
+                     questions: int, first_message: str = "",
+                     run_start: int | None = None) -> str:
     """One short paragraph a person can read on a phone.
 
     Plain sentences by construction: agent names, counts, compass
     directions. No ids, no field names, no dumps - the run monitor's
     terminal messages are the ones that carry diagnostics, and they carry
-    them once.
+    them once. The "N of M" counts from the run's START, not the ping
+    window's start — the old formula produced nonsense like "26 of -19"
+    because it subtracted the window boundary from the total.
     """
     bits = []
     for who in (ADAM_REF, EVE_REF):
@@ -249,8 +252,10 @@ def progress_message(pair: str, since_hb: int, target_end: int, summary: dict,
         tail.append(f"asked the operator {questions} question"
                     f"{'s' if questions != 1 else ''}")
 
-    msg = (f"Genesis: {pair} is {tick - since_hb + 1} of {target_end - since_hb + 1} "
-           f"heartbeats in. {who_line}. {'; '.join(tail).capitalize()}.")
+    msg = (f"{pair} is at heartbeat {tick} of {target_end} "
+           f"({tick - (run_start or since_hb) + 1} of "
+           f"{target_end - (run_start or since_hb) + 1} done). "
+           f"{who_line}. {'; '.join(tail).capitalize()}.")
     if first_message:
         msg += f' The first one said: "{first_message[:140]}"'
     return msg
@@ -320,21 +325,21 @@ def terminal_message(state: str, pair: str, tick: int | None, target_end: int,
                      reason: str = "", inert_tail: int | None = None) -> str:
     if state == "frozen":
         span = f" for the last {inert_tail} heartbeats" if inert_tail else ""
-        return (f"Genesis: the agents have stopped acting{span}. {pair} is at "
+        return (f"the agents have stopped acting{span}. {pair} is at "
                 f"HB{tick} of a run targeting {target_end}, and NEITHER agent "
                 f"has taken an action. The clock is still advancing; the "
                 f"world is not. This is a model/provider failure, not a "
                 f"result about the agents - these heartbeats are not "
                 f"evidence. Needs a human look.")
     if state == "complete":
-        return (f"Genesis: census run complete. {pair} reached HB{target_end} "
+        return (f"census run complete. {pair} reached HB{target_end} "
                 f"(100 heartbeats, no action needed).")
     if state == "stopped":
-        return (f"Genesis: chain STOPPED at HB{tick} (target {target_end}). "
+        return (f"chain STOPPED at HB{tick} (target {target_end}). "
                 f"{reason} I am idle; nothing will advance until a human "
                 f"looks. No data lost: the store is intact at HB{tick}.")
     if state == "stalled":
-        return (f"Genesis: chain STALLED at HB{tick} (target {target_end}, "
+        return (f"chain STALLED at HB{tick} (target {target_end}, "
                 f"no movement in 30+ min). {reason} Needs a human look.")
     return ""
 
@@ -374,7 +379,7 @@ def send_telegram_text(text: str) -> tuple[bool, str]:
         return False, "telegram not configured in process env"
     sig = {
         "severity": "info",
-        "title": "run monitor",
+        "title": "",
         "pair": "-",
         "agent": "-",
         "heartbeat": "-",
@@ -630,7 +635,7 @@ def announce_start(pair: str, start: int, end: int) -> dict:
     run_key = f"{pair}:{start}-{end}"
     if already_sent(run_key, "started"):
         return {"announced": False, "reason": "already announced"}
-    msg = (f"Genesis: census run started. {pair} HB{start}-{end} "
+    msg = (f"census run started. {pair} HB{start}-{end} "
            f"({end - start + 1} heartbeats, ~4h). I will message on "
            f"complete, stop, or stall — silence from me means running.")
     ok, detail = send_telegram_text(msg)
@@ -691,7 +696,7 @@ def maybe_send_progress(pair: str, start: int, end: int, tick: int | None,
     summary = window_summary(beats, since, tick)
     n_msgs, n_objs, n_asks, first = window_counts(pair, since, tick)
     msg = progress_message(pair, since, end, summary, tick, n_msgs, n_objs,
-                           n_asks, first_message=first)
+                           n_asks, first_message=first, run_start=start)
     ok, detail = send_telegram_text(msg)
     if ok:
         mark_sent(run_key, state)
