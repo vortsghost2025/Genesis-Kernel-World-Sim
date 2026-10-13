@@ -74,12 +74,34 @@ SNAPSHOTS_ENABLED = True
 PUBLIC_VPS = os.environ.get("GENESIS_PUBLIC_VPS", "root@187.77.3.56")
 
 
+def _count_heartbeat_records(path) -> int:
+    """Count heartbeat records without loading the full JSON.
+
+    The chain calls this on every tick. Loading the whole file at
+    2,200+ records caused a MemoryError at HB2230 (east chain died
+    mid-run). A byte-scan for '"heartbeat_number"' occurrences gives
+    the same count for a fraction of the memory: the file is read in
+    chunks, never held whole.
+    """
+    import io
+    count = 0
+    try:
+        with open(path, "rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)  # 1MB at a time
+                if not chunk:
+                    break
+                count += chunk.count(b'"heartbeat_number"')
+    except OSError:
+        return 0
+    return count
+
+
 def store_state(pair: str) -> tuple[int, int, dict]:
-    hb = json.loads((STORES[pair] / "heartbeat.json").read_text(encoding="utf-8"))
-    data = hb.get("data", hb)
+    hb_count = _count_heartbeat_records(STORES[pair] / "heartbeat.json")
     ws = json.loads((STORES[pair] / "world_state.json").read_text(encoding="utf-8"))
     wdata = ws.get("data", ws)
-    return len(data), wdata.get("tick", 0), wdata.get("tile_occupancy", {})
+    return hb_count, wdata.get("tick", 0), wdata.get("tile_occupancy", {})
 
 
 def status_path(pair: str, hb: int) -> Path:
