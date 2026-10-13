@@ -310,6 +310,12 @@ def build_local_observation(
     # the 90+ objects west Eve built a reason to exist: something you
     # placed on a tile makes that tile legible to anyone within two
     # steps, not just those standing on it.
+    #
+    # WATCHTOWER extension (docs/capability_builds_spec.md): an object
+    # whose type contains "tower" or "watchtower" is TALL - it extends
+    # visibility to Chebyshev distance 5 instead of 2. Type-matched,
+    # same substring principle as the wall unlock. Build it tall, see
+    # far.
     if public_objects:
         origin = position.get("coordinates") or {}
         pos_continent = position.get("continent_id")
@@ -331,7 +337,11 @@ def build_local_observation(
                 tx, ty = coords.get("x"), coords.get("y")
                 if tx is None or ty is None:
                     continue
-                if max(abs(tx - ox), abs(ty - oy)) <= 2:
+                cheb = max(abs(tx - ox), abs(ty - oy))
+                obj_type = str(obj.get("object_type", "")).casefold()
+                is_tower = "tower" in obj_type or "watchtower" in obj_type
+                max_range = 5 if is_tower else 2
+                if cheb <= max_range:
                     visible_tile_ids.append(tile_id)
                     existing.add(tile_id)
             visible_tile_ids = sorted(

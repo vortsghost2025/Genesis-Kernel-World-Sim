@@ -1218,7 +1218,7 @@ Available actions:
 - leave_public_message: leave a public message (requires: message, recipient)
 - ask_human: ask a question to the human operator (requires: question_id, question, reason_for_asking, requested_human_capability, urgency)
 - request_capability: request a new capability from the human (requires: capability_id, capability_reason)
-- move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves
+- move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently

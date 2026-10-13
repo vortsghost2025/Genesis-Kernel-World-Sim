@@ -435,6 +435,40 @@ class FirstPairRuntime:
         except Exception:
             return []
 
+    def _on_road_tile(self, position: str) -> bool:
+        """True when the agent's current tile carries a road object.
+
+        Road = any public object whose object_type contains 'road'.
+        The same substring matching the wall unlock uses. Build a road
+        on your tile and you walk faster — the world does not say you
+        must, only that you can.
+        """
+        objs = (self._world_state.public_objects or {}) \
+            if isinstance(self._world_state.public_objects, dict) else {}
+        for obj in objs.values():
+            if not isinstance(obj, dict):
+                continue
+            if obj.get("tile_id") == position:
+                if "road" in str(obj.get("object_type", "")).casefold():
+                    return True
+        return False
+
+    def _road_two_step(self, position: str, adjacent: list[str]) -> list[str]:
+        """Two-step reachable tiles from a road tile: for each 1-step
+        neighbor, its 1-step neighbors (excluding the starting tile).
+        Deduplicated, ordered."""
+        out: list[str] = []
+        seen = {position}
+        for n1 in adjacent:
+            if n1 == position:
+                continue
+            n1_adj = self._get_effective_adjacency(n1)
+            for n2 in n1_adj:
+                if n2 not in seen:
+                    seen.add(n2)
+                    out.append(n2)
+        return sorted(set(out))
+
     def _merge_and_persist_known_map(
         self, agent_ref: str, observation: dict[str, Any], tick: int
     ) -> None:
@@ -559,7 +593,20 @@ class FirstPairRuntime:
                     heartbeat_number=heartbeat_number,
                 )
                 visible_tiles = observation["visible_tiles"]
-                available_moves = [t for t in visible_tiles if t != position]
+                # available_moves: only tiles reachable by travel edges,
+                # not every visible tile. The object sightline extension
+                # made far tiles visible for INFORMATION, not movement —
+                # seeing a cairn 2 tiles away doesn't mean you can walk
+                # there in one step. Road tiles (any object whose type
+                # contains "road" on the CURRENT tile) extend movement
+                # to 2 travel edges per heartbeat.
+                adjacent = self._get_effective_adjacency(position)
+                available_moves = [t for t in adjacent if t != position]
+                if self._on_road_tile(position):
+                    two_step = self._road_two_step(position, adjacent)
+                    for t in two_step:
+                        if t not in available_moves and t != position:
+                            available_moves.append(t)
                 policy_allowed = self._get_effective_allowed_tiles()
                 movement_allowed_flag = True
             except FogAdapterError:
