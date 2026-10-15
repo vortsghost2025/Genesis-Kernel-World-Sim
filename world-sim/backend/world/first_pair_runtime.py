@@ -919,10 +919,34 @@ class FirstPairRuntime:
             pass  # never fail a heartbeat over the notice
 
         # --- Operator messages (operator-owned; the runtime only reads) ---
-        operator_messages = [
+        # The seen gate: messages fire ONCE per agent, like the physics
+        # changelog. West Eve counted 90 consecutive heartbeats of the
+        # same message repeating — this fixes that. A message appears,
+        # the agent reads it, it enters memory, the prompt moves on.
+        all_operator = [
             m for m in load_operator_messages(self._store)
             if m.get("addressed_to") in ("all", agent_ref)
-        ][-5:]
+        ]
+        seen_path = self._store.root / "operator_seen.json"
+        try:
+            seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+        except Exception:
+            seen_data = {}
+        seen_ids = set((seen_data.get("data", {}) or {}).get(agent_ref, []))
+        operator_messages = [
+            m for m in all_operator if m.get("message_id") not in seen_ids
+        ]
+        # Mark shown messages as seen for this agent
+        if operator_messages:
+            new_ids = sorted(
+                seen_ids | {m["message_id"] for m in operator_messages
+                            if m.get("message_id")})
+            seen_data.setdefault("data", {})[agent_ref] = new_ids
+            tmp = seen_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(seen_data, indent=1),
+                           encoding="utf-8", newline="\n")
+            json.loads(tmp.read_text(encoding="utf-8"))
+            tmp.replace(seen_path)
 
         return AgentContext(
             agent_id=view["agent_id"],
