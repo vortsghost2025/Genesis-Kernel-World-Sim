@@ -229,38 +229,88 @@ def action_summary(pair: str, since_hb: int) -> dict:
     }
 
 
-def hourly_digest(actions: list[str]) -> str:
-    """One clean paragraph for the phone."""
+def build_narrative_summary(pair: str, since_hb: int) -> dict:
+    """What happened, in words a person hears on TTS.
+
+    No coordinates, no heartbeat numbers, no move counts. Just: who
+    did what, what they said, and whether they have a question.
+    """
+    store = STORES[pair]
+    try:
+        raw = (store / "heartbeat.json").read_text(encoding="utf-8")
+        all_rows = json.loads(raw).get("data", [])
+        recent = [r for r in all_rows if isinstance(r, dict)
+                  and (r.get("heartbeat_number") or 0) >= since_hb]
+    except Exception:
+        recent = []
+
+    # What did each agent DO (named actions, not counts)
+    did: dict[str, list[str]] = {}
+    quotes: list[str] = []
+    question = None
+    for r in recent:
+        for who, a in (r.get("action_taken") or {}).items():
+            if not isinstance(a, dict):
+                continue
+            name = who.split("_")[1] if "_" in who else who
+            at = a.get("action_type", "")
+            if at == "move":
+                did.setdefault(name, []).append("explored")
+            elif at == "gather":
+                kind = a.get("resource_kind", "resources")
+                did.setdefault(name, []).append(f"gathered {kind}")
+            elif at == "build":
+                ot = a.get("object_type", "something")
+                did.setdefault(name, []).append(f"built a {ot}")
+            elif at == "leave_public_message":
+                text = str(a.get("message", ""))[:140]
+                if text:
+                    quotes.append(f"{name} said: {text}")
+                did.setdefault(name, []).append("sent a message")
+            elif at == "ask_human":
+                q = str(a.get("question", ""))[:160]
+                if q:
+                    question = f"{name} is asking: {q}"
+            elif at == "use_object":
+                op = a.get("operation", "")
+                target = a.get("target_object_id", "")
+                did.setdefault(name, []).append(f"used an object ({op})")
+            elif at == "revise_charter":
+                did.setdefault(name, []).append("revised their charter")
+
+    # Build the summary sentence
     parts = []
-    for pair in ("east", "west"):
-        s = action_summary(pair, _read_tick(STORES[pair]) - 60)
-        names = []
-        for agent, pos in (s["positions"] or {}).items():
-            n = agent.split("_")[1] if "_" in agent else agent
-            # extract coords from tile id like cont_a_gen_-2_-4
-            tile = str(pos)
-            try:
-                pieces = tile.split("_")
-                coords = f"({pieces[-2]},{pieces[-1]})"
-            except Exception:
-                coords = tile[:20]
-            names.append(f"{n} at {coords}")
-        activity = []
-        if s["moves"]:
-            activity.append(f"{sum(s['moves'].values())} moves")
-        if s["messages"]:
-            activity.append(f"{s['messages']} messages")
-        if s["builds"]:
-            activity.append(f"{s['builds']} builds")
-        if s["use_object"]:
-            activity.append(f"{s['use_object']} interactions")
-        act_str = ", ".join(activity) if activity else "quiet"
-        parts.append(f"{pair}: {'; '.join(names) if names else 'unknown'} "
-                     f"— {act_str}")
-    msg = "World: " + " | ".join(parts)
-    if actions:
-        msg += f" [steward: {'; '.join(actions)}]"
-    return msg
+    for name, actions in did.items():
+        # Deduplicate and limit
+        unique = list(dict.fromkeys(actions))[:3]
+        parts.append(f"{name} {' and '.join(unique)}")
+    summary = "; ".join(parts) if parts else "quiet"
+
+    return {
+        "summary": summary,
+        "quote": quotes[-1] if quotes else None,
+        "question": question,
+    }
+
+
+def build_digest(east: dict, west: dict) -> str:
+    """One paragraph, TTS-friendly: what they did, what they said,
+    what they need. No coordinates, no numbers, no telemetry."""
+    parts = []
+    for pair_name, data in (("East", east), ("West", west)):
+        s = data.get("summary", "quiet")
+        if s and s != "quiet":
+            sentence = f"{pair_name}: {s}"
+            q = data.get("quote")
+            if q:
+                sentence += f". {q}"
+            parts.append(sentence)
+        else:
+            parts.append(f"{pair_name}: quiet")
+        ask = data.get("question")
+        if ask:
+            parts.append(f"QUESTION: {ask}")
+    return ". ".join(parts) + "."
 
 
 def send_telegram(text: str) -> bool:
@@ -297,7 +347,11 @@ def poll_once(digest: bool = False) -> dict:
     result = {"at_utc": _utc_now(), "actions": all_actions}
 
     if digest:
-        msg = hourly_digest(all_actions)
+        east_data = build_narrative_summary("east", _read_tick(STORES["east"]) - 60)
+        west_data = build_narrative_summary("west", _read_tick(STORES["west"]) - 60)
+        msg = build_digest(east_data, west_data)
+        if all_actions:
+            msg += f" Steward note: {'; '.join(all_actions)}."
         sent = send_telegram(msg)
         result["digest_sent"] = sent
         result["digest"] = msg

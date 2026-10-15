@@ -57,10 +57,15 @@ class TestRenderHumanFriendly:
         text = aw.render(_sig())
         assert "[HIGH]" not in text
 
-    def test_names_agent_and_heartbeat_in_plain_words(self):
+    def test_names_agent_in_plain_words(self):
         text = aw.render(_sig())
         assert "Eve" in text
-        assert "hb 968" in text or "heartbeat 968" in text
+
+    def test_no_heartbeat_numbers(self):
+        """Sean hears this through TTS — heartbeat numbers are noise."""
+        text = aw.render(_sig())
+        assert "hb" not in text.lower()
+        assert "968" not in text
 
     def test_materials_dict_not_dumped(self):
         text = aw.render(_sig())
@@ -75,19 +80,23 @@ class TestRenderHumanFriendly:
         """chain_watch sends its own shapes; render must not KeyError."""
         text = aw.render({
             "severity": "info",
-            "title": "run monitor",
+            "title": "",
             "pair": "-",
             "agent": "-",
             "heartbeat": "-",
             "body": "channel works",
         })
-        assert "run monitor" in text
+        assert "channel works" in text
 
-    def test_severity_worded_not_shouted(self):
+    def test_severity_is_not_shouted(self):
+        """The severity word itself is noise on TTS — the content is
+        the signal. 'Adam is asking' is urgent on its own."""
         low = aw.render(_sig(severity="low"))
         high = aw.render(_sig(severity="high"))
-        assert "high" in high.lower()
-        assert "high" not in low.lower()
+        # both should contain the content, neither should contain
+        # the raw severity label as a standalone word
+        assert "Eve" in low
+        assert "Eve" in high
 
 
 class TestIsTestBuild:

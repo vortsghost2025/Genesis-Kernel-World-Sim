@@ -335,32 +335,37 @@ def dedupe(signals: list[dict], fired: dict) -> tuple[list[dict], dict]:
 
 
 def render(sig: dict) -> str:
-    """Plain sentences for a phone screen. No key=value telemetry, no raw
-    materials dicts, no bracket noise. The durable log keeps reply hints;
-    Telegram gets the human version."""
-    sev = (sig.get("severity") or "info").lower()
-    label = {"high": "High", "low": "Routine"}.get(sev, "")
-    lines: list[str] = []
-    head = str(sig.get("title") or "")
-    if label and head:
-        head = f"{label} — {head}"
-    if head:
-        lines.append(head)
-    ctx: list[str] = []
+    """One clean sentence for TTS. Sean hears these through a screen
+    reader — every severity label, context line, and heartbeat number
+    is noise between him and the content.
+
+    What he needs to hear:
+    - "Adam is asking: [question]" — an agent question
+    - "Eve built a storage container" — a notable action
+    - "The east pair stopped moving" — a problem
+
+    NOT:
+    - "High — west_adam asks (unanswered) · by west_adam · west pair · hb 1756"
+    """
     agent = sig.get("agent")
-    if agent and str(agent) not in ("-", "", "unknown"):
-        ctx.append(f"by {agent}")
-    pair = sig.get("pair")
-    if pair and str(pair) != "-":
-        ctx.append(f"{pair} pair")
-    hb = sig.get("heartbeat")
-    if hb not in (None, "", "-"):
-        ctx.append(f"hb {hb}")
-    if ctx:
-        lines.append(" · ".join(ctx))
-    if sig.get("body"):
-        lines.append(str(sig["body"]))
-    return "\n".join(lines)
+    name = str(agent).split("_")[1] if agent and "_" in str(agent) else str(agent or "")
+    body = str(sig.get("body") or "").strip()
+    title = str(sig.get("title") or "").strip()
+
+    # "asks (unanswered)" → "{name} is asking: {body}"
+    if "asks" in title.lower():
+        return f"{name or 'Someone'} is asking: {body}" if body else title
+
+    # "built a {type}" → "{name} built a {type}: {body}"
+    if "built" in title.lower():
+        return f"{name or 'Someone'} {title}: {body}" if body else f"{name} {title}"
+
+    # "stopped at tick" / "stuck" / generic → "{name}: {body}" or just body
+    if body:
+        if name and name not in ("-", "", "unknown"):
+            return f"{name}: {body}"
+        return body
+    return title
 
 
 def telegram_config(env: dict | None = None) -> tuple[str, str]:
