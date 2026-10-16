@@ -73,27 +73,18 @@ CREATE_NO_WINDOW = 0x08000000
 # validate_model_output with a real proposed action
 # (.scratch/contract_probe.json). A 200 is not evidence; a validated
 # action is. Re-verify with that same probe before trusting either.
-# MODEL ERA 3 (2026-10-11). The era-2 constants were overwritten during
-# the missing-days session (9328d00, "10JH") to ling-3.0-flash-sante:free
-# for BOTH lanes - which then went paid ("unavailable for free", 404) and
-# froze both chains for 8 inert heartbeats before the frozen-run
-# detection killed them. Same class as the Sept 30 outage: the configured
-# route died upstream and nothing could serve.
+# MODEL ERA 4 (2026-10-16). dots-studio hit its free-tier daily cap (429)
+# and nemotron-3-ultra went 404 again. Only one route is contract-valid
+# right now: nemotron-3-nano-omni-30b-a3b-reasoning (13.8s, valid JSON,
+# verified against the contract probe). dots-studio is kept as fallback —
+# the 429 is a daily reset and may recover at midnight UTC.
 #
-# Era 3 restores dots-studio as primary (verified alive today: 200, valid
-# JSON, realistic size) and names nemotron-3-ultra-550b-a55b:free as the
-# fallback - the model that served the first 1,243 heartbeats of this
-# sim, returned from its own outage, and re-verified against the REAL
-# contract this morning (both east agents, real contexts, valid move
-# actions - .scratch/verify_fallback_contract.py). The old fallback
-# (inclusionai/ling-3.0-flash-sante:free) is DEAD: 404, went paid.
-#
-# Before naming any model here, run the contract probe. A 200 is not
-# availability; a validated action is.
-PRIMARY_MODEL = "dots-studio/dots-3-note-preview:free"
-FALLBACK_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
-ADAM_MODEL = "dots-studio/dots-3-note-preview:free"
-EVE_MODEL = "dots-studio/dots-3-note-preview:free"
+# Before naming any model here, run .scratch/find_live_route.py —
+# a 200 is not availability; a validated action is.
+PRIMARY_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+FALLBACK_MODEL = "dots-studio/dots-3-note-preview:free"
+ADAM_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+EVE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 # Single source of truth for the lane endpoint. build_clean_env() writes this
 # and resolution_proof() asserts the resolver honored it, so the configured
