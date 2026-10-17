@@ -29,7 +29,12 @@ from backend.world.first_pair_cognition_interface import (  # noqa: E402
     AgentContext,
 )
 
-BOTH_VALID_ROUTE = "inclusionai/ling-3.0-flash-sante:free"
+# Model era 4b (Oct 2026): the only contract-valid route alive is the
+# nemotron nano omni route. dots-studio is 429-rate-limited, nemotron-ultra
+# is 404, ling is paid-only. Primary and fallback are the same route by
+# necessity — when this route dies, the era changes and so does this file.
+BOTH_VALID_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+DIVERSE_FALLBACK_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 _FALLBACK_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",
@@ -202,9 +207,21 @@ class TestDotsAdamInvalidity:
 
 class TestPrimaryModels:
     def test_primary_and_per_agent_models_are_both_valid_route(self):
-        """Runner constants must name the Oct-07 both-valid route, not
-        the Adam-invalid dots route."""
+        """Runner constants must name the currently both-valid route
+        (era 4b: nemotron nano omni — dots 429-limited, ultra 404,
+        ling paid-only)."""
         from backend.world import canonical_heartbeat_runner as r
         assert r.PRIMARY_MODEL == BOTH_VALID_ROUTE
         assert r.ADAM_MODEL == BOTH_VALID_ROUTE
         assert r.EVE_MODEL == BOTH_VALID_ROUTE
+
+    def test_fallback_names_the_alive_route(self):
+        """Era 4b has exactly one contract-valid route alive, so the
+        fallback IS the primary route (same nano model). The invariant
+        that matters now: the fallback must name a route that serves
+        200s on its own — i.e. it must be the era's living route, not
+        a stale one from a dead era."""
+        from backend.world import canonical_heartbeat_runner as r
+        assert r.FALLBACK_MODEL == DIVERSE_FALLBACK_ROUTE
+        assert r.FALLBACK_MODEL == r.PRIMARY_MODEL
+        assert r.FALLBACK_MODEL.endswith(":free")

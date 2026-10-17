@@ -44,6 +44,9 @@ class TestCompleteIsNotSuccess:
                             lambda t: (sent.append(t), (True, "ok"))[1])
         monkeypatch.setattr(cw, "already_sent", lambda k, s: False)
         monkeypatch.setattr(cw, "mark_sent", lambda k, s: None)
+        monkeypatch.setattr(cw, "wake_operator",
+                            lambda b, run: {"woken": False,
+                                           "reason": "mocked"})
         out = cw.monitor_once("east", 1, 8, None)
         assert out["state"] == "frozen"
         assert sent and "stopped acting" in sent[0]
@@ -59,6 +62,9 @@ class TestCompleteIsNotSuccess:
                             lambda t: (sent.append(t), (True, "ok"))[1])
         monkeypatch.setattr(cw, "already_sent", lambda k, s: False)
         monkeypatch.setattr(cw, "mark_sent", lambda k, s: None)
+        monkeypatch.setattr(cw, "wake_operator",
+                            lambda b, run: {"woken": False,
+                                           "reason": "mocked"})
         out = cw.monitor_once("east", 1, 8, None)
         assert out["state"] == "complete"
         assert sent and "complete" in sent[0].lower()
@@ -90,6 +96,9 @@ class TestHealthIsReported:
                             lambda t: (sent.append(t), (True, "ok"))[1])
         monkeypatch.setattr(cw, "already_sent", lambda k, s: False)
         monkeypatch.setattr(cw, "mark_sent", lambda k, s: None)
+        monkeypatch.setattr(cw, "wake_operator",
+                            lambda b, run: {"woken": False,
+                                           "reason": "mocked"})
         out = cw.monitor_once("east", 1, 8, 1)
         assert out["health"]["inert_tail"] == 8
         # Mid-run freeze must alert NOW, not at the end of the run. The
