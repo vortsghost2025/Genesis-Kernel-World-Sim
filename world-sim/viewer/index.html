@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -6,69 +6,165 @@
 <title>Genesis — Two Civilizations</title>
 <style>
 :root {
-  --bg: #0a0e14; --panel: rgba(15,20,28,.92); --line: #1a2a3a;
-  --text: #dce4ee; --dim: #6b7f94; --accent: #e8b84b;
-  --adam: #4ecdc4; --eve: #f7d05e;
-  --water: #0d2137; --forest: #0d2818; --grass: #1a2818; --hill: #2a2418;
-  --mountain: #2a1a14; --desert: #3a3018; --snow: #2a3040;
-  --wall: #4a1010;
+  --bg: #04060b;
+  --panel: rgba(13, 18, 28, 0.85);
+  --line: rgba(110, 150, 200, 0.16);
+  --text: #d8e2ee;
+  --dim: #7d8aa0;
+  --adam: #4ecdc4;
+  --eve: #f7d05e;
+  --east: #4ecdc4;
+  --west: #f7d05e;
 }
-* { box-sizing: border-box; margin: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
-
-header { padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: 1px; }
-header .tick { color: var(--accent); font-weight: 800; }
-header .sub { color: var(--dim); font-size: .85rem; }
-
-#main { flex: 1; display: flex; overflow: hidden; }
-#map-panel { flex: 1; position: relative; overflow: auto; }
-#map-canvas { display: block; }
-#sidebar { width: 380px; border-left: 1px solid var(--line); overflow-y: auto; flex-shrink: 0; background: var(--bg); }
-
-#sidebar .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
-#sidebar h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); margin-bottom: 10px; }
-
-.agent-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; background: rgba(20,30,42,.6); border: 1px solid var(--line); }
-.agent-card .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 700px at 20% -10%, #0a1220 0%, transparent 60%),
+    radial-gradient(1000px 600px at 90% 110%, #0c0a14 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(8, 11, 18, 0.6);
+  flex: 0 0 auto;
+}
+h1 {
+  margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: 0.35em;
+}
+h1 span { color: var(--adam); }
+.sub { color: var(--dim); font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 2px; }
+.tick {
+  font: 700 1.25rem/1.1 "Cascadia Mono", Consolas, monospace;
+  color: #eaf2ff; text-align: right;
+}
+#clock { color: var(--dim); font-size: 0.7rem; text-align: right; }
+#main { flex: 1 1 auto; display: flex; min-height: 0; }
+#map-panel {
+  flex: 1 1 auto; position: relative; min-width: 0;
+  background: #04060b;
+}
+#map-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: grab; display: block;
+}
+#map-canvas.dragging { cursor: grabbing; }
+#map-hint {
+  position: absolute; top: 10px; right: 14px;
+  color: var(--dim); font-size: 0.7rem; letter-spacing: 0.08em;
+  background: rgba(8, 11, 18, 0.55); border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px 10px; pointer-events: none;
+}
+#zoom-label {
+  position: absolute; top: 10px; left: 14px;
+  color: var(--dim); font-size: 0.7rem;
+  background: rgba(8, 11, 18, 0.55); border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px 10px; pointer-events: none;
+}
+#legend {
+  position: absolute; bottom: 12px; left: 12px;
+  max-width: 300px;
+  background: rgba(8, 11, 18, 0.78); border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px 10px;
+  font-size: 0.72rem; color: var(--dim);
+  backdrop-filter: blur(6px);
+}
+#legend summary {
+  cursor: pointer; color: var(--text); font-size: 0.7rem;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  user-select: none; outline: none;
+}
+#legend .lg { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 6px; }
+#legend .li { display: flex; align-items: center; gap: 5px; }
+#legend .sw { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+#sidebar {
+  flex: 0 0 340px; overflow-y: auto; padding: 12px;
+  border-left: 1px solid var(--line);
+  background: rgba(6, 9, 15, 0.5);
+  scrollbar-width: thin; scrollbar-color: #24303f transparent;
+}
+.section { margin-bottom: 16px; }
+.section h2 {
+  margin: 0 0 8px; font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase; color: var(--dim);
+}
+.agent-card {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 6px;
+}
+.agent-card.adam { border-left: 3px solid var(--adam); }
+.agent-card.eve { border-left: 3px solid var(--eve); }
+.dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: 0 0 auto; }
 .agent-card.adam .dot { background: var(--adam); box-shadow: 0 0 8px var(--adam); }
 .agent-card.eve .dot { background: var(--eve); box-shadow: 0 0 8px var(--eve); }
-.agent-card .name { font-weight: 700; font-size: .95rem; }
-.agent-card .pos { color: var(--dim); font-size: .8rem; }
-.agent-card .inv { font-size: .78rem; color: var(--dim); }
-
-.stat-row { display: flex; gap: 16px; flex-wrap: wrap; }
-.stat { background: rgba(20,30,42,.6); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
-.stat .num { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
-.stat .label { font-size: .75rem; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
-
-.msg { padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: rgba(20,30,42,.5); border-left: 3px solid var(--line); font-size: .88rem; line-height: 1.45; }
-.msg.adam { border-left-color: var(--adam); }
-.msg.eve { border-left-color: var(--eve); }
-.msg .who { font-weight: 700; font-size: .8rem; margin-bottom: 3px; }
-.msg .who.adam { color: var(--adam); }
-.msg .who.eve { color: var(--eve); }
-.msg .hb { color: var(--dim); font-size: .75rem; }
-
-.obj-item { display: inline-flex; align-items: center; gap: 6px; background: rgba(20,30,42,.5); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; margin: 2px; font-size: .82rem; }
-.obj-item .type { color: var(--accent); font-weight: 600; }
-
-canvas { image-rendering: pixelated; }
-#tooltip { position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; font-size: .82rem; pointer-events: none; display: none; max-width: 260px; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+.name { font-weight: 600; }
+.pos { color: var(--dim); font: 0.7rem "Cascadia Mono", Consolas, monospace; }
+.inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip {
+  font-size: 0.68rem; color: #b9c6d8;
+  background: rgba(120, 160, 210, 0.1); border: 1px solid rgba(120, 160, 210, 0.2);
+  border-radius: 20px; padding: 1px 7px;
+}
+.stat-row { display: flex; gap: 6px; }
+.stat {
+  flex: 1; text-align: center; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 2px;
+}
+.stat .num { font: 700 1rem "Cascadia Mono", Consolas, monospace; color: #eaf2ff; }
+.stat .label { color: var(--dim); font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.msg {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 7px 10px; margin-bottom: 6px; font-size: 0.82rem;
+  color: #c3cedd;
+}
+.msg.adam { border-left: 3px solid var(--adam); }
+.msg.eve { border-left: 3px solid var(--eve); }
+.who { font-weight: 700; color: var(--text); font-size: 0.78rem; }
+.hb { color: var(--dim); font-weight: 400; font-size: 0.68rem; margin-left: 4px; }
+.obj-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 20px; padding: 2px 9px; margin: 0 4px 4px 0; font-size: 0.75rem;
+}
+.obj-item .type { color: var(--text); }
+.obj-item .cnt { color: var(--dim); font: 0.7rem "Cascadia Mono", Consolas, monospace; }
+#tooltip {
+  position: fixed; display: none; z-index: 50; max-width: 300px;
+  background: rgba(8, 10, 16, 0.94); border: 1px solid rgba(130, 170, 220, 0.3);
+  border-radius: 10px; padding: 9px 12px; font-size: 0.78rem; color: #c9d4e2;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+#tooltip b { color: #eaf2ff; }
+#tooltip .trow { margin-top: 3px; }
+#tooltip .tbar { height: 3px; background: #1a2432; border-radius: 2px; margin-top: 4px; width: 130px; }
+#tooltip .tbar i { display: block; height: 100%; background: linear-gradient(90deg, #35507a, #8fb8e8); border-radius: 2px; }
 </style>
 </head>
 <body>
 <header>
-  <div><h1>GENESIS</h1><div class="sub">Two Civilizations</div></div>
-  <div style="text-align:right"><div class="tick" id="tick-label">—</div><div class="sub" id="clock">—</div></div>
+  <div><h1>GENE<span>SIS</span></h1><div class="sub">Two Civilizations</div></div>
+  <div style="text-align:right"><div class="tick" id="tick-label">—</div><div id="clock">—</div></div>
 </header>
 <div id="main">
-  <div id="map-panel"><canvas id="map-canvas"></canvas></div>
+  <div id="map-panel">
+    <canvas id="map-canvas"></canvas>
+    <div id="zoom-label">—</div>
+    <div id="map-hint">scroll zoom · drag pan · double-click fit</div>
+    <details id="legend"><summary>Legend</summary><div class="lg" id="legend-body"></div></details>
+  </div>
   <div id="sidebar">
     <div class="section"><h2>Agents</h2><div id="agents"></div></div>
-    <div class="section"><h2>World</h2>
-      <div class="stat-row" id="stats"></div>
-    </div>
+    <div class="section"><h2>World</h2><div class="stat-row" id="stats"></div></div>
     <div class="section"><h2>Messages</h2><div id="messages"></div></div>
     <div class="section"><h2>Objects</h2><div id="objects"></div></div>
   </div>
@@ -76,218 +172,770 @@ canvas { image-rendering: pixelated; }
 <div id="tooltip"></div>
 <script src="viewer_data.js"></script>
 <script>
-const D = window.VIEWER_DATA;
+(() => {
+"use strict";
+
+// ---------- data ----------
+const D = window.VIEWER_DATA || {};
 const PAIRS = D.pairs || {};
 const TM = D.true_map || {};
 
-// Build tile lookup from true_map
-const tiles = {};
-const tileAt = {};
+const tiles = new Map();
+const tileByCoord = new Map();
 (TM.tiles || []).forEach(t => {
-  tiles[t.tile_id] = t;
-  const c = t.coordinates; if (!c) return;
-  tileAt[c.x + ',' + c.y] = t;
+  tiles.set(t.tile_id, t);
+  const c = t.coordinates;
+  if (c) tileByCoord.set(c.x + "," + c.y, t);
 });
 
-// Terrain colors
-const TERRAIN_COLORS = {
-  ocean: '#0d2137', forest: '#0d2818', grassland: '#1a2818',
-  hill: '#2a2418', mountain: '#2a1a14', desert: '#3a3018',
-  snow: '#2a3040', coast: '#122a3a', river: '#1a3050',
-  swamp: '#1a3020', tundra: '#202a35'
-};
-
-// Render world map
-const canvas = document.getElementById('map-canvas');
-const ctx = canvas.getContext('2d');
-const TILE_SIZE = 6;
-
-function renderMap() {
-  // Find tile bounds
-  let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
-  Object.values(tiles).forEach(t => {
-    const c = t.coordinates; if (!c) return;
-    if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
-    if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
-  });
-  const w = (maxX - minX + 1) * TILE_SIZE, h = (maxY - minY + 1) * TILE_SIZE;
-  canvas.width = w; canvas.height = h;
-  canvas.style.width = Math.min(w, 1200) + 'px';
-
-  // Draw tiles
-  Object.values(tiles).forEach(t => {
-    const c = t.coordinates; if (!c) return;
-    const px = (c.x - minX) * TILE_SIZE, py = (c.y - minY) * TILE_SIZE;
-    const biome = t.biome || '';
-    let color = TERRAIN_COLORS[biome] || '#1a1a2a';
-    if (t.blocks_travel) color = '#4a1010';
-    ctx.fillStyle = color;
-    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-
-    // Resources as tiny dots
-    if (t.resources && t.resources.length > 0) {
-      ctx.fillStyle = 'rgba(200,220,180,0.4)';
-      ctx.fillRect(px+TILE_SIZE/4, py+TILE_SIZE/4, TILE_SIZE/2, TILE_SIZE/2);
-    }
-  });
-
-  // Draw walls (blocked tiles get red overlay)
-  Object.values(tiles).forEach(t => {
-    if (!t.blocks_travel) return;
-    const c = t.coordinates; if (!c) return;
-    const px = (c.x - minX) * TILE_SIZE, py = (c.y - minY) * TILE_SIZE;
-    ctx.fillStyle = 'rgba(180,40,40,0.35)';
-    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-  });
-
-  // Draw objects
-  for (const [pairName, pairData] of Object.entries(PAIRS)) {
-    const objs = pairData.public_objects || {};
-    Object.values(objs).forEach(o => {
-      const tile = tiles[o.tile_id]; if (!tile) return;
-      const c = tile.coordinates; if (!c) return;
-      const px = (c.x - minX) * TILE_SIZE, py = (c.y - minY) * TILE_SIZE;
-      ctx.fillStyle = pairName === 'east' ? 'rgba(78,205,196,0.8)' : 'rgba(247,208,94,0.8)';
-      ctx.fillRect(px+1, py+1, TILE_SIZE-2, TILE_SIZE-2);
-    });
-  }
-}
-
-// Draw agents (current_positions maps agent_ref -> tile_id)
-function drawAgents() {
-  const b = tileBoundsMin();
-  for (const [pairName, pairData] of Object.entries(PAIRS)) {
-    const color = pairName === 'east' ? '#4ecdc4' : '#f7d05e';
-    for (const [ref, tileId] of Object.entries(pairData.current_positions || {})) {
-      const tile = tiles[tileId]; if (!tile) continue;
-      const c = tile.coordinates; if (!c) continue;
-      const px = (c.x - b.x) * TILE_SIZE + TILE_SIZE/2;
-      const py = (c.y - b.y) * TILE_SIZE + TILE_SIZE/2;
-      ctx.beginPath();
-      ctx.arc(px, py, 5, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      // Label
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(ref.split('_')[1] || ref, px + 8, py + 4);
-    }
-  }
-}
-
-function tileBoundsMin() {
-  let mx=Infinity, my=Infinity;
-  Object.values(tiles).forEach(t=>{const c=t.coordinates;if(c){if(c.x<mx)mx=c.x;if(c.y<my)my=c.y;}});
-  return {x: mx, y: my};
-}
-
+// ---------- helpers ----------
 function esc(s) {
   const A = '&' + 'amp;', L = '&' + 'lt;', G = '&' + 'gt;', Q = '&' + 'quot;';
   return String(s == null ? '' : s)
     .replace(/&/g, A).replace(/</g, L).replace(/>/g, G).replace(/"/g, Q);
 }
+function hash2(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = (h ^ (h >> 13)) * 1274126177 | 0;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+}
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
-// Populate sidebar
-function renderSidebar() {
-  // Tick (max exported_tick across pairs)
-  let tick = 0, stamp = '';
-  for (const pd of Object.values(PAIRS)) {
-    if ((pd.exported_tick || 0) > tick) { tick = pd.exported_tick; stamp = pd.exported_at_utc || ''; }
-  }
-  document.getElementById('tick-label').textContent = 'HB ' + (tick || 0).toLocaleString();
-  document.getElementById('clock').textContent = stamp ? new Date(stamp).toLocaleString() : '';
+// ---------- bounds ----------
+let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+tiles.forEach(t => {
+  const c = t.coordinates; if (!c) return;
+  if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+  if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+});
+if (!isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
+const GW = maxX - minX + 1, GH = maxY - minY + 1;
+const gcx = (minX + maxX) / 2, gcy = (minY + maxY) / 2;
 
-  // Agents
-  const agentsDiv = document.getElementById('agents');
-  agentsDiv.innerHTML = '';
-  for (const [pairName, pairData] of Object.entries(PAIRS)) {
-    const color = pairName === 'east' ? 'var(--adam)' : 'var(--eve)';
-    const inventories = pairData.inventories || {};
-    for (const [ref, tileId] of Object.entries(pairData.current_positions || {})) {
-      const name = ref.split('_')[1] || ref;
-      const inv = inventories[ref] || {};
-      const invStr = Object.entries(inv).filter(([k,v])=>v>0).map(([k,v])=>k+':'+v).join(', ') || 'empty';
-      agentsDiv.innerHTML += `<div class="agent-card ${pairName === 'east' ? 'adam' : 'eve'}">
-        <div class="dot"></div>
-        <div><div class="name">${esc(name)} <span style="color:var(--dim);font-size:.75rem">(${esc(pairName)})</span></div>
-        <div class="pos">${esc(tileId)}</div><div class="inv">${esc(invStr)}</div></div></div>`;
-    }
-  }
+// ---------- palette ----------
+// [low-elev tint, high-elev tint, snow threshold or 0]
+const BIOME = {
+  deep_ravine:      [22, 17, 32],
+  deep_lake:        [16, 52, 88],
+  warm_coast:       [196, 164, 106],
+  temperate_valley: [64, 118, 66],
+  temperate_hills:  [104, 120, 66],
+  highland:         [124, 116, 102],
+  temperate_forest: [42, 94, 52],
+  dense_woodland:   [26, 72, 40],
+  dark_thicket:     [20, 52, 42],
+  coastal_forest:   [40, 90, 60],
+};
+const TERRAIN_FALLBACK = {
+  forest: [42, 94, 52], grassland: [64, 118, 66], hill: [104, 120, 66],
+  mountain: [124, 116, 102], desert: [200, 170, 100], snow: [205, 214, 222],
+  coast: [196, 164, 106], river: [34, 96, 148], swamp: [58, 92, 56],
+  tundra: [150, 158, 166], ocean: [12, 36, 60],
+};
+const WATER_DRINK = [46, 128, 182];
+const WATER_DEAD = [40, 82, 122];
+const WALL = [58, 16, 20];
+const EAST = "#4ecdc4", WEST = "#f7d05e";
+const PAIR_RGB = { east: [78, 205, 196], west: [247, 208, 94] };
 
-  // Stats
-  let totalMsgs = 0, totalObjs = 0, totalHb = 0;
-  for (const [pn, pd] of Object.entries(PAIRS)) {
-    totalMsgs += (pd.public_messages || []).length;
-    totalObjs += Object.keys(pd.public_objects || {}).length;
-    totalHb = Math.max(totalHb, pd.exported_tick || 0);
+function baseColor(t) {
+  const e = t.elevation == null ? 0.5 : t.elevation;
+  if (t.water) {
+    const b = t.water.drinkable ? WATER_DRINK : WATER_DEAD;
+    const k = 0.75 + e * 0.5;
+    return [b[0] * k, b[1] * k, b[2] * k];
   }
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="num">${totalHb}</div><div class="label">Heartbeats</div></div>
-    <div class="stat"><div class="num">${totalMsgs}</div><div class="label">Messages</div></div>
-    <div class="stat"><div class="num">${totalObjs}</div><div class="label">Objects</div></div>`;
-
-  // Messages (most recent first, all pairs)
-  const msgDiv = document.getElementById('messages');
-  msgDiv.innerHTML = '';
-  let allMsgs = [];
-  for (const [pn, pd] of Object.entries(PAIRS)) {
-    for (const m of (pd.public_messages || []).slice(-30)) {
-      allMsgs.push({...m, _pair: pn});
-    }
+  let b = BIOME[t.biome] || TERRAIN_FALLBACK[t.terrain] || [40, 48, 62];
+  // low ground slightly darker, high ground lighter, per-biome ramp
+  const k = 0.72 + e * 0.56;
+  let r = b[0] * k, g = b[1] * k, bl = b[2] * k;
+  const snowLine = (t.biome === "highland" || t.terrain === "mountain") ? 0.78 : 0.93;
+  if (e > snowLine && !t.water) {
+    const m = clamp((e - snowLine) / (1 - snowLine), 0, 1);
+    r = r + (210 - r) * m; g = g + (218 - g) * m; bl = bl + (226 - bl) * m;
   }
-  allMsgs.sort((a,b) => (b.heartbeat||0) - (a.heartbeat||0));
-  for (const m of allMsgs.slice(0, 15)) {
-    const raw = String(m.sender || m.sender_agent_id || '?');
-    const who = raw.split('_')[1] || raw;
-    const cls = raw.includes('adam') ? 'adam' : 'eve';
-    msgDiv.innerHTML += `<div class="msg ${cls}"><div class="who">${esc(who)} <span class="hb">HB${m.heartbeat||''}</span></div>${esc(m.message || m.text || '')}</div>`;
-  }
-  if (!allMsgs.length) msgDiv.innerHTML = '<div style="color:var(--dim);font-size:.85rem">No messages yet.</div>';
-
-  // Objects
-  const objDiv = document.getElementById('objects');
-  objDiv.innerHTML = '';
-  let allObjs = [];
-  for (const [pn, pd] of Object.entries(PAIRS)) {
-    for (const [oid, o] of Object.entries(pd.public_objects || {})) {
-      allObjs.push({...o, _pair: pn});
-    }
-  }
-  // Group by type
-  const byType = {};
-  allObjs.forEach(o => { const t = o.object_type || '?'; byType[t] = (byType[t]||0)+1; });
-  const typeStr = Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,c])=>`<span class="obj-item"><span class="type">${t}</span> ×${c}</span>`).join('');
-  objDiv.innerHTML = typeStr || '<div style="color:var(--dim);font-size:.85rem">No objects yet.</div>';
+  return [r, g, bl];
 }
 
-// Render everything
-renderMap();
-renderSidebar();
-drawAgents();
+// ---------- canvas setup ----------
+const canvas = document.getElementById("map-canvas");
+const ctx = canvas.getContext("2d");
+const panel = document.getElementById("map-panel");
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-// Tooltip on hover
-canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left + document.getElementById('map-panel').scrollLeft;
-  const my = e.clientY - rect.top + document.getElementById('map-panel').scrollTop;
-  const b = tileBoundsMin();
-  const tx = Math.floor(mx / TILE_SIZE) + b.x;
-  const ty = Math.floor(my / TILE_SIZE) + b.y;
-  const t = tileAt[tx + ',' + ty];
-  const tip = document.getElementById('tooltip');
-  if (t) {
-    tip.style.display = 'block';
-    tip.style.left = (e.clientX + 12) + 'px';
-    tip.style.top = (e.clientY + 12) + 'px';
-    tip.innerHTML = `<b>${esc(t.tile_id)}</b><br>${esc(t.terrain)} / ${esc(t.biome)}<br>${esc((t.resources||[]).join(', ')) || 'no resources'}`;
+let view = { scale: 10, cx: gcx, cy: gcy };
+let cssW = 1, cssH = 1;
+
+function resize() {
+  cssW = panel.clientWidth || 100;
+  cssH = panel.clientHeight || 100;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+}
+window.addEventListener("resize", () => { resize(); layoutZoomLabel(); });
+resize();
+
+function fitScale() { return Math.min(cssW / GW, cssH / GH); }
+function fitView() {
+  view = { scale: fitScale(), cx: gcx, cy: gcy };
+}
+function screenToWorld(sx, sy) {
+  return { x: (sx - cssW / 2) / view.scale + view.cx, y: (sy - cssH / 2) / view.scale + view.cy };
+}
+
+// ---------- terrain layer ----------
+// rendered at px pixels/tile, cached; rebaked when zoom crosses a bucket
+const layerCache = new Map(); // px -> canvas
+let layerPx = 0;
+function capPx(px) {
+  const m = Math.max(GW, GH);
+  return Math.max(1, Math.min(px, Math.floor(4096 / m)));
+}
+function getLayer(px) {
+  px = capPx(px);
+  if (layerCache.has(px)) return layerCache.get(px);
+  const c = renderTerrainLayer(px);
+  layerCache.set(px, c);
+  while (layerCache.size > 2) {
+    const first = layerCache.keys().next().value;
+    if (first === px) break;
+    layerCache.delete(first);
+  }
+  return c;
+}
+function ensureLayer() {
+  const want = clamp(Math.round(view.scale), 3, 26);
+  if (!layerPx || Math.abs(want / layerPx - 1) > 0.55) {
+    layerPx = want;
+    getLayer(layerPx);
+  }
+  return layerCache.get(capPx(layerPx)) || getLayer(layerPx);
+}
+
+function renderTerrainLayer(px) {
+  const W = GW * px, H = GH * px;
+  // pass 1: 1px per tile color field
+  const base = document.createElement("canvas");
+  base.width = GW; base.height = GH;
+  const b = base.getContext("2d");
+  const img = b.createImageData(GW, GH);
+  tiles.forEach(t => {
+    const c = t.coordinates; if (!c) return;
+    const col = baseColor(t);
+    const i = ((c.y - minY) * GW + (c.x - minX)) * 4;
+    img.data[i] = col[0]; img.data[i + 1] = col[1];
+    img.data[i + 2] = col[2]; img.data[i + 3] = 255;
+  });
+  b.putImageData(img, 0, 0);
+
+  // pass 2: smooth upscale — the organic look, no pacman squares
+  const c2 = document.createElement("canvas");
+  c2.width = W; c2.height = H;
+  const g = c2.getContext("2d");
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(base, 0, 0, W, H);
+
+  // pass 3: per-tile detail over the smooth field
+  tiles.forEach(t => {
+    const c = t.coordinates; if (!c) return;
+    const x = (c.x - minX) * px, y = (c.y - minY) * px;
+    const e = t.elevation == null ? 0.5 : t.elevation;
+
+    // deterministic brightness noise — breaks up flat fields
+    const n = (hash2(c.x * 3 + 7, c.y * 3 + 11) - 0.5) * 0.07;
+    g.fillStyle = n > 0 ? `rgba(255,255,255,${n.toFixed(3)})`
+                        : `rgba(0,0,0,${(-n).toFixed(3)})`;
+    g.fillRect(x, y, px, px);
+
+    if (t.water) {
+      // shore highlight where land sits above
+      const up = tileByCoord.get(c.x + "," + (c.y - 1));
+      if (up && !up.water) {
+        g.fillStyle = "rgba(190,225,255,0.30)";
+        g.fillRect(x, y, px, Math.max(1, px * 0.16));
+      }
+    } else {
+      // hillshade: lighter toward NW when rising that way
+      const nw = tileByCoord.get((c.x - 1) + "," + (c.y - 1));
+      if (nw && nw.elevation != null) {
+        const d = clamp((e - nw.elevation) * 0.9, -0.22, 0.22);
+        if (Math.abs(d) > 0.02) {
+          const gr = g.createLinearGradient(x, y, x + px, y + px);
+          if (d > 0) { gr.addColorStop(0, `rgba(255,240,220,${(d).toFixed(3)})`); gr.addColorStop(1, "rgba(255,240,220,0)"); }
+          else { gr.addColorStop(0, "rgba(0,0,10,0)"); gr.addColorStop(1, `rgba(0,0,10,${(-d).toFixed(3)})`); }
+          g.fillStyle = gr;
+          g.fillRect(x, y, px, px);
+        }
+      }
+      // coast rim: land touching water gets a pale sand edge
+      const nearWater = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy]) => {
+        const n = tileByCoord.get((c.x+dx) + "," + (c.y+dy));
+        return n && n.water;
+      });
+      if (nearWater) {
+        g.strokeStyle = "rgba(232,214,170,0.38)";
+        g.lineWidth = Math.max(1, px * 0.14);
+        g.strokeRect(x + g.lineWidth / 2, y + g.lineWidth / 2,
+                     px - g.lineWidth, px - g.lineWidth);
+      }
+    }
+
+    // resources: tiny pale dots, deterministic placement
+    if (t.resources && t.resources.length && !t.water) {
+      g.fillStyle = "rgba(215,232,200,0.55)";
+      const cnt = Math.min(t.resources.length, 3);
+      for (let i = 0; i < cnt; i++) {
+        const h1 = hash2(c.x * 7 + i * 13, c.y * 7 - i * 5);
+        const h2 = hash2(c.x * 11 - i * 3, c.y * 11 + i * 17);
+        const rr = Math.max(1, px * 0.08);
+        g.beginPath();
+        g.arc(x + (0.18 + h1 * 0.64) * px, y + (0.18 + h2 * 0.64) * px, rr, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+
+    // walls: dark crimson with a hot top edge
+    if (t.blocks_travel) {
+      g.fillStyle = `rgba(${WALL[0]},${WALL[1]},${WALL[2]},0.78)`;
+      g.fillRect(x, y, px, px);
+      g.fillStyle = "rgba(255,90,80,0.30)";
+      g.fillRect(x, y, px, Math.max(1, px * 0.14));
+    }
+
+    // roads: warm packed-earth tint, baked into the terrain
+    const here = objectsByTile.get(t.tile_id);
+    if (here && here.some(o => objCategory(o.object_type) === "road")) {
+      g.fillStyle = "rgba(196,168,120,0.30)";
+      g.fillRect(x, y, px, px);
+      g.strokeStyle = "rgba(150,122,80,0.35)";
+      g.lineWidth = 1;
+      g.strokeRect(x + 0.5, y + 0.5, px - 1, px - 1);
+    }
+  });
+  return c2;
+}
+
+// ---------- glow layer ----------
+// civilization silhouette blurred + tinted, drawn additively — the known
+// world glows faintly out of the dark
+let glowCanvas = null;
+function ensureGlow(terrain) {
+  if (glowCanvas && glowCanvas._for === terrain) return glowCanvas;
+  if (typeof ctx.filter !== "string") { glowCanvas = null; return null; }
+  const c = document.createElement("canvas");
+  c.width = terrain.width; c.height = terrain.height;
+  const g = c.getContext("2d");
+  const k = Math.max(6, Math.round(terrain.width / 60));
+  g.filter = `blur(${k}px)`;
+  g.drawImage(terrain, 0, 0);
+  g.filter = "none";
+  g.globalCompositeOperation = "source-in";
+  const gr = g.createLinearGradient(0, 0, c.width, c.height);
+  gr.addColorStop(0, "rgba(80,170,200,0.85)");
+  gr.addColorStop(1, "rgba(120,140,220,0.85)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, c.width, c.height);
+  glowCanvas = c; glowCanvas._for = terrain;
+  return c;
+}
+
+// ---------- flattened scene data ----------
+const objectsAll = [];
+const objectsByTile = new Map();
+for (const [pn, pair] of Object.entries(PAIRS)) {
+  for (const [oid, o] of Object.entries(pair.public_objects || {})) {
+    const rec = { ...o, _pair: pn, _oid: oid };
+    objectsAll.push(rec);
+    if (!objectsByTile.has(o.tile_id)) objectsByTile.set(o.tile_id, []);
+    objectsByTile.get(o.tile_id).push(rec);
+  }
+}
+const agentsAll = [];
+for (const [pn, pair] of Object.entries(PAIRS)) {
+  for (const [ref, tid] of Object.entries(pair.current_positions || {})) {
+    agentsAll.push({ ref, pair: pn, tileId: tid });
+  }
+}
+const homeByPair = {};
+for (const [pn, pair] of Object.entries(PAIRS)) {
+  const tl = pair.position_timeline || {};
+  const hbs = Object.keys(tl).map(Number).sort((a, b) => a - b);
+  if (hbs.length) homeByPair[pn] = { hb: hbs[0], pos: tl[hbs[0]] || {} };
+}
+
+function objCategory(type) {
+  const s = String(type || "").toLowerCase();
+  if (s.includes("road")) return "road";
+  if (s.includes("tower")) return "tower";
+  if (s.includes("fire")) return "fire";
+  if (/(furnace|forge|kiln|smelter)/.test(s)) return "ember";
+  if (/(storage|container|bin|silo|crate)/.test(s)) return "box";
+  if (/(craft|work|surface|anvil|bench)/.test(s)) return "craft";
+  if (s.includes("landmark") || s.includes("monument")) return "star";
+  return "craft";
+}
+
+// ---------- drawing ----------
+function drawObjGlyph(g, cat, x, y, s, rgb) {
+  const col = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.9)`;
+  const dark = `rgba(${Math.round(rgb[0]*0.3)},${Math.round(rgb[1]*0.3)},${Math.round(rgb[2]*0.3)},0.9)`;
+  g.lineWidth = Math.max(1, s * 0.09);
+  switch (cat) {
+    case "tower": {
+      g.fillStyle = col;
+      g.fillRect(x - s*0.10, y - s*0.42, s*0.20, s*0.84);
+      g.beginPath(); g.arc(x, y - s*0.42, s*0.17, Math.PI, 0); g.fill();
+      g.fillStyle = dark;
+      g.fillRect(x - s*0.06, y + s*0.10, s*0.12, s*0.16);
+      break;
+    }
+    case "fire": {
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(x, y - s*0.34); g.lineTo(x + s*0.24, y + s*0.22); g.lineTo(x - s*0.24, y + s*0.22);
+      g.closePath(); g.fill();
+      g.fillStyle = "rgba(255,244,200,0.95)";
+      g.beginPath();
+      g.moveTo(x, y - s*0.10); g.lineTo(x + s*0.10, y + s*0.18); g.lineTo(x - s*0.10, y + s*0.18);
+      g.closePath(); g.fill();
+      break;
+    }
+    case "ember": {
+      g.fillStyle = "rgba(30,26,26,0.95)";
+      g.fillRect(x - s*0.26, y - s*0.20, s*0.52, s*0.40);
+      g.fillStyle = "rgba(255,140,60,0.95)";
+      g.beginPath(); g.arc(x, y, s*0.11, 0, Math.PI*2); g.fill();
+      break;
+    }
+    case "box": {
+      g.strokeStyle = col;
+      g.strokeRect(x - s*0.22, y - s*0.22, s*0.44, s*0.44);
+      g.beginPath(); g.moveTo(x - s*0.22, y); g.lineTo(x + s*0.22, y); g.stroke();
+      break;
+    }
+    case "star": {
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(x, y - s*0.28); g.lineTo(x + s*0.09, y - s*0.09);
+      g.lineTo(x + s*0.28, y); g.lineTo(x + s*0.09, y + s*0.09);
+      g.lineTo(x, y + s*0.28); g.lineTo(x - s*0.09, y + s*0.09);
+      g.lineTo(x - s*0.28, y); g.lineTo(x - s*0.09, y - s*0.09);
+      g.closePath(); g.fill();
+      break;
+    }
+    default: { // craft + anything else: diamond
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(x, y - s*0.24); g.lineTo(x + s*0.24, y); g.lineTo(x, y + s*0.24); g.lineTo(x - s*0.24, y);
+      g.closePath(); g.fill();
+      g.strokeStyle = dark;
+      g.beginPath();
+      g.moveTo(x, y - s*0.24); g.lineTo(x + s*0.24, y); g.lineTo(x, y + s*0.24); g.lineTo(x - s*0.24, y);
+      g.closePath(); g.stroke();
+    }
+  }
+}
+
+let vignette = null, vignetteFor = "";
+function getVignette() {
+  const key = cssW + "x" + cssH;
+  if (vignette && vignetteFor === key) return vignette;
+  const c = document.createElement("canvas");
+  c.width = cssW; c.height = cssH;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(cssW/2, cssH/2, Math.min(cssW,cssH)*0.36,
+                                    cssW/2, cssH/2, Math.max(cssW,cssH)*0.74);
+  gr.addColorStop(0, "rgba(0,0,0,0)");
+  gr.addColorStop(1, "rgba(0,0,0,0.5)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, cssW, cssH);
+  vignette = c; vignetteFor = key;
+  return c;
+}
+
+const waterTiles = [];
+tiles.forEach(t => { if (t.water) waterTiles.push(t); });
+
+function drawFrame(ts) {
+  resizeIfChanged();
+  const g = ctx;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // abyss background
+  const bg = g.createLinearGradient(0, 0, cssW, cssH);
+  bg.addColorStop(0, "#04060b");
+  bg.addColorStop(0.5, "#060a12");
+  bg.addColorStop(1, "#05060d");
+  g.fillStyle = bg;
+  g.fillRect(0, 0, cssW, cssH);
+
+  const terrain = ensureLayer();
+  const px = capPx(layerPx || 10);
+  const s = view.scale;
+  // world -> screen for the layer's own pixel grid
+  const origin = screenToWorld(0, 0);
+  const dx = (origin.x - minX) * s, dy = (origin.y - minY) * s;
+  const dw = GW * s, dh = GH * s;
+
+  // glow beneath the land
+  const glow = ensureGlow(terrain);
+  if (glow) {
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    g.globalAlpha = 0.34;
+    g.drawImage(glow, -dx, -dy, dw, dh);
+    g.restore();
+    g.globalAlpha = 1;
+  }
+
+  // terrain
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(terrain, -dx, -dy, dw, dh);
+
+  // visible tile range
+  const tl = screenToWorld(0, 0), br = screenToWorld(cssW, cssH);
+  const vx0 = Math.floor(tl.x), vx1 = Math.ceil(br.x);
+  const vy0 = Math.floor(tl.y), vy1 = Math.ceil(br.y);
+
+  // water shimmer
+  if (s >= 5 && waterTiles.length) {
+    for (const t of waterTiles) {
+      const c = t.coordinates; if (!c) continue;
+      if (c.x < vx0 || c.x > vx1 || c.y < vy0 || c.y > vy1) continue;
+      const a = 0.5 + 0.5 * Math.sin(ts / 900 + hash2(c.x, c.y) * 6.283);
+      const sx = (c.x - origin.x) * s, sy = (c.y - origin.y) * s;
+      g.fillStyle = `rgba(190,225,255,${(0.04 + 0.09 * a).toFixed(3)})`;
+      g.fillRect(sx + s*0.08, sy + s*0.08, s*0.84, s*0.84);
+    }
+  }
+
+  // objects
+  for (const o of objectsAll) {
+    const t = tiles.get(o.tile_id);
+    if (!t || !t.coordinates) continue;
+    const c = t.coordinates;
+    if (c.x < vx0 || c.x > vx1 || c.y < vy0 || c.y > vy1) continue;
+    const cat = objCategory(o.object_type);
+    if (cat === "road") continue; // roads are baked into terrain tint
+    const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+    const size = cat === "tower" ? s * 1.15 : s * 0.7;
+    if (s < 4.5) {
+      const rgb = PAIR_RGB[o._pair];
+      g.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.8)`;
+      g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+    } else {
+      drawObjGlyph(g, cat, sx, sy, Math.max(size, 5), PAIR_RGB[o._pair]);
+    }
+  }
+
+  // home markers
+  if (s >= 5) {
+    for (const [pn, home] of Object.entries(homeByPair)) {
+      for (const tid of Object.values(home.pos || {})) {
+        const t = tiles.get(tid);
+        if (!t || !t.coordinates) continue;
+        const c = t.coordinates;
+        const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+        g.strokeStyle = `rgba(${PAIR_RGB[pn].join(",")},0.55)`;
+        g.lineWidth = 1.5;
+        g.beginPath(); g.arc(sx, sy, s * 0.62, 0, Math.PI * 2); g.stroke();
+      }
+    }
+  }
+
+  // agents: pulse halo + body + ring
+  for (let i = 0; i < agentsAll.length; i++) {
+    const a = agentsAll[i];
+    const t = tiles.get(a.tileId);
+    if (!t || !t.coordinates) continue;
+    const c = t.coordinates;
+    const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+    if (sx < -60 || sy < -60 || sx > cssW + 60 || sy > cssH + 60) continue;
+    const rgb = PAIR_RGB[a.pair];
+    const r = Math.max(5, s * 0.34);
+    const p = ((ts / 1600) + i * 0.27) % 1;
+    g.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${(0.5 * (1 - p)).toFixed(3)})`;
+    g.lineWidth = 2;
+    g.beginPath(); g.arc(sx, sy, r * (1.1 + p * 1.5), 0, Math.PI * 2); g.stroke();
+    const halo = g.createRadialGradient(sx, sy, 0, sx, sy, r * 2.4);
+    halo.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.35)`);
+    halo.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = halo;
+    g.beginPath(); g.arc(sx, sy, r * 2.4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = `rgb(${rgb.join(",")})`;
+    g.beginPath(); g.arc(sx, sy, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = "rgba(255,255,255,0.85)";
+    g.lineWidth = Math.max(1.2, r * 0.14);
+    g.stroke();
+  }
+
+  // label chips, screen space, collision-avoiding
+  drawChips(g, origin, s);
+
+  // vignette on top
+  g.drawImage(getVignette(), 0, 0);
+
+  layoutZoomLabel();
+}
+
+// animation loop — but the FIRST frame is drawn synchronously below so the
+// map is never blank in a throttled or hidden tab (rAF may not fire there).
+function loop(ts) {
+  drawFrame(ts);
+  requestAnimationFrame(loop);
+}
+
+function drawChips(g, origin, s) {
+  const placed = [];
+  for (const a of agentsAll) {
+    const t = tiles.get(a.tileId);
+    if (!t || !t.coordinates) continue;
+    const c = t.coordinates;
+    const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+    const rgb = PAIR_RGB[a.pair];
+    const label = a.ref.split("_")[1] || a.ref;
+    const tag = a.pair.toUpperCase();
+    g.font = "600 11px 'Segoe UI', sans-serif";
+    const tw = g.measureText(label).width;
+    const tagW = 30;
+    const w = tw + tagW + 22, h = 19;
+    // stack chips that share a tile
+    let oy = sy - s * 0.55 - h - 6;
+    let clash = placed.find(p => Math.abs(p.x - sx) < w && Math.abs(p.y - oy) < h + 2);
+    while (clash) { oy -= h + 4; clash = placed.find(p => Math.abs(p.x - sx) < w && Math.abs(p.y - oy) < h + 2); }
+    placed.push({ x: sx, y: oy });
+    const x0 = sx - w / 2;
+    g.fillStyle = "rgba(6,9,15,0.88)";
+    roundRect(g, x0, oy, w, h, h / 2);
+    g.fill();
+    g.strokeStyle = `rgba(${rgb.join(",")},0.9)`;
+    g.lineWidth = 1.2;
+    roundRect(g, x0, oy, w, h, h / 2);
+    g.stroke();
+    g.fillStyle = "rgba(255,255,255,0.92)";
+    g.fillText(label, x0 + 9, oy + h - 6);
+    g.fillStyle = `rgba(${rgb.join(",")},0.95)`;
+    g.font = "700 8px 'Segoe UI', sans-serif";
+    g.fillText(tag, x0 + tw + 15, oy + h - 6);
+    // connector
+    g.strokeStyle = `rgba(${rgb.join(",")},0.4)`;
+    g.beginPath(); g.moveTo(sx, oy + h); g.lineTo(sx, sy - s * 0.5); g.stroke();
+  }
+}
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+let lastW = 0, lastH = 0;
+function resizeIfChanged() {
+  if (panel.clientWidth !== lastW || panel.clientHeight !== lastH) {
+    lastW = panel.clientWidth; lastH = panel.clientHeight;
+    resize();
+  }
+}
+
+const zoomLabel = document.getElementById("zoom-label");
+function layoutZoomLabel() {
+  zoomLabel.textContent = "×" + (view.scale / fitScale()).toFixed(2) +
+    "  ·  " + Math.round(view.scale) + " px/tile";
+}
+
+// ---------- interactions ----------
+let dragging = false, dragMoved = false, lx = 0, ly = 0;
+canvas.addEventListener("pointerdown", e => {
+  dragging = true; dragMoved = false; lx = e.clientX; ly = e.clientY;
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", e => {
+  if (dragging) {
+    const dx = e.clientX - lx, dy = e.clientY - ly;
+    if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+    view.cx -= dx / view.scale;
+    view.cy -= dy / view.scale;
+    lx = e.clientX; ly = e.clientY;
+    drawFrame(performance.now()); // instant feedback even when rAF is throttled
   } else {
-    tip.style.display = 'none';
+    updateTooltip(e);
   }
 });
-canvas.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+canvas.addEventListener("pointerup", e => {
+  dragging = false;
+  canvas.classList.remove("dragging");
+});
+canvas.addEventListener("pointerleave", () => {
+  document.getElementById("tooltip").style.display = "none";
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  const before = screenToWorld(sx, sy);
+  const f = Math.exp(-e.deltaY * 0.0016);
+  view.scale = clamp(view.scale * f, fitScale() * 0.5, 140);
+  const after = screenToWorld(sx, sy);
+  view.cx += before.x - after.x;
+  view.cy += before.y - after.y;
+  drawFrame(performance.now()); // instant feedback even when rAF is throttled
+}, { passive: false });
+canvas.addEventListener("dblclick", () => { fitView(); drawFrame(performance.now()); });
+
+const tip = document.getElementById("tooltip");
+function updateTooltip(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  const w = screenToWorld(sx, sy);
+  const tx = Math.floor(w.x), ty = Math.floor(w.y);
+  const t = tileByCoord.get(tx + "," + ty);
+  if (!t) { tip.style.display = "none"; return; }
+  const c = t.coordinates || {};
+  const rows = [];
+  rows.push(`<b>${esc(t.tile_id)}</b>`);
+  rows.push(`<div class="trow">${esc(t.terrain || "?")} · ${esc(t.biome || "?")}</div>`);
+  if (t.elevation != null) {
+    rows.push(`<div class="trow">elevation ${(+t.elevation).toFixed(2)}</div>
+      <div class="tbar"><i style="width:${Math.round(clamp(t.elevation,0,1)*100)}%"></i></div>`);
+  }
+  if (t.water) {
+    rows.push(`<div class="trow">water: ${esc(t.water.type || "?")}${t.water.drinkable ? " · drinkable" : ""}</div>`);
+  }
+  if (t.resources && t.resources.length) {
+    rows.push(`<div class="trow">${t.resources.map(r => `<span class="chip">${esc(r)}</span>`).join(" ")}</div>`);
+  }
+  if (t.hazards && t.hazards.length) {
+    rows.push(`<div class="trow" style="color:#e08a8a">hazards: ${esc(t.hazards.join(", "))}</div>`);
+  }
+  const objsHere = objectsByTile.get(t.tile_id) || [];
+  if (objsHere.length) {
+    const shown = objsHere.slice(0, 5).map(o =>
+      `<div class="trow">· ${esc(o.object_type)} <span style="color:var(--dim)">HB${esc(o.created_heartbeat || "")}</span></div>`).join("");
+    rows.push(shown + (objsHere.length > 5 ? `<div class="trow" style="color:var(--dim)">+${objsHere.length - 5} more</div>` : ""));
+  }
+  const agentsHere = agentsAll.filter(a => a.tileId === t.tile_id);
+  if (agentsHere.length) {
+    rows.push(`<div class="trow">agents here: ${agentsHere.map(a => esc(a.ref.split("_")[1])).join(", ")}</div>`);
+  }
+  tip.innerHTML = rows.join("");
+  tip.style.display = "block";
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tw - 10) + "px";
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - th - 10) + "px";
+}
+
+// ---------- legend ----------
+(function buildLegend() {
+  const body = document.getElementById("legend-body");
+  const items = [];
+  const seenBiomes = new Set();
+  tiles.forEach(t => { if (t.biome && !t.water) seenBiomes.add(t.biome); });
+  const col = b => {
+    const v = BIOME[b]; return v ? `rgb(${v.join(",")})` : "#223047";
+  };
+  [...seenBiomes].sort().forEach(b => {
+    items.push(`<span class="li"><span class="sw" style="background:${col(b)}"></span>${esc(b.replace(/_/g, " "))}</span>`);
+  });
+  items.push(`<span class="li"><span class="sw" style="background:rgb(${WATER_DRINK.join(",")})"></span>drinkable water</span>`);
+  items.push(`<span class="li"><span class="sw" style="background:rgb(${WALL.join(",")})"></span>world wall</span>`);
+  items.push(`<span class="li"><span class="sw" style="background:${EAST}"></span>east pair</span>`);
+  items.push(`<span class="li"><span class="sw" style="background:${WEST}"></span>west pair</span>`);
+  body.innerHTML = items.join("");
+})();
+
+// ---------- sidebar ----------
+let maxTick = 0, newestStamp = "";
+for (const pair of Object.values(PAIRS)) {
+  if ((pair.exported_tick || 0) > maxTick) {
+    maxTick = pair.exported_tick;
+    newestStamp = pair.exported_at_utc || "";
+  }
+}
+document.getElementById("tick-label").textContent = "HB " + (maxTick || 0).toLocaleString();
+document.getElementById("clock").textContent =
+  newestStamp ? "updated " + new Date(newestStamp).toLocaleString() : "";
+
+(function renderAgents() {
+  const el = document.getElementById("agents");
+  let html = "";
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    const inventories = pair.inventories || {};
+    for (const [ref, tileId] of Object.entries(pair.current_positions || {})) {
+      const name = ref.split("_")[1] || ref;
+      const inv = inventories[ref] || {};
+      const chips = Object.entries(inv).filter(([, v]) => v > 0).slice(0, 6)
+        .map(([k, v]) => `<span class="chip">${esc(k)} ×${v}</span>`).join("");
+      const more = Object.entries(inv).filter(([, v]) => v > 0).length > 6
+        ? `<span class="chip">…</span>` : "";
+      html += `<div class="agent-card ${pn === "east" ? "adam" : "eve"}">
+        <div class="dot"></div>
+        <div><div class="name">${esc(name)} <span style="color:var(--dim);font-size:.72rem">${esc(pn)}</span></div>
+        <div class="pos">${esc(tileId)}</div>
+        <div class="inv">${chips || '<span class="chip" style="opacity:.5">empty</span>'}${more}</div></div></div>`;
+    }
+  }
+  el.innerHTML = html || '<div style="color:var(--dim)">No agents.</div>';
+})();
+
+(function renderStats() {
+  let msgs = 0, objs = 0;
+  for (const pair of Object.values(PAIRS)) {
+    msgs += (pair.public_messages || []).length;
+    objs += Object.keys(pair.public_objects || {}).length;
+  }
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="num">${(maxTick || 0).toLocaleString()}</div><div class="label">Heartbeats</div></div>
+    <div class="stat"><div class="num">${msgs}</div><div class="label">Messages</div></div>
+    <div class="stat"><div class="num">${objs}</div><div class="label">Objects</div></div>
+    <div class="stat"><div class="num">${tiles.size.toLocaleString()}</div><div class="label">Tiles Seen</div></div>`;
+})();
+
+(function renderMessages() {
+  const el = document.getElementById("messages");
+  const all = [];
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    for (const m of (pair.public_messages || []).slice(-24)) {
+      all.push({ ...m, _pair: pn });
+    }
+  }
+  all.sort((a, b) => (b.heartbeat || 0) - (a.heartbeat || 0));
+  let html = "";
+  for (const m of all.slice(0, 14)) {
+    const raw = String(m.sender || m.sender_agent_id || "?");
+    const who = raw.split("_")[1] || raw;
+    const cls = raw.includes("adam") ? "adam" : "eve";
+    html += `<div class="msg ${cls}"><div class="who">${esc(who)}<span class="hb">HB${esc(m.heartbeat || "")}</span></div>${esc(m.message || m.text || "")}</div>`;
+  }
+  el.innerHTML = html || '<div style="color:var(--dim);font-size:.85rem">No messages yet.</div>';
+})();
+
+(function renderObjects() {
+  const byType = {};
+  for (const o of objectsAll) {
+    const t = o.object_type || "?";
+    byType[t] = (byType[t] || 0) + 1;
+  }
+  const html = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 14)
+    .map(([t, c]) => `<span class="obj-item"><span class="type">${esc(t)}</span><span class="cnt">×${c}</span></span>`).join("");
+  document.getElementById("objects").innerHTML =
+    html || '<div style="color:var(--dim);font-size:.85rem">No objects yet.</div>';
+})();
+
+// ---------- go ----------
+fitView();
+ensureLayer();
+drawFrame(0);                    // synchronous first paint — no blank tab
+requestAnimationFrame(loop);     // shimmer + pulse continue when visible
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) drawFrame(performance.now());
+});
+})();
 </script>
 </body>
 </html>
