@@ -1300,9 +1300,20 @@ class FirstPairRuntime:
                     "reason": f"Object is on {obj.get('tile_id')}, not your current tile"}
 
         operation = action.get("operation", "inspect")
-        if operation not in ("deposit", "extract", "inspect"):
+        if operation not in ("deposit", "extract", "inspect", "smelt", "craft"):
             return {"status": "rejected",
                     "reason": f"Unknown operation: {operation}. Use deposit, extract, or inspect."}
+
+        obj_type = str(obj.get("object_type", "")).casefold()
+
+        # Type-dependent operations: the world has rules about what each
+        # object does. The agent discovers them by testing.
+        if operation == "smelt" and "furnace" not in obj_type and "foundry" not in obj_type:
+            return {"status": "rejected",
+                    "reason": f"Smelting requires a furnace or foundry, not a {obj.get('object_type')}"}
+        if operation == "craft" and "crafting_surface" not in obj_type and "forge" not in obj_type:
+            return {"status": "rejected",
+                    "reason": f"Crafting requires a crafting surface, not a {obj.get('object_type')}"}
 
         # Initialize contents if the object predates the field
         if "contents" not in obj or not isinstance(obj.get("contents"), dict):
@@ -1318,6 +1329,12 @@ class FirstPairRuntime:
             return {"status": "rejected",
                     "reason": f"{operation} requires a materials dict like "
                               f'{{"stone": 2}}'}
+
+        if operation == "smelt":
+            return self._smelt_materials(obj_id, obj, materials)
+
+        if operation == "craft":
+            return self._craft_on_surface(obj_id, obj, materials, agent_ref)
 
         if operation == "deposit":
             from backend.world.first_pair_persistence import add_to_inventory
@@ -1359,6 +1376,77 @@ class FirstPairRuntime:
                     "contents": dict(obj["contents"])}
 
         return {"status": "rejected", "reason": f"Unhandled operation: {operation}"}
+
+    # Crafting recipes: materials → tool. Discoverable by testing.
+    # Keys are sorted tuples of (kind, amount) pairs — not frozensets,
+    # because frozenset(dict) drops the amounts and collapses different
+    # recipes that share material types.
+    _CRAFT_RECIPES = {
+        (("stone", 2), ("wood", 1)): "stone_axe",
+        (("fiber_plants", 3),): "fiber_rope",
+        (("stone", 1), ("wood", 2)): "stone_hammer",
+    }
+
+    _SMELT_RECIPES = {
+        "iron_ore": {"input": 3, "output": "iron", "output_amount": 1},
+    }
+
+    def _smelt_materials(self, obj_id: str, obj: dict, materials: dict) -> dict:
+        """Smelt ore into metal. The furnace consumes ore from its
+        contents and produces metal in its contents. The agent extracts
+        the metal afterward."""
+        if len(materials) != 1:
+            return {"status": "rejected",
+                    "reason": "Smelting converts one material at a time"}
+        kind, amount = next(iter(materials.items()))
+        recipe = self._SMELT_RECIPES.get(kind)
+        if not recipe:
+            return {"status": "rejected",
+                    "reason": f"Cannot smelt {kind}"}
+        contained = obj["contents"].get(kind, 0)
+        needed = recipe["input"]
+        if contained < amount:
+            return {"status": "rejected",
+                    "reason": f"Not enough {kind} in furnace: holds {contained}, "
+                              f"needs {amount}"}
+        if amount < needed:
+            return {"status": "rejected",
+                    "reason": f"Cannot smelt {amount} {kind}: the furnace requires "
+                              f"at least {needed} per batch"}
+        output_amount = (amount // needed) * recipe["output_amount"]
+        output_kind = recipe["output"]
+        obj["contents"][kind] = contained - amount
+        obj["contents"][output_kind] = obj["contents"].get(output_kind, 0) + output_amount
+        return {"status": "success",
+                "detail": f"Smelted {amount} {kind} into {output_amount} {output_kind}",
+                "contents": dict(obj["contents"])}
+
+    def _craft_on_surface(self, obj_id: str, obj: dict, materials: dict,
+                          agent_ref: str) -> dict:
+        """Combine materials into a tool. The crafting surface doesn't
+        store anything — the materials are consumed from the agent's
+        inventory and the tool goes into their inventory."""
+        from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+
+        inventory = load_inventory(self._store).get(agent_ref, {})
+        material_set = tuple(sorted(materials.items()))
+
+        recipe = self._CRAFT_RECIPES.get(material_set)
+        if not recipe:
+            return {"status": "rejected",
+                    "reason": f"Unknown recipe: {dict(materials)}. The "
+                              f"crafting surface combines specific materials."}
+
+        for kind, amount in materials.items():
+            held = inventory.get(kind, 0)
+            if held < amount:
+                return {"status": "rejected",
+                        "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
+
+        for kind, amount in materials.items():
+            add_to_inventory(self._store, agent_ref, kind, -amount)
+        add_to_inventory(self._store, agent_ref, recipe, 1)
+        return {"status": "success", "detail": f"Crafted {recipe}", "crafted": recipe}
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
