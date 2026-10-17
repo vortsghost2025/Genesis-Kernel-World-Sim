@@ -49,17 +49,13 @@ class TestStreamingCount:
             f"streaming={streaming} full={full} — the streaming count "
             f"must match the full parse exactly")
 
-    def test_store_state_uses_streaming_count(self, monkeypatch, tmp_path):
-        """store_state must call _count_heartbeat_records, not the full
-        json.loads. Otherwise the OOM recurs at the next growth boundary."""
-        calls = []
-        monkeypatch.setattr(lc, "_count_heartbeat_records",
-                            lambda p: calls.append(p) or 50)
+    def test_store_state_uses_tick_as_position(self, monkeypatch, tmp_path):
+        """store_state returns the TICK as the position, not the count.
+        The tick is the only authoritative heartbeat position."""
         monkeypatch.setattr(lc, "STORES",
                             {"east": tmp_path, "west": tmp_path})
         (tmp_path / "world_state.json").write_text(
             '{"data": {"tick": 10, "tile_occupancy": {}}}',
             encoding="utf-8")
         count, tick, occ = lc.store_state("east")
-        assert count == 50
-        assert calls, "store_state did not call the streaming counter"
+        assert count == 10 and tick == 10
