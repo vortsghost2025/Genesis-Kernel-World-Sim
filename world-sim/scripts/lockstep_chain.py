@@ -79,11 +79,15 @@ def _count_heartbeat_records(path) -> int:
 
     The chain calls this on every tick. Loading the whole file at
     2,200+ records caused a MemoryError at HB2230 (east chain died
-    mid-run). A byte-scan for '"heartbeat_number"' occurrences gives
-    the same count for a fraction of the memory: the file is read in
-    chunks, never held whole.
+    mid-run). A byte-scan gives the same count for a fraction of the
+    memory: the file is read in chunks, never held whole.
+
+    Counts '"heartbeat_number":' (the JSON key with its colon). The
+    records are dict-serialized with alphabetically sorted keys, so
+    heartbeat_number is never the FIRST key — counting the key-colon
+    pair is the correct pattern. The colon excludes prose mentions
+    in agent reasoning text.
     """
-    import io
     count = 0
     try:
         with open(path, "rb") as fh:
@@ -91,7 +95,7 @@ def _count_heartbeat_records(path) -> int:
                 chunk = fh.read(1024 * 1024)  # 1MB at a time
                 if not chunk:
                     break
-                count += chunk.count(b'"heartbeat_number"')
+                count += chunk.count(b'"heartbeat_number":')
     except OSError:
         return 0
     return count
