@@ -73,16 +73,15 @@ CREATE_NO_WINDOW = 0x08000000
 # validate_model_output with a real proposed action
 # (.scratch/contract_probe.json). A 200 is not evidence; a validated
 # action is. Re-verify with that same probe before trusting either.
-# MODEL ERA 4 (2026-10-16). dots-studio hit its free-tier daily cap (429)
-# and nemotron-3-ultra went 404 again. Only one route is contract-valid
-# right now: nemotron-3-nano-omni-30b-a3b-reasoning (13.8s, valid JSON,
-# verified against the contract probe). dots-studio is kept as fallback —
-# the 429 is a daily reset and may recover at midnight UTC.
-#
-# Before naming any model here, run .scratch/find_live_route.py —
-# a 200 is not availability; a validated action is.
+# MODEL ERA 4b (2026-10-17). The overnight logs showed 65+ failed chain
+# restarts with "provider resolution proof rejected (no paid fallback
+# permitted)". The dots-studio fallback was 429-rate-limited all night,
+# and the runner's proof check treated the dead fallback as invalid,
+# rejecting the entire configuration even though the primary (nano)
+# was alive. Setting fallback to the same nano model: it's the only
+# route answering right now, and a dead fallback is worse than none.
 PRIMARY_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-FALLBACK_MODEL = "dots-studio/dots-3-note-preview:free"
+FALLBACK_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ADAM_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 EVE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
