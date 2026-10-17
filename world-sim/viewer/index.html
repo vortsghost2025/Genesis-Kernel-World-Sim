@@ -82,7 +82,12 @@ const TM = D.true_map || {};
 
 // Build tile lookup from true_map
 const tiles = {};
-(TM.tiles || []).forEach(t => { tiles[t.tile_id] = t; });
+const tileAt = {};
+(TM.tiles || []).forEach(t => {
+  tiles[t.tile_id] = t;
+  const c = t.coordinates; if (!c) return;
+  tileAt[c.x + ',' + c.y] = t;
+});
 
 // Terrain colors
 const TERRAIN_COLORS = {
@@ -115,7 +120,7 @@ function renderMap() {
     const px = (c.x - minX) * TILE_SIZE, py = (c.y - minY) * TILE_SIZE;
     const biome = t.biome || '';
     let color = TERRAIN_COLORS[biome] || '#1a1a2a';
-    if (t.blocks_travel) color = 'var(--wall, #4a1010)';
+    if (t.blocks_travel) color = '#4a1010';
     ctx.fillStyle = color;
     ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
@@ -137,7 +142,7 @@ function renderMap() {
 
   // Draw objects
   for (const [pairName, pairData] of Object.entries(PAIRS)) {
-    const objs = pairData.objects || {};
+    const objs = pairData.public_objects || {};
     Object.values(objs).forEach(o => {
       const tile = tiles[o.tile_id]; if (!tile) return;
       const c = tile.coordinates; if (!c) return;
@@ -148,16 +153,16 @@ function renderMap() {
   }
 }
 
-// Draw agents
+// Draw agents (current_positions maps agent_ref -> tile_id)
 function drawAgents() {
+  const b = tileBoundsMin();
   for (const [pairName, pairData] of Object.entries(PAIRS)) {
     const color = pairName === 'east' ? '#4ecdc4' : '#f7d05e';
-    for (const [ref, info] of Object.entries(pairData.agents || {})) {
-      const tileId = info.tile_id || info.position;
+    for (const [ref, tileId] of Object.entries(pairData.current_positions || {})) {
       const tile = tiles[tileId]; if (!tile) continue;
-      const c = tile.coordinates; if (!c) return;
-      const px = (c.x - minX()) * TILE_SIZE + TILE_SIZE/2;
-      const py = (c.y - minY()) * TILE_SIZE + TILE_SIZE/2;
+      const c = tile.coordinates; if (!c) continue;
+      const px = (c.x - b.x) * TILE_SIZE + TILE_SIZE/2;
+      const py = (c.y - b.y) * TILE_SIZE + TILE_SIZE/2;
       ctx.beginPath();
       ctx.arc(px, py, 5, 0, Math.PI * 2);
       ctx.fillStyle = color;
@@ -168,44 +173,56 @@ function drawAgents() {
       // Label
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(info.name || ref, px + 8, py + 4);
+      ctx.fillText(ref.split('_')[1] || ref, px + 8, py + 4);
     }
   }
 }
 
-function minX() { let m=Infinity; Object.values(tiles).forEach(t=>{const c=t.coordinates;if(c&&c.x<m)m=c.x;}); return m; }
-function minY() { let m=Infinity; Object.values(tiles).forEach(t=>{const c=t.coordinates;if(c&&c.y<m)m=c.y;}); return m; }
+function tileBoundsMin() {
+  let mx=Infinity, my=Infinity;
+  Object.values(tiles).forEach(t=>{const c=t.coordinates;if(c){if(c.x<mx)mx=c.x;if(c.y<my)my=c.y;}});
+  return {x: mx, y: my};
+}
+
+function esc(s) {
+  const A = '&' + 'amp;', L = '&' + 'lt;', G = '&' + 'gt;', Q = '&' + 'quot;';
+  return String(s == null ? '' : s)
+    .replace(/&/g, A).replace(/</g, L).replace(/>/g, G).replace(/"/g, Q);
+}
 
 // Populate sidebar
 function renderSidebar() {
-  // Tick
-  const tick = D.tick || 0;
-  document.getElementById('tick-label').textContent = 'HB ' + tick.toLocaleString();
-  document.getElementById('clock').textContent = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
+  // Tick (max exported_tick across pairs)
+  let tick = 0, stamp = '';
+  for (const pd of Object.values(PAIRS)) {
+    if ((pd.exported_tick || 0) > tick) { tick = pd.exported_tick; stamp = pd.exported_at_utc || ''; }
+  }
+  document.getElementById('tick-label').textContent = 'HB ' + (tick || 0).toLocaleString();
+  document.getElementById('clock').textContent = stamp ? new Date(stamp).toLocaleString() : '';
 
   // Agents
   const agentsDiv = document.getElementById('agents');
   agentsDiv.innerHTML = '';
   for (const [pairName, pairData] of Object.entries(PAIRS)) {
     const color = pairName === 'east' ? 'var(--adam)' : 'var(--eve)';
-    for (const [ref, info] of Object.entries(pairData.agents || {})) {
+    const inventories = pairData.inventories || {};
+    for (const [ref, tileId] of Object.entries(pairData.current_positions || {})) {
       const name = ref.split('_')[1] || ref;
-      const tileId = info.tile_id || info.position || '?';
-      const inv = info.inventory || {};
+      const inv = inventories[ref] || {};
       const invStr = Object.entries(inv).filter(([k,v])=>v>0).map(([k,v])=>k+':'+v).join(', ') || 'empty';
       agentsDiv.innerHTML += `<div class="agent-card ${pairName === 'east' ? 'adam' : 'eve'}">
         <div class="dot"></div>
-        <div><div class="name">${name} <span style="color:var(--dim);font-size:.75rem">(${pairName})</span></div>
-        <div class="pos">${tileId}</div><div class="inv">${invStr}</div></div></div>`;
+        <div><div class="name">${esc(name)} <span style="color:var(--dim);font-size:.75rem">(${esc(pairName)})</span></div>
+        <div class="pos">${esc(tileId)}</div><div class="inv">${esc(invStr)}</div></div></div>`;
     }
   }
 
   // Stats
   let totalMsgs = 0, totalObjs = 0, totalHb = 0;
   for (const [pn, pd] of Object.entries(PAIRS)) {
-    totalMsgs += (pd.messages || []).length;
-    totalObjs += Object.keys(pd.objects || {}).length;
-    totalHb = Math.max(totalHb, pd.tick || 0);
+    totalMsgs += (pd.public_messages || []).length;
+    totalObjs += Object.keys(pd.public_objects || {}).length;
+    totalHb = Math.max(totalHb, pd.exported_tick || 0);
   }
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="num">${totalHb}</div><div class="label">Heartbeats</div></div>
@@ -217,15 +234,16 @@ function renderSidebar() {
   msgDiv.innerHTML = '';
   let allMsgs = [];
   for (const [pn, pd] of Object.entries(PAIRS)) {
-    for (const m of (pd.messages || []).slice(-30)) {
+    for (const m of (pd.public_messages || []).slice(-30)) {
       allMsgs.push({...m, _pair: pn});
     }
   }
   allMsgs.sort((a,b) => (b.heartbeat||0) - (a.heartbeat||0));
   for (const m of allMsgs.slice(0, 15)) {
-    const who = (m.sender_agent_id || '').split('_')[1] || m.sender_agent_id;
-    const cls = m.sender_agent_id && m.sender_agent_id.includes('adam') ? 'adam' : 'eve';
-    msgDiv.innerHTML += `<div class="msg ${cls}"><div class="who">${who || '?'} <span class="hb">HB${m.heartbeat}</span></div>${m.message || m.text || ''}</div>`;
+    const raw = String(m.sender || m.sender_agent_id || '?');
+    const who = raw.split('_')[1] || raw;
+    const cls = raw.includes('adam') ? 'adam' : 'eve';
+    msgDiv.innerHTML += `<div class="msg ${cls}"><div class="who">${esc(who)} <span class="hb">HB${m.heartbeat||''}</span></div>${esc(m.message || m.text || '')}</div>`;
   }
   if (!allMsgs.length) msgDiv.innerHTML = '<div style="color:var(--dim);font-size:.85rem">No messages yet.</div>';
 
@@ -234,7 +252,7 @@ function renderSidebar() {
   objDiv.innerHTML = '';
   let allObjs = [];
   for (const [pn, pd] of Object.entries(PAIRS)) {
-    for (const [oid, o] of Object.entries(pd.objects || {})) {
+    for (const [oid, o] of Object.entries(pd.public_objects || {})) {
       allObjs.push({...o, _pair: pn});
     }
   }
@@ -255,16 +273,16 @@ canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left + document.getElementById('map-panel').scrollLeft;
   const my = e.clientY - rect.top + document.getElementById('map-panel').scrollTop;
-  const tx = Math.floor(mx / TILE_SIZE) + minX();
-  const ty = Math.floor(my / TILE_SIZE) + minY();
-  const tid = `cont_a_gen_${tx}_${ty}`;
-  const t = tiles[tid];
+  const b = tileBoundsMin();
+  const tx = Math.floor(mx / TILE_SIZE) + b.x;
+  const ty = Math.floor(my / TILE_SIZE) + b.y;
+  const t = tileAt[tx + ',' + ty];
   const tip = document.getElementById('tooltip');
   if (t) {
     tip.style.display = 'block';
     tip.style.left = (e.clientX + 12) + 'px';
     tip.style.top = (e.clientY + 12) + 'px';
-    tip.innerHTML = `<b>${tid}</b><br>${t.terrain} / ${t.biome}<br>${(t.resources||[]).join(', ') || 'no resources'}`;
+    tip.innerHTML = `<b>${esc(t.tile_id)}</b><br>${esc(t.terrain)} / ${esc(t.biome)}<br>${esc((t.resources||[]).join(', ')) || 'no resources'}`;
   } else {
     tip.style.display = 'none';
   }
