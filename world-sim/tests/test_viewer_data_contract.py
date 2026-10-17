@@ -30,14 +30,17 @@ EXPORTED_PAIR_KEYS = (
     "inventories",
     "position_timeline",
 )
-EXPORTED_TOP_KEYS = ("true_map", "pairs", "shared_tiles")
+EXPORTED_TOP_KEYS = ("true_map", "pairs", "shared_tiles", "world_size")
+BACKDROP_PNG = WORLD_SIM / "viewer" / "world_base.png"
 
 
 def _viewer_js() -> str:
     html = VIEWER_HTML.read_text(encoding="utf-8")
-    match = re.search(r"<script>\s*(.*?)</script>", html, re.DOTALL)
-    assert match, "viewer index.html must contain an inline script block"
-    return match.group(1)
+    blocks = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+    assert blocks, "viewer index.html must contain an inline script block"
+    # the main script is the largest inline block (a tiny cache-buster
+    # script tag sits ahead of it)
+    return max(blocks, key=len)
 
 
 def _exporter_source() -> str:
@@ -62,6 +65,27 @@ class TestExporterSide:
         src = _exporter_source()
         assert '"sender"' in src, (
             "exporter must add a resolved 'sender' field to public_messages"
+        )
+
+    def test_full_world_backdrop_exists(self):
+        """The unexplored world must have presence: the exporter renders
+        the full true map to a 1px/tile PNG that the viewer draws dim.
+        Without it the map is sparse dots on void."""
+        assert BACKDROP_PNG.exists(), (
+            "world_base.png missing — run export_viewer_snapshot.py"
+        )
+        assert BACKDROP_PNG.stat().st_size > 10_000, (
+            "world_base.png suspiciously small for a 200x200 world"
+        )
+        assert "write_world_backdrop" in _exporter_source()
+        # the viewer must read world_size from the snapshot root and
+        # reference the backdrop by name
+        js = _viewer_js()
+        assert "D.world_size" in js, (
+            "viewer must use the snapshot's full-world frame"
+        )
+        assert 'src = "world_base.png"' in js, (
+            "viewer must draw the ghost backdrop"
         )
 
 

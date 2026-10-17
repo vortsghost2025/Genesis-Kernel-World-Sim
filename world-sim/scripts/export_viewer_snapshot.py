@@ -6,25 +6,31 @@ that the static viewer (world-sim/viewer/index.html) loads via <script src>.
 
 READ-ONLY: never writes to canonical state. Output is regenerable:
 world-sim/viewer/viewer_data.js
+world-sim/viewer/world_base.png  (full 200x200 true map, 1px/tile — the
+viewer draws it dim as the unexplored world's ghost)
 
 Usage:
     python world-sim/scripts/export_viewer_snapshot.py
     python world-sim/scripts/export_viewer_snapshot.py --slim --out PATH
         --slim: only tiles any agent has touched/known (web payload; the
-        full 80k-tile map is never served to a browser)
+        full 80k-tile map is never served to a browser — except as the
+        pre-rendered backdrop PNG, which is ~40KB)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
 RUNTIME_ROOT = WORLD_SIM / ".runtime"
 VIEWER_DIR = WORLD_SIM / "viewer"
 OUT_FILE = VIEWER_DIR / "viewer_data.js"
+BASE_PNG = VIEWER_DIR / "world_base.png"
 
 if str(WORLD_SIM) not in sys.path:
     sys.path.insert(0, str(WORLD_SIM))
@@ -33,6 +39,108 @@ PAIRS = [
     ("east", RUNTIME_ROOT / "first-pair"),
     ("west", RUNTIME_ROOT / "first-pair-west"),
 ]
+
+
+# --------------------------------------------------------------------------
+# full-world backdrop PNG
+#
+# The explored snapshot only carries tiles civilization has touched, which
+# renders as sparse dots on void. The full 200x200 true map exists, so we
+# render it once, server-side, at 1px/tile into a tiny PNG. The viewer draws
+# it dim — the unexplored world has presence, and the lit explored regions
+# sit on top of their own ghost.
+# --------------------------------------------------------------------------
+
+# same palette the viewer uses (keep in sync with index.html BIOME table)
+_PY_BIOME = {
+    "deep_ravine": (22, 17, 32),
+    "deep_lake": (16, 52, 88),
+    "warm_coast": (196, 164, 106),
+    "temperate_valley": (64, 118, 66),
+    "temperate_hills": (104, 120, 66),
+    "highland": (124, 116, 102),
+    "temperate_forest": (42, 94, 52),
+    "dense_woodland": (26, 72, 40),
+    "dark_thicket": (20, 52, 42),
+    "coastal_forest": (40, 90, 60),
+    "coastal_cliffs": (118, 118, 128),
+    "open_sea": (10, 34, 62),
+}
+_PY_TERRAIN_FALLBACK = {
+    "forest": (42, 94, 52), "grassland": (64, 118, 66), "hill": (104, 120, 66),
+    "mountain": (124, 116, 102), "desert": (200, 170, 100), "snow": (205, 214, 222),
+    "coast": (196, 164, 106), "river": (34, 96, 148), "swamp": (58, 92, 56),
+    "tundra": (150, 158, 166), "ocean": (10, 34, 62),
+}
+
+
+def _backdrop_color(tile: dict) -> tuple[int, int, int]:
+    e = tile.get("elevation")
+    if e is None:
+        e = 0.5
+    if tile.get("water"):
+        b = (46, 128, 182) if tile["water"].get("drinkable") else (40, 82, 122)
+        k = 0.75 + e * 0.5
+        return (int(b[0] * k), int(b[1] * k), int(b[2] * k))
+    b = _PY_BIOME.get(tile.get("biome") or "") or _PY_TERRAIN_FALLBACK.get(
+        tile.get("terrain") or "", (40, 48, 62))
+    k = 0.72 + e * 0.56
+    r, g, bl = b[0] * k, b[1] * k, b[2] * k
+    snow_line = 0.78 if tile.get("biome") == "highland" or tile.get("terrain") == "mountain" else 0.93
+    if e > snow_line:
+        m = min(1.0, (e - snow_line) / (1 - snow_line))
+        r += (210 - r) * m
+        g += (218 - g) * m
+        bl += (226 - bl) * m
+    return (int(r), int(g), int(bl))
+
+
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    return (struct.pack(">I", len(data)) + tag + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+
+def write_world_backdrop(true_map: dict, out_path: Path) -> dict | None:
+    """Render the FULL true map to a 1px/tile PNG. Returns world_size info."""
+    tiles = true_map.get("tiles") or []
+    if not tiles:
+        return None
+    xs = [t["coordinates"]["x"] for t in tiles if t.get("coordinates")]
+    ys = [t["coordinates"]["y"] for t in tiles if t.get("coordinates")]
+    if not xs:
+        return None
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    w, h = max_x - min_x + 1, max_y - min_y + 1
+
+    rows: list[bytes] = []
+    empty = bytes((6, 9, 15, 255))
+    grid: dict[tuple[int, int], bytes] = {}
+    for t in tiles:
+        c = t.get("coordinates")
+        if not c:
+            continue
+        r, g, b = _backdrop_color(t)
+        grid[(c["x"], c["y"])] = bytes((r, g, b, 255))
+    for gy in range(min_y, max_y + 1):
+        row = bytearray()
+        for gx in range(min_x, max_x + 1):
+            row += grid.get((gx, gy), empty)
+        rows.append(bytes(row))
+
+    raw = b"".join(b"\x00" + row for row in rows)
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _png_chunk(b"IHDR", ihdr)
+           + _png_chunk(b"IDAT", zlib.compress(raw, 9))
+           + _png_chunk(b"IEND", b""))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(png)
+    return {
+        "min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y,
+        "width": w, "height": h,
+        "png_bytes": len(png),
+    }
 
 
 def read_json(path: Path):
@@ -244,6 +352,10 @@ def main() -> int:
     out_path = Path(args.out)
 
     true_map = read_json(WORLD_SIM / "data" / "world" / "true_map.json")
+    world_size = write_world_backdrop(true_map, BASE_PNG)
+    if world_size:
+        print(f"WORLD-BACKDROP=OK {world_size['width']}x{world_size['height']} "
+              f"({world_size['png_bytes']} bytes) -> {BASE_PNG.name}")
     map_snapshot = {
         "continents": true_map.get("continents", []),
         "regions": true_map.get("regions", []),
@@ -302,6 +414,7 @@ def main() -> int:
         "true_map": map_snapshot,
         "pairs": pairs,
         "shared_tiles": shared_tiles,
+        "world_size": world_size,
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

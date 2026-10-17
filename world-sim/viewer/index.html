@@ -170,7 +170,7 @@ h1 span { color: var(--adam); }
   </div>
 </div>
 <div id="tooltip"></div>
-<script src="viewer_data.js"></script>
+<script>document.write('<scr' + 'ipt src="viewer_data.js?v=' + Date.now() + '"></scr' + 'ipt>');</script>
 <script>
 (() => {
 "use strict";
@@ -202,15 +202,31 @@ function hash2(x, y) {
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
 // ---------- bounds ----------
-let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-tiles.forEach(t => {
-  const c = t.coordinates; if (!c) return;
-  if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
-  if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
-});
-if (!isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
-const GW = maxX - minX + 1, GH = maxY - minY + 1;
+// Prefer the exporter's full-world frame (the ghost backdrop aligns to it);
+// fall back to the touched-tile bbox for older snapshots.
+const WS = D.world_size || TM.world_size || null;
+let minX, minY, maxX, maxY, GW, GH;
+if (WS && WS.width) {
+  minX = WS.min_x; minY = WS.min_y;
+  maxX = WS.max_x; maxY = WS.max_y;
+  GW = WS.width; GH = WS.height;
+} else {
+  minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+  tiles.forEach(t => {
+    const c = t.coordinates; if (!c) return;
+    if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+    if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+  });
+  if (!isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
+  GW = maxX - minX + 1; GH = maxY - minY + 1;
+}
 const gcx = (minX + maxX) / 2, gcy = (minY + maxY) / 2;
+
+// full-world ghost backdrop — the unexplored world has presence
+const baseImg = new Image();
+baseImg._ok = false;
+baseImg.onload = () => { baseImg._ok = true; drawFrame(performance.now()); };
+baseImg.src = "world_base.png";
 
 // ---------- palette ----------
 // [low-elev tint, high-elev tint, snow threshold or 0]
@@ -225,6 +241,8 @@ const BIOME = {
   dense_woodland:   [26, 72, 40],
   dark_thicket:     [20, 52, 42],
   coastal_forest:   [40, 90, 60],
+  coastal_cliffs:   [118, 118, 128],
+  open_sea:         [10, 34, 62],
 };
 const TERRAIN_FALLBACK = {
   forest: [42, 94, 52], grassland: [64, 118, 66], hill: [104, 120, 66],
@@ -246,8 +264,9 @@ function baseColor(t) {
     return [b[0] * k, b[1] * k, b[2] * k];
   }
   let b = BIOME[t.biome] || TERRAIN_FALLBACK[t.terrain] || [40, 48, 62];
-  // low ground slightly darker, high ground lighter, per-biome ramp
-  const k = 0.72 + e * 0.56;
+  // explored tiles run brighter than the ghost backdrop so the known
+  // world visibly pops out of it
+  const k = 0.80 + e * 0.62;
   let r = b[0] * k, g = b[1] * k, bl = b[2] * k;
   const snowLine = (t.biome === "highland" || t.terrain === "mountain") ? 0.78 : 0.93;
   if (e > snowLine && !t.water) {
@@ -276,8 +295,21 @@ window.addEventListener("resize", () => { resize(); layoutZoomLabel(); });
 resize();
 
 function fitScale() { return Math.min(cssW / GW, cssH / GH); }
-function fitView() {
+function fitAll() {
   view = { scale: fitScale(), cx: gcx, cy: gcy };
+}
+function focusDefault() {
+  // open on where the agents actually are, not the void between worlds
+  let ax = 0, ay = 0, n = 0;
+  for (const a of agentsAll) {
+    const t = tiles.get(a.tileId);
+    if (t && t.coordinates) { ax += t.coordinates.x; ay += t.coordinates.y; n++; }
+  }
+  if (n) {
+    view = { scale: Math.max(fitScale() * 2.4, 7), cx: ax / n, cy: ay / n };
+  } else {
+    fitAll();
+  }
 }
 function screenToWorld(sx, sy) {
   return { x: (sx - cssW / 2) / view.scale + view.cx, y: (sy - cssH / 2) / view.scale + view.cy };
@@ -578,12 +610,21 @@ function drawFrame(ts) {
   const dx = (origin.x - minX) * s, dy = (origin.y - minY) * s;
   const dw = GW * s, dh = GH * s;
 
-  // glow beneath the land
+  // full-world ghost — dim, desaturated presence for the unexplored
+  if (baseImg._ok) {
+    g.save();
+    g.globalAlpha = 0.34;
+    g.drawImage(baseImg, -dx, -dy, dw, dh);
+    g.restore();
+  }
+
+  // glow beneath the land — it breathes, slowly
   const glow = ensureGlow(terrain);
   if (glow) {
+    const breath = 0.30 + 0.09 * (0.5 + 0.5 * Math.sin(ts / 2800));
     g.save();
     g.globalCompositeOperation = "lighter";
-    g.globalAlpha = 0.34;
+    g.globalAlpha = baseImg._ok ? breath : 0.34;
     g.drawImage(glow, -dx, -dy, dw, dh);
     g.restore();
     g.globalAlpha = 1;
@@ -786,7 +827,7 @@ canvas.addEventListener("wheel", e => {
   view.cy += before.y - after.y;
   drawFrame(performance.now()); // instant feedback even when rAF is throttled
 }, { passive: false });
-canvas.addEventListener("dblclick", () => { fitView(); drawFrame(performance.now()); });
+canvas.addEventListener("dblclick", () => { fitAll(); drawFrame(performance.now()); });
 
 const tip = document.getElementById("tooltip");
 function updateTooltip(e) {
@@ -928,7 +969,7 @@ document.getElementById("clock").textContent =
 })();
 
 // ---------- go ----------
-fitView();
+focusDefault();
 ensureLayer();
 drawFrame(0);                    // synchronous first paint — no blank tab
 requestAnimationFrame(loop);     // shimmer + pulse continue when visible
