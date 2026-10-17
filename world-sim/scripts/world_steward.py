@@ -15,8 +15,15 @@ never changes physics. It does exactly what Sean has been saying "yes"
 to every time he checks in: repair, restart, resume, report.
 
 Usage:
-    python world-seward.py --once          # one poll, print to stdout
-    python world_steward.py --loop 900     # poll every 900s, the daemon
+    python world_steward.py --once          # one poll, print to stdout
+    python world_steward.py --loop 900 --max-polls 4   # bounded daemon
+
+Every invocation takes a single-instance lock: a second steward that
+finds a fresh lock held by a live pid exits immediately. Daemon mode
+must be bounded with --max-polls — the Oct 19 incident (80 immortal
+stewards from an unbounded --loop under a 15-min schedule) is why this
+file grew a lock. The hourly digest cadence lives in a fire counter,
+so --once under a 15-min schedule still digests every 4th fire.
 """
 from __future__ import annotations
 
@@ -38,6 +45,8 @@ STORES = {
 CHAIN = WORLD_SIM / "scripts" / "lockstep_chain.py"
 LOCK_DIR = WORLD_SIM / ".scratch" / "lockstep"
 WINDOW_SIZE = 100
+STEWARD_LOCK = LOCK_DIR / "steward.lock"
+FIRE_COUNTER = LOCK_DIR / "steward_fires.json"
 
 # Windows process creation flags for silent spawning
 CREATE_NO_WINDOW = 0x08000000
@@ -48,6 +57,68 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# --------------------------------------------------------------------------
+# single-instance lock
+# --------------------------------------------------------------------------
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _read_steward_lock() -> dict | None:
+    data = _read_json(STEWARD_LOCK)
+    if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
+        return None
+    return data
+
+
+def acquire_steward_lock(max_age_s: float) -> bool:
+    """Take the steward lock. False = a live steward already holds it."""
+    now = time.time()
+    existing = _read_steward_lock()
+    if existing:
+        age = now - float(existing.get("ts", 0))
+        if _pid_alive(existing["pid"]) and age <= max_age_s:
+            return False
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    STEWARD_LOCK.write_text(
+        json.dumps({"pid": os.getpid(), "ts": now}),
+        encoding="utf-8", newline="\n")
+    return True
+
+
+def refresh_steward_lock() -> None:
+    """Heartbeat the lock so a hung steward's lock still expires."""
+    if STEWARD_LOCK.exists():
+        STEWARD_LOCK.write_text(
+            json.dumps({"pid": os.getpid(), "ts": time.time()}),
+            encoding="utf-8", newline="\n")
+
+
+def release_steward_lock() -> None:
+    try:
+        data = _read_steward_lock()
+        if data and data.get("pid") == os.getpid():
+            STEWARD_LOCK.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _bump_fire_counter() -> int:
+    """How many times has the steward fired? Drives the hourly digest
+    cadence when running --once under the scheduled task."""
+    data = _read_json(FIRE_COUNTER) or {}
+    n = int(data.get("count", 0)) + 1
+    FIRE_COUNTER.parent.mkdir(parents=True, exist_ok=True)
+    FIRE_COUNTER.write_text(json.dumps({"count": n}),
+                            encoding="utf-8", newline="\n")
+    return n
 
 
 def _read_json(path: Path):
@@ -163,6 +234,10 @@ def ensure_running(pair: str) -> list[str]:
     alive = chain_alive()
     if alive.get(pair):
         return actions  # running, nothing to do
+
+    # .scratch can vanish (cleanup tools love gitignored dirs); without
+    # it start_chain cannot open logs and every restart silently fails
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
     # Not running: repair the store if needed
     repair = forward_repair(pair)
@@ -364,31 +439,50 @@ def main(argv=None) -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--loop", type=int, default=0,
                     help="poll interval in seconds (0 = run once)")
+    ap.add_argument("--max-polls", type=int, default=0,
+                    help="daemon mode: exit after N polls (0 = unlimited; "
+                         "unbounded daemons caused the Oct 19 pileup)")
     ap.add_argument("--digest", action="store_true",
-                    help="send hourly digest even in --once mode")
+                    help="force the digest even if the fire counter "
+                         "isn't at the hourly mark")
     args = ap.parse_args(argv)
 
-    if args.once or args.loop == 0:
-        out = poll_once(digest=args.digest)
-        print(json.dumps(out, indent=1))
+    lock_age = max(args.loop * 2, 120) if args.loop else 300
+    if not acquire_steward_lock(lock_age):
+        print("STEWARD=ALREADY-RUNNING", flush=True)
         return 0
 
-    # Daemon mode
-    poll_count = 0
-    print(f"STEWARD=UP interval={args.loop}s", flush=True)
-    while True:
-        poll_count += 1
-        digest = (poll_count % 4 == 0)  # every 4th poll = hourly at 15min
-        try:
+    try:
+        if args.once or args.loop == 0:
+            fire = _bump_fire_counter()
+            digest = args.digest or (fire % 4 == 0)
             out = poll_once(digest=digest)
-            stamp = out["at_utc"][:19]
-            acts = "; ".join(out["actions"]) if out["actions"] else "clean"
-            print(f"[{stamp}] poll {poll_count}: {acts}", flush=True)
-            if out.get("digest_sent"):
-                print(f"[{stamp}] digest sent", flush=True)
-        except Exception as exc:
-            print(f"STEWARD_ERROR {type(exc).__name__}: {exc}", flush=True)
-        time.sleep(args.loop)
+            print(json.dumps(out, indent=1))
+            return 0
+
+        # Daemon mode — bounded by --max-polls, heartbeat every poll
+        poll_count = 0
+        print(f"STEWARD=UP interval={args.loop}s "
+              f"max_polls={args.max_polls or 'unlimited'}", flush=True)
+        while True:
+            poll_count += 1
+            refresh_steward_lock()
+            digest = (poll_count % 4 == 0)
+            try:
+                out = poll_once(digest=digest)
+                stamp = out["at_utc"][:19]
+                acts = "; ".join(out["actions"]) if out["actions"] else "clean"
+                print(f"[{stamp}] poll {poll_count}: {acts}", flush=True)
+                if out.get("digest_sent"):
+                    print(f"[{stamp}] digest sent", flush=True)
+            except Exception as exc:
+                print(f"STEWARD_ERROR {type(exc).__name__}: {exc}", flush=True)
+            if args.max_polls > 0 and poll_count >= args.max_polls:
+                break
+            time.sleep(args.loop)
+        return 0
+    finally:
+        release_steward_lock()
 
 
 if __name__ == "__main__":
