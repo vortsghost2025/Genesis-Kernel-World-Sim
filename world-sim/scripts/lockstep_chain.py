@@ -102,10 +102,21 @@ def _count_heartbeat_records(path) -> int:
 
 
 def store_state(pair: str) -> tuple[int, int, dict]:
-    hb_count = _count_heartbeat_records(STORES[pair] / "heartbeat.json")
+    """(position, tick, occupancy) — position is the world state's tick.
+
+    Failed runners can write duplicate heartbeat records (same
+    heartbeat number, no tick advance), which makes the raw record
+    count unreliable as a position indicator. The tick is the ONLY
+    authoritative heartbeat position — it's set by successful
+    heartbeats and never inflated by failures. The chain starts at
+    tick + 1 and trusts the tick.
+    """
     ws = json.loads((STORES[pair] / "world_state.json").read_text(encoding="utf-8"))
     wdata = ws.get("data", ws)
-    return hb_count, wdata.get("tick", 0), wdata.get("tile_occupancy", {})
+    tick = wdata.get("tick", 0)
+    if not isinstance(tick, int):
+        tick = 0
+    return tick, tick, wdata.get("tile_occupancy", {})
 
 
 def status_path(pair: str, hb: int) -> Path:
