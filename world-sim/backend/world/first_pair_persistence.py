@@ -2647,12 +2647,38 @@ def load_heartbeat_history(store: FirstPairPersistenceStore) -> list[HeartbeatRe
 
 
 def append_heartbeat(store: FirstPairPersistenceStore, record: HeartbeatRecord) -> None:
-    history = load_heartbeat_history(store)
-    history.append(record)
-    store._atomic_write(
-        store._path(_HEARTBEAT_FILE),
-        {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(h) for h in history]},
-    )
+    """Append one heartbeat to the ledger.
+
+    Guarded (Oct 19 2026): detached runner orphans can outlive their
+    chain and append late. This function used to be read-full /
+    append / write-full with NO store lock and NO idempotence check —
+    concurrent writers clobbered newer records and duplicated old ones,
+    and the duplicate-inflated count masked the loss inside the chain's
+    count==tick invariant. Now: the ledger is re-read fresh under the
+    store lock, and an already-present or older heartbeat_number is a
+    provenance-logged no-op.
+    """
+    with store._store_lock():
+        history = load_heartbeat_history(store)
+        n = getattr(record, "heartbeat_number", None)
+        if n is not None:
+            if any(getattr(h, "heartbeat_number", None) == n for h in history):
+                store._append_provenance(
+                    "heartbeat_append_skipped_duplicate",
+                    {"heartbeat_number": n},
+                )
+                return
+            if any(getattr(h, "heartbeat_number", None) > n for h in history):
+                store._append_provenance(
+                    "heartbeat_append_skipped_stale",
+                    {"heartbeat_number": n},
+                )
+                return
+        history.append(record)
+        store._atomic_write(
+            store._path(_HEARTBEAT_FILE),
+            {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(h) for h in history]},
+        )
 
 
 def load_agent_question_proposals(store: FirstPairPersistenceStore) -> list[dict]:

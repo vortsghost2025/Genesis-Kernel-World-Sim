@@ -158,3 +158,51 @@ def test_ensure_running_recreates_missing_lock_dir(monkeypatch, tmp_path):
     actions = ws.ensure_running("east")
     assert ws.LOCK_DIR.exists(), "lock dir must be recreated before spawn"
     assert any("restarted HB101" in a for a in actions)
+
+
+def test_ensure_running_refuses_broken_interpreter(monkeypatch, tmp_path):
+    """Oct 19, act 2: the task's PATH resolved `python` to 3.14, which
+    cannot import openai. Every chain the task spawned died in the
+    resolution proof before its first model call, and the (then
+    unbounded) steward kept relaunching the doomed cycle all day. The
+    steward must detect a broken interpreter and refuse to spawn,
+    naming the actual problem instead of 'proof rejected'."""
+    monkeypatch.setattr(ws, "LOCK_DIR", tmp_path / "lockstep")
+    monkeypatch.setattr(ws, "chain_alive", lambda: {"east": False, "west": False})
+    monkeypatch.setattr(ws, "forward_repair", lambda pair: None)
+    spawned = []
+
+    def _no_spawn(pair, s, e):
+        spawned.append((pair, s, e))
+        return 9999
+
+    monkeypatch.setattr(ws, "start_chain", _no_spawn)
+    monkeypatch.setattr(ws, "_count_heartbeat_records", lambda p: 100)
+    monkeypatch.setattr(ws, "_read_tick", lambda store: 100)
+    monkeypatch.setattr(ws, "interpreter_can_import_cognition",
+                        lambda: (False, "ModuleNotFoundError: openai"))
+
+    actions = ws.ensure_running("east")
+    assert not spawned, "a broken interpreter must not spawn doomed chains"
+    assert any("interpreter" in a.lower() for a in actions), actions
+    assert any("openai" in a for a in actions), "the action must name the cause"
+
+
+def test_ensure_running_spawns_when_interpreter_ok(monkeypatch, tmp_path):
+    monkeypatch.setattr(ws, "LOCK_DIR", tmp_path / "lockstep")
+    monkeypatch.setattr(ws, "chain_alive", lambda: {"east": False, "west": False})
+    monkeypatch.setattr(ws, "forward_repair", lambda pair: None)
+    monkeypatch.setattr(ws, "start_chain", lambda pair, s, e: 4242)
+    monkeypatch.setattr(ws, "_count_heartbeat_records", lambda p: 100)
+    monkeypatch.setattr(ws, "_read_tick", lambda store: 100)
+    monkeypatch.setattr(ws, "interpreter_can_import_cognition",
+                        lambda: (True, "ok"))
+    actions = ws.ensure_running("east")
+    assert any("restarted HB101" in a for a in actions)
+
+
+def test_this_interpreter_can_import_cognition():
+    """The real check, run for real: the python running the tests must
+    be able to import the cognition model. Guards the guard."""
+    ok, detail = ws.interpreter_can_import_cognition()
+    assert ok, f"test interpreter is broken: {detail}"

@@ -63,6 +63,46 @@ RETRY_DELAY_S = 45
 # can be slow - but finite, so a dead runner cannot spin the chain forever.
 STATUS_TIMEOUT_S = 600
 SNAPSHOT_EVERY = 10
+
+# Detached runners spawned this run (their status files carry the pid).
+# When the chain hard-stops these MUST be killed: an orphan runner that
+# finishes its model call minutes later appends with the store's append
+# guard, but it still holds a doomed attempt's model call open and can
+# confuse the next window's preflight. Measured Oct 19: orphans were the
+# writers behind duplicate and stale ledger appends.
+RUNNER_STATUS_PATHS: list[Path] = []
+
+
+def kill_runner_pids(status_paths: list[Path]) -> list[int]:
+    """Kill any detached runners still in flight for this chain's window.
+
+    Skips runners that already reported persisted/evidence-exported —
+    those are done and their writes are legitimate. Returns killed pids.
+    """
+    killed: list[int] = []
+    for sp in status_paths:
+        try:
+            data = json.loads(Path(sp).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("status") in ("persisted", "evidence-exported"):
+            continue
+        pid = data.get("pid")
+        if not isinstance(pid, int) or pid <= 0:
+            continue
+        try:
+            r = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True,
+                creationflags=CREATE_NO_WINDOW, timeout=30,
+            )
+            if r.returncode == 0:
+                killed.append(pid)
+        except Exception:
+            continue
+    return killed
 # The snapshot push is an EXTERNAL network write: it exports the slim world
 # state and scp/ssh's it onto a public viewer. It is not a local read or a
 # sim write - it publishes. It is non-fatal by design and unrelated to any
@@ -130,6 +170,7 @@ def attempt_heartbeat(pair: str, hb: int) -> bool:
     status = status_path(pair, hb)
     if status.exists():
         status.unlink()
+    RUNNER_STATUS_PATHS.append(status)
 
     proc = subprocess.run(
         [
@@ -557,6 +598,11 @@ def _main_inner(_trace=None) -> int:
             if snapshots and hb % SNAPSHOT_EVERY == 0:
                 push_snapshot()
     finally:
+        # Kill in-flight detached runners: a hard stop must not leave
+        # orphans appending to the ledger after the chain is gone.
+        orphans = kill_runner_pids(RUNNER_STATUS_PATHS)
+        if orphans:
+            print(f"CLEANUP: killed in-flight runners {orphans}", flush=True)
         for p in lock_paths:
             try:
                 p.unlink(missing_ok=True)

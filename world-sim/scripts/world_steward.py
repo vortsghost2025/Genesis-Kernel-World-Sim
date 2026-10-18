@@ -204,6 +204,32 @@ def chain_alive() -> dict[str, bool]:
     return alive
 
 
+def interpreter_can_import_cognition() -> tuple[bool, str]:
+    """Can THIS python import the cognition model? The scheduled task's
+    PATH `python` may resolve to an interpreter without the project's
+    dependencies (measured Oct 19: 3.14 without openai), in which case
+    every spawned chain dies in the resolution proof before its first
+    model call. Detect that here, name it plainly."""
+    code = ("import sys; sys.path.insert(0, '.'); "
+            "import backend.world.first_pair_cognition_model")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(WORLD_SIM),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            creationflags=CREATE_NO_WINDOW,
+        )
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        reason = tail[-1] if tail else f"exit {proc.returncode}"
+        return False, f"{sys.executable}: {reason}"
+    return True, "ok"
+
+
 def start_chain(pair: str, start: int, end: int) -> int | None:
     """Start a chain window. Returns the pid or None."""
     log = LOCK_DIR / f"chain_{pair}_{start}_{end}.log"
@@ -244,6 +270,15 @@ def ensure_running(pair: str) -> list[str]:
     if repair:
         actions.append(repair)
     clear_lock(pair)
+
+    # A chain spawned under an interpreter that cannot import the
+    # cognition model dies in the resolution proof — refuse and say why
+    ok, detail = interpreter_can_import_cognition()
+    if not ok:
+        actions.append(f"{pair}: interpreter cannot import the cognition "
+                       f"model ({detail}) — chain NOT spawned; pin the "
+                       "scheduled task to a python that can")
+        return actions
 
     # Start from the next heartbeat
     store = STORES[pair]
