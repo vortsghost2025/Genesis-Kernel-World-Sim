@@ -111,17 +111,21 @@ FREEZE_THRESHOLD = 20.0       # at/below this warmth: vitality drains
 
 
 def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
-                in_shelter: bool) -> float:
+                in_shelter: bool, wet: float = 0.0) -> float:
     """Warmth drifts toward the ambient comfort level.
 
     A fire dominates: warmth climbs toward 100 fast regardless of season.
     Shelter does not heat — it slows the drain (you hold what you have).
+    A soaked body (wet >= 50) holds almost no heat: warmth moves at 0.4x
+    speed in both directions — you cannot warm up while wet. epistemic.5.
     """
     comfort = max(0.0, min(100.0, ambient_temp))
-    if by_fire:
+    if by_fire and wet < 50.0:
         return min(100.0, warmth + FIRE_WARMTH_PER_HB)
     gap = comfort - warmth
     change = gap * WARMTH_APPROACH_RATE
+    if wet >= 50.0:
+        change *= 0.4
     if change < 0 and in_shelter:
         change *= SHELTER_DECAY_FACTOR
     return max(0.0, min(100.0, warmth + change))
@@ -136,6 +140,103 @@ COLLAPSE_THRESHOLD = 0.0    # vitality at/below: down
 RECOVERY_STAND_AT = 12.0    # vitality needed to stand again after collapse
 DOWNED_PASSIVE_REGEN = 0.15  # slow self-recovery while down (rescue is better)
 
+
+# --- weather: the sky (epistemic.5) -----------------------------------------
+# Weather is a PURE function of (pair seed, heartbeat): no state file, no
+# drift, no split-brain — the sky is part of the physics, not a process.
+# Stable windows give agents something to plan around, and the forecast
+# (the next window) is visible in every observation: weather is planning
+# material, not dice.
+WEATHER_WINDOW = 36            # heartbeats per weather window (half a day)
+WEATHER_TYPES = ("clear", "overcast", "rain", "storm")
+# per-season probabilities (clear, overcast, rain, storm); a winter storm
+# reads as a blizzard in the observation, but the math is one thing
+WEATHER_TABLE = {
+    "spring": (0.55, 0.20, 0.20, 0.05),
+    "summer": (0.78, 0.12, 0.08, 0.02),
+    "autumn": (0.50, 0.22, 0.21, 0.07),
+    "winter": (0.52, 0.20, 0.18, 0.10),
+}
+WEATHER_TEMP_MODIFIER = {"clear": 0.0, "overcast": -3.0,
+                         "rain": -6.0, "storm": -11.0}
+WETNESS_GAIN_EXPOSED = 9.0     # per heartbeat in rain, unsheltered
+WETNESS_DRY_RATE = 4.0         # per heartbeat in clear/overcast
+WETNESS_FIRE_DRY_RATE = 14.0   # drying by a fire
+WET_THRESHOLD = 50.0           # soaked: cannot warm up (see warmth_next)
+STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
+
+
+def _pair_seed(pair_name: str) -> int:
+    h = 0
+    for ch in str(pair_name):
+        h = (h * 131 + ord(ch)) & 0xFFFFFFFF
+    return h
+
+
+def _window_roll(pair_seed: int, window_index: int) -> float:
+    """Deterministic 0..1 roll for one weather window."""
+    x = (pair_seed * 2654435761 + window_index * 40503) & 0xFFFFFFFF
+    x ^= x >> 13
+    x = (x * 1274126177) & 0xFFFFFFFF
+    return ((x ^ (x >> 16)) & 0xFFFFFFFF) / 0x100000000
+
+
+def weather_at(pair_name: str, heartbeat_number: int):
+    """Current weather type and the heartbeat the window ends.
+
+    Pure: same (pair, heartbeat) always yields the same sky.
+    """
+    seed = _pair_seed(pair_name)
+    window_index = heartbeat_number // WEATHER_WINDOW
+    roll = _window_roll(seed, window_index)
+    probs = WEATHER_TABLE[season(heartbeat_number)]
+    acc = 0.0
+    wtype = "clear"
+    for wtype, p in zip(WEATHER_TYPES, probs):
+        acc += p
+        if roll < acc:
+            break
+    window_end = (window_index + 1) * WEATHER_WINDOW
+    return wtype, window_end
+
+
+def weather_forecast(pair_name: str, heartbeat_number: int) -> dict:
+    """Current weather plus the next window — the sky is legible."""
+    wtype, window_end = weather_at(pair_name, heartbeat_number)
+    nxt, _ = weather_at(pair_name, window_end)
+    return {
+        "current": wtype,
+        "next": nxt,
+        "changes_at_heartbeat": window_end,
+    }
+
+
+def effective_temperature(heartbeat_number: int, weather: str) -> float:
+    """Ambient temperature with the sky's modifier."""
+    return ambient_temperature(heartbeat_number) + WEATHER_TEMP_MODIFIER.get(
+        weather, 0.0)
+
+
+def wetness_next(wetness: float, weather: str, in_shelter: bool,
+                 by_fire: bool) -> float:
+    """Wetness rises in rain when exposed; dries in clear weather, fast
+    by a fire. Shelter blocks gain entirely."""
+    if in_shelter:
+        if by_fire:
+            return max(0.0, wetness - WETNESS_FIRE_DRY_RATE)
+        return max(0.0, wetness - WETNESS_DRY_RATE)
+    if weather in ("rain", "storm"):
+        return min(100.0, wetness + WETNESS_GAIN_EXPOSED)
+    if by_fire:
+        return max(0.0, wetness - WETNESS_FIRE_DRY_RATE)
+    return max(0.0, wetness - WETNESS_DRY_RATE)
+
+
+def fire_is_snuffed(weather: str, fire_tile_sheltered: bool) -> bool:
+    """THE shelter rule: rain snuffs open fires; a fire under a roof
+    keeps burning. This one rule makes roof-building permanently
+    valuable."""
+    return weather in ("rain", "storm") and not fire_tile_sheltered
 
 def vitality_next(vitality: float, hunger: float, warmth: float,
                   downed: bool) -> float:
@@ -156,24 +257,31 @@ def vitality_next(vitality: float, hunger: float, warmth: float,
 def initial_vitals() -> dict:
     """Healthy start. No retroactive famine for existing agents."""
     return {"hunger": 18.0, "warmth": 82.0, "vitality": 100.0,
-            "downed": False}
+            "wetness": 0.0, "downed": False}
 
 
 def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
-                    in_shelter: bool, ate_satisfaction: float = 0.0) -> dict:
+                    in_shelter: bool, ate_satisfaction: float = 0.0,
+                    weather: str = "clear") -> dict:
     """One heartbeat of embodiment. Returns a NEW vitals dict.
 
     `ate_satisfaction` is the hunger points satisfied by food eaten this
-    heartbeat (0 = nothing eaten). Everything else follows the physics.
+    heartbeat (0 = nothing eaten). `weather` is the current sky (the
+    caller resolves the forecast); it drives wetness, the temperature
+    modifier, and storm exposure. Everything else follows the physics.
     """
     hunger = hunger_next(vitals.get("hunger", 0.0), heartbeat_number)
     hunger = max(0.0, hunger - ate_satisfaction)
-    warmth = warmth_next(vitals.get("warmth", 50.0),
-                         ambient_temperature(heartbeat_number),
-                         by_fire, in_shelter)
+    wetness = wetness_next(vitals.get("wetness", 0.0), weather,
+                           in_shelter, by_fire)
+    temp = effective_temperature(heartbeat_number, weather)
+    warmth = warmth_next(vitals.get("warmth", 50.0), temp,
+                         by_fire, in_shelter, wetness)
     downed = bool(vitals.get("downed", False))
     vitality = vitality_next(vitals.get("vitality", 100.0), hunger,
                              warmth, downed)
+    if weather == "storm" and not in_shelter and not downed:
+        vitality = max(0.0, vitality - STORM_EXPOSURE_DRAIN)
     if downed and vitality >= RECOVERY_STAND_AT:
         downed = False
     if not downed and vitality <= COLLAPSE_THRESHOLD:
@@ -182,6 +290,7 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
         "hunger": round(hunger, 2),
         "warmth": round(warmth, 2),
         "vitality": round(vitality, 2),
+        "wetness": round(wetness, 2),
         "downed": downed,
     }
 

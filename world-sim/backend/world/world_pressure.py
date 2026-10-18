@@ -67,4 +67,10 @@ GATHER_YIELD = 1
 # safety — never famine. The v1 trap (income == consumption pinning an
 # agent at zero) is structurally impossible here: slack is a tested
 # invariant (tests/test_survival_physics.py).
-PHYSICS_VERSION = "epistemic.4"
+# epistemic.5 is a REAL physics change (docs/survival_physics_spec.md,
+# "the sky"): weather. Rain wets, wet bodies cannot hold warmth, storms
+# drain exposed vitality, and rain snuffs open fires — a fire under a
+# roof keeps burning. The forecast is visible in every observation, so
+# the sky is planning material, not dice. Pure function of (pair seed,
+# heartbeat): no state, no drift, no split-brain.
+PHYSICS_VERSION = "epistemic.5"

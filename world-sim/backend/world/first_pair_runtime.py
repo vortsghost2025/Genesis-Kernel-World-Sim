@@ -653,11 +653,19 @@ class FirstPairRuntime:
         vitals = dict(self._vitals_for(agent_ref))
         vitals["state"] = survival.vitals_state_label(vitals)
         observation["self_body"] = vitals
+        forecast = survival.weather_forecast(self._pair_id, heartbeat_number)
+        weather_name = forecast["current"]
+        if weather_name == "storm" and survival.season(heartbeat_number) == "winter":
+            weather_name = "blizzard"
         observation["environment"] = {
             "time_of_day": "night" if survival.is_night(heartbeat_number) else "day",
             "season": survival.season(heartbeat_number),
-            "temperature": round(survival.ambient_temperature(heartbeat_number), 1),
-            "by_fire": self._nearby_fire(position) if position else False,
+            "temperature": round(survival.effective_temperature(
+                heartbeat_number, forecast["current"]), 1),
+            "weather": weather_name,
+            "forecast_next": forecast["next"],
+            "weather_changes_at_heartbeat": forecast["changes_at_heartbeat"],
+            "by_fire": self._nearby_fire(position, heartbeat_number) if position else False,
             "sheltered": self._in_shelter(position) if position else False,
         }
 
@@ -1026,12 +1034,22 @@ class FirstPairRuntime:
         except (IndexError, ValueError):
             return None
 
-    def _nearby_fire(self, tile_id: str) -> bool:
-        """A lit fire within FIRE_RADIUS (Chebyshev): warmth climbs."""
+    def _nearby_fire(self, tile_id: str,
+                     heartbeat_number: int | None = None) -> bool:
+        """A warming fire within FIRE_RADIUS (Chebyshev).
+
+        epistemic.5: rain snuffs open fires — in rain or storm, a fire
+        warms only if the fire's own tile is sheltered (a fire under a
+        roof keeps burning). The rule that makes roof-building
+        permanently valuable.
+        """
         pos = self._tile_xy(tile_id)
         if pos is None:
             return False
         px, py = pos
+        weather = "clear"
+        if heartbeat_number is not None:
+            weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
         fire_kinds = ("fire", "forge", "furnace", "brazier", "hearth",
                       "campfire")
         for record in self._world_state.public_objects.values():
@@ -1044,6 +1062,10 @@ class FirstPairRuntime:
             if other is None:
                 continue
             if max(abs(other[0] - px), abs(other[1] - py)) <= survival.FIRE_RADIUS:
+                if weather in ("rain", "storm"):
+                    if self._in_shelter(record.get("tile_id", "")):
+                        return True  # a roofed fire keeps burning
+                    continue  # an open fire is snuffed by the rain
                 return True
         return False
 
@@ -1072,17 +1094,20 @@ class FirstPairRuntime:
         """One heartbeat of embodiment for every agent. Called once per
         heartbeat BEFORE the cognition cycles, so the observation the
         agent reasons from includes the body it is about to act with."""
+        weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
         for agent_ref in (self._adam_ref, self._eve_ref):
             vitals = self._vitals_for(agent_ref)
             position = self._world_state.tile_occupancy.get(agent_ref)
-            by_fire = self._nearby_fire(position) if position else False
+            by_fire = (self._nearby_fire(position, heartbeat_number)
+                       if position else False)
             in_shelter = self._in_shelter(position) if position else False
             ate = 0.0
             if vitals.get("downed"):
                 ate = self._downed_tile_feed(agent_ref, position)
             self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
                 vitals, heartbeat_number, by_fire=by_fire,
-                in_shelter=in_shelter, ate_satisfaction=ate)
+                in_shelter=in_shelter, ate_satisfaction=ate,
+                weather=weather)
 
     def _downed_tile_feed(self, agent_ref: str, position: str | None) -> float:
         """A collapsed body eats from objects on its own tile.

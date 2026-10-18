@@ -270,6 +270,13 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         except Exception:
             operator_messages = []
 
+    try:
+        from backend.world import survival
+        weather_snapshot = survival.weather_forecast(
+            pair_name, world_state.get("tick") or 0)
+    except Exception:
+        weather_snapshot = None
+
     return {
         "agents": agents,
         "exported_tick": world_state.get("tick"),
@@ -277,6 +284,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "home_continent": home_continent,
         "current_positions": world_state.get("tile_occupancy", {}),
         "vitals": world_state.get("vitals", {}),
+        "weather": weather_snapshot,
         "public_objects": world_state.get("public_objects", {}),
         "public_messages": [
             {**m, "sender": msg_sender(m)} for m in world_state.get("public_messages", [])

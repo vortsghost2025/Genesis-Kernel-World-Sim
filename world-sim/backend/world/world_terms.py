@@ -83,7 +83,21 @@ TERMS_CHANGELOG["epistemic.4"] = (
     "do about any of it."
 )
 
-CURRENT_TERMS = "epistemic.4"
+# epistemic.5: the sky. Weather as facts, never advice.
+TERMS_CHANGELOG["epistemic.5"] = (
+    "No longer true: that the sky is empty. Weather now exists. Rain "
+    "soaks an exposed body; a soaked body cannot hold warmth, and a "
+    "warm fire will not dry-warm it until the wetness is gone. Storms "
+    "are colder and drain the vitality of anyone left exposed. Rain "
+    "snuffs open fires — a fire standing under a roof keeps burning. "
+    "Shelter blocks rain entirely and slows every cold drain. The "
+    "observation's environment shows the current weather, the next "
+    "window, and when the sky changes. The sky owes you nothing and "
+    "asks you nothing."
+)
+
+CURRENT_TERMS = "epistemic.5"
+PREVIOUS_TERMS = "epistemic.4"
 PREVIOUS_TERMS = "epistemic.3"
 
 

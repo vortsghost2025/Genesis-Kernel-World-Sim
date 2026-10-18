@@ -55,6 +55,7 @@ def _runtime_stub():
     rt._world_state = _FakeWorldState()
     rt._adam_ref = "east_adam"
     rt._eve_ref = "east_eve"
+    rt._pair_id = "east"
     rt._identity_record = _FakeIdentity()
     return rt
 

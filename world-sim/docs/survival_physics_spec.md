@@ -44,3 +44,18 @@ Time of day, season, and temperature ride in every observation under `environmen
 hunger → gather → **storage** (depleted tiles + night trips make stockpiles rational) · night cold → **fire** → fuel gathering · warmth drain → **shelter** · vitality collapse → **rescue** (a downed agent eats from their tile; the partner decides whether to bring food) · seasons → **planning** (winter is survivable; unprepared winter is not comfortable).
 
 Nothing in the changelog tells the agents what to do about any of this. The world imposes; they discover.
+
+## The sky (epistemic.5) — 2026-10-18
+
+Sean, the next morning: *"we probably need to redesign some stuff, add weather, give them a reason to make shelter to get away from the elements."*
+
+Weather is a **pure function of (pair seed, heartbeat)** — no state file, no drift, no split-brain. Windows of 36 heartbeats (half a day); per-season probabilities (winter storms 10%, summer 2%); the **forecast is in every observation** (current, next, when it changes) — weather is planning material, not dice. East and west are seeded differently: two civilizations under different skies.
+
+| mechanic | rule |
+|---|---|
+| temperature | sky modifier: clear 0, overcast −3, rain −6, storm −11 (a winter storm reads as *blizzard*) |
+| `wetness` (new vital) | +9/hb exposed in rain; dries 4/hb, 14/hb by fire; **shelter blocks it entirely** |
+| soaked body (wet ≥ 50) | warmth moves at 0.4× in both directions — you cannot warm up while wet |
+| **the shelter rule** | **rain snuffs open fires; a fire under a roof keeps burning** |
+
+The shelter rule is the reason this update exists: it makes roof-building *permanently* valuable — not a warmth percentage, but the difference between having heat and not having it, every time it rains, forever. The causal chain closes: rain → wet → cold that fire cannot fix until you are dry or roofed → **build a roof over the fire** → the first real house is a house because the sky demanded it.

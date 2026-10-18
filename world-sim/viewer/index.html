@@ -127,6 +127,7 @@ h1 span { color: var(--adam); }
 .vbar.b-hunger i { background: #d8a04e; }
 .vbar.b-warmth i { background: #5aa8d8; }
 .vbar.b-vital i { background: #6bd88a; }
+.vbar.b-wet i { background: #4e7fd8; }
 .stat-row { display: flex; gap: 6px; }
 .stat {
   flex: 1; text-align: center; background: var(--panel);
@@ -167,7 +168,7 @@ h1 span { color: var(--adam); }
 <body>
 <header>
   <div><h1>GENE<span>SIS</span></h1><div class="sub">Two Civilizations</div></div>
-  <div style="text-align:right"><div class="tick" id="tick-label">—</div><div id="clock">—</div></div>
+  <div style="text-align:right"><div class="tick" id="tick-label">—</div><div id="weather-line" style="font-size:.78rem;color:var(--dim)"></div><div id="clock">—</div></div>
 </header>
 <div id="main">
   <div id="map-panel">
@@ -916,6 +917,18 @@ document.getElementById("tick-label").textContent = "HB " + (maxTick || 0).toLoc
 document.getElementById("clock").textContent =
   newestStamp ? "updated " + new Date(newestStamp).toLocaleString() : "";
 
+(function renderWeather() {
+  const el = document.getElementById("weather-line");
+  const forecasts = [];
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    const w = pair.weather;
+    if (!w || !w.current) continue;
+    const name = (x) => x === "storm" && pn === "east" ? x : x;
+    forecasts.push(`${pn}: ${w.current} → ${w.next} @ HB${w.changes_at_heartbeat}`);
+  }
+  el.textContent = forecasts.join("   ·   ") || "";
+})();
+
 (function renderAgents() {
   const el = document.getElementById("agents");
   let html = "";
@@ -936,7 +949,7 @@ document.getElementById("clock").textContent =
         const bar = (cls, val) => `<div class="vbar ${cls}"><i style="width:${clamp(val,0,100)}%"></i></div>`;
         bodyHtml = `<div class="body${v.downed ? " downed" : ""}">
           <span class="blabel">${esc(label)}</span>
-          ${bar("b-hunger", 100 - v.hunger)}${bar("b-warmth", v.warmth)}${bar("b-vital", v.vitality)}
+          ${bar("b-hunger", 100 - v.hunger)}${bar("b-warmth", v.warmth)}${bar("b-vital", v.vitality)}${bar("b-wet", v.wetness || 0)}
         </div>`;
       }
       html += `<div class="agent-card ${pn === "east" ? "adam" : "eve"}">
