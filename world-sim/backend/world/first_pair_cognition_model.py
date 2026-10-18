@@ -1462,6 +1462,56 @@ def build_system_prompt(context: AgentContext) -> str:
     else:
         physics_section = ""
 
+    # --- The body speaks at the moment of need (epistemic.4/5) ---
+    # Facts, never advice: what the body is doing and which mechanics
+    # bear on it. The changelog states the terms once; the body states
+    # them every heartbeat they bear. Measured Oct 18: both pairs
+    # starved with full pockets because a once-told fact does not
+    # survive 300 heartbeats of habit.
+    _sb = (context.observation or {}).get("self_body") or {}
+    _env = (context.observation or {}).get("environment") or {}
+    body_section = ""
+    if _sb:
+        _lines = []
+        if _sb.get("downed"):
+            _lines.append(
+                "Your body has collapsed (vitality 0). You cannot move, "
+                "gather, or build until vitality recovers above 12.")
+            _lines.append(
+                "Facts: the eat action consumes one unit of a named food "
+                "from your belongings and works while you are collapsed. "
+                "Food deposited into any object on your tile also feeds "
+                "you while you are down. Vitality recovers slowly on its "
+                "own, and faster when fed.")
+        else:
+            if (_sb.get("hunger", 0) or 0) >= 60:
+                _lines.append(
+                    f"Your hunger is {round(_sb.get('hunger', 0))}/100."
+                    + (" Your vitality drains while hunger stays at 88 or "
+                       "higher, and at 0 vitality you collapse."
+                       if (_sb.get("hunger", 0) or 0) >= 88 else ""))
+                _lines.append(
+                    "Fact: the eat action consumes one unit of a named "
+                    "food from your belongings. Each food satisfies a "
+                    "different amount; a meal tides you over for roughly "
+                    "a dozen heartbeats.")
+            if (_sb.get("warmth", 100) or 100) <= 40:
+                _lines.append(
+                    f"Your warmth is {round(_sb.get('warmth', 0))}/100."
+                    + (" Your vitality drains while warmth stays at 20 or "
+                       "lower." if (_sb.get("warmth", 0) or 100) <= 20 else ""))
+                _lines.append(
+                    "Facts: a lit fire within three tiles raises warmth. "
+                    "Shelter slows the cold but does not warm you. In "
+                    "rain an open fire is snuffed; a fire under a roof "
+                    "keeps burning. A soaked body (wetness 50+) cannot "
+                    "warm up until it dries.")
+        if _lines:
+            body_section = (
+                "--- YOUR BODY (the store, speaking at the moment of need) ---\n"
+                + "\n".join("- " + line for line in _lines)
+            )
+
     # --- Operator: a human is watching and can write ---
     if context.operator_messages:
         op_lines = [
@@ -1491,6 +1541,8 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {anchor_section}
 
 {belongings_section}
+
+{body_section}
 
 {physics_section}
 
