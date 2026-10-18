@@ -162,6 +162,54 @@ def reconstruct_positions(heartbeats: list[dict], start_tiles: dict) -> dict:
     return {str(k): v for k, v in timeline.items()}
 
 
+def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
+                    limit: int = 24) -> list[dict]:
+    """Notable events, newest last: builds, meals, questions, collapses.
+
+    The show's script. Moves and gathers are noise; what an agent MADE,
+    what it ATE, what it ASKED, and when a body failed are the beats a
+    watcher actually follows.
+    """
+    events: list[dict] = []
+    for rec in heartbeats[-120:]:
+        hb = rec.get("heartbeat_number")
+        acts = rec.get("action_taken") or {}
+        outcomes = rec.get("action_outcomes") or {}
+        if not isinstance(acts, dict):
+            continue
+        for who, action in acts.items():
+            if not isinstance(action, dict):
+                continue
+            name = name_by_hash.get(who, who)
+            at = action.get("action_type")
+            outcome = outcomes.get(who) if isinstance(outcomes, dict) else {}
+            outcome = outcome if isinstance(outcome, dict) else {}
+            if at in ("build", "create_public_object"):
+                events.append({"hb": hb, "kind": "build",
+                               "who": name,
+                               "text": f"built a {action.get('object_type', 'thing')}"})
+            elif at == "eat":
+                outcome_status = outcome.get("status")
+                if outcome_status == "success":
+                    events.append({"hb": hb, "kind": "eat",
+                                   "who": name,
+                                   "text": f"ate {action.get('resource_kind', 'something')}"})
+            elif at == "ask_human":
+                q = str(action.get("question", ""))[:90]
+                if q:
+                    events.append({"hb": hb, "kind": "ask",
+                                   "who": name,
+                                   "text": f"asked: {q}"})
+            elif at in ("move", "gather", "no_action", "leave_public_message"):
+                continue
+            elif outcome.get("status") == "rejected" and "collapse" in str(
+                    outcome.get("reason", "")):
+                events.append({"hb": hb, "kind": "collapse",
+                               "who": name,
+                               "text": "collapsed"})
+    return events[-limit:]
+
+
 def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | None:
     """One pair's snapshot, or None if the store doesn't exist yet."""
     if not (store / "heartbeat.json").exists() or not (store / "world_state.json").exists():
@@ -285,6 +333,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "current_positions": world_state.get("tile_occupancy", {}),
         "vitals": world_state.get("vitals", {}),
         "weather": weather_snapshot,
+        "chronicle": build_chronicle(heartbeats, name_by_hash),
         "public_objects": world_state.get("public_objects", {}),
         "public_messages": [
             {**m, "sender": msg_sender(m)} for m in world_state.get("public_messages", [])

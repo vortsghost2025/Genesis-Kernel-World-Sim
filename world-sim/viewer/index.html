@@ -6,46 +6,75 @@
 <title>Genesis — Two Civilizations</title>
 <style>
 :root {
-  --bg: #04060b;
-  --panel: rgba(13, 18, 28, 0.85);
-  --line: rgba(110, 150, 200, 0.16);
-  --text: #d8e2ee;
-  --dim: #7d8aa0;
+  --bg: #05070d;
+  --panel: rgba(16, 22, 34, 0.72);
+  --panel-solid: #0d1219;
+  --line: rgba(120, 160, 210, 0.14);
+  --line-bright: rgba(130, 170, 220, 0.3);
+  --text: #dde6f2;
+  --dim: #7688a0;
+  --dimmer: #4d5c72;
   --adam: #4ecdc4;
   --eve: #f7d05e;
   --east: #4ecdc4;
   --west: #f7d05e;
+  --good: #6bd88a;
+  --warn: #d8a04e;
+  --bad: #e0764e;
+  --crit: #ff5c47;
+  --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --mono: "Cascadia Mono", Consolas, "SF Mono", monospace;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0;
   background:
-    radial-gradient(1200px 700px at 20% -10%, #0a1220 0%, transparent 60%),
-    radial-gradient(1000px 600px at 90% 110%, #0c0a14 0%, transparent 55%),
+    radial-gradient(1400px 800px at 15% -15%, #0b1526 0%, transparent 55%),
+    radial-gradient(1100px 700px at 95% 115%, #140f1e 0%, transparent 50%),
     var(--bg);
   color: var(--text);
-  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
   display: flex; flex-direction: column;
   overflow: hidden;
 }
 header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 18px;
+  padding: 12px 22px;
   border-bottom: 1px solid var(--line);
-  background: rgba(8, 11, 18, 0.6);
+  background: linear-gradient(180deg, rgba(12,17,27,0.9), rgba(8,11,18,0.55));
   flex: 0 0 auto;
 }
+.masthead { display: flex; align-items: baseline; gap: 14px; }
 h1 {
-  margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: 0.35em;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1.35rem; font-weight: 400;
+  letter-spacing: 0.42em; text-transform: uppercase;
+  color: #f0f5fc;
 }
-h1 span { color: var(--adam); }
-.sub { color: var(--dim); font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 2px; }
+h1 b { color: var(--adam); font-weight: 400; }
+.masthead .sub {
+  color: var(--dim); font-size: 0.72rem; letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.readouts { display: flex; align-items: center; gap: 18px; }
+.weather-strip { display: flex; gap: 16px; }
+.wchip {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 20px; padding: 4px 12px;
+  font-size: 0.76rem; color: var(--text);
+}
+.wchip .wicon { font-size: 0.95rem; }
+.wchip .wpair { color: var(--dim); font-size: 0.68rem; letter-spacing: 0.08em; }
+.wchip .wnext { color: var(--dimmer); font-size: 0.7rem; }
 .tick {
-  font: 700 1.25rem/1.1 "Cascadia Mono", Consolas, monospace;
-  color: #eaf2ff; text-align: right;
+  font: 400 1.5rem/1.1 var(--mono);
+  color: #eef4ff; text-align: right;
+  letter-spacing: 0.02em;
 }
-#clock { color: var(--dim); font-size: 0.7rem; text-align: right; }
+#clock { color: var(--dimmer); font-size: 0.66rem; text-align: right; }
 #main { flex: 1 1 auto; display: flex; min-height: 0; }
 #map-panel {
   flex: 1 1 auto; position: relative; min-width: 0;
@@ -56,18 +85,15 @@ h1 span { color: var(--adam); }
   cursor: grab; display: block;
 }
 #map-canvas.dragging { cursor: grabbing; }
-#map-hint {
-  position: absolute; top: 10px; right: 14px;
-  color: var(--dim); font-size: 0.7rem; letter-spacing: 0.08em;
+#map-hint, #zoom-label {
+  position: absolute;
+  color: var(--dim); font-size: 0.68rem; letter-spacing: 0.08em;
   background: rgba(8, 11, 18, 0.55); border: 1px solid var(--line);
   border-radius: 8px; padding: 4px 10px; pointer-events: none;
+  backdrop-filter: blur(4px);
 }
-#zoom-label {
-  position: absolute; top: 10px; left: 14px;
-  color: var(--dim); font-size: 0.7rem;
-  background: rgba(8, 11, 18, 0.55); border: 1px solid var(--line);
-  border-radius: 8px; padding: 4px 10px; pointer-events: none;
-}
+#map-hint { top: 10px; right: 14px; }
+#zoom-label { top: 10px; left: 14px; }
 #legend {
   position: absolute; bottom: 12px; left: 12px;
   max-width: 300px;
@@ -77,7 +103,7 @@ h1 span { color: var(--adam); }
   backdrop-filter: blur(6px);
 }
 #legend summary {
-  cursor: pointer; color: var(--text); font-size: 0.7rem;
+  cursor: pointer; color: var(--text); font-size: 0.68rem;
   letter-spacing: 0.14em; text-transform: uppercase;
   user-select: none; outline: none;
 }
@@ -85,76 +111,109 @@ h1 span { color: var(--adam); }
 #legend .li { display: flex; align-items: center; gap: 5px; }
 #legend .sw { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
 #sidebar {
-  flex: 0 0 340px; overflow-y: auto; padding: 12px;
+  flex: 0 0 360px; overflow-y: auto; padding: 14px;
   border-left: 1px solid var(--line);
-  background: rgba(6, 9, 15, 0.5);
-  scrollbar-width: thin; scrollbar-color: #24303f transparent;
+  background: rgba(6, 9, 15, 0.55);
+  scrollbar-width: thin; scrollbar-color: #223042 transparent;
 }
-.section { margin-bottom: 16px; }
+.section { margin-bottom: 18px; }
 .section h2 {
-  margin: 0 0 8px; font-size: 0.68rem; font-weight: 700;
-  letter-spacing: 0.22em; text-transform: uppercase; color: var(--dim);
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 9px; font-size: 0.64rem; font-weight: 600;
+  letter-spacing: 0.26em; text-transform: uppercase; color: var(--dim);
+}
+.section h2::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
 }
 .agent-card {
-  display: flex; gap: 10px; align-items: flex-start;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 10px; padding: 8px 10px; margin-bottom: 6px;
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+  backdrop-filter: blur(6px);
 }
 .agent-card.adam { border-left: 3px solid var(--adam); }
 .agent-card.eve { border-left: 3px solid var(--eve); }
-.dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: 0 0 auto; }
-.agent-card.adam .dot { background: var(--adam); box-shadow: 0 0 8px var(--adam); }
-.agent-card.eve .dot { background: var(--eve); box-shadow: 0 0 8px var(--eve); }
-.name { font-weight: 600; }
-.pos { color: var(--dim); font: 0.7rem "Cascadia Mono", Consolas, monospace; }
-.inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.chip {
-  font-size: 0.68rem; color: #b9c6d8;
-  background: rgba(120, 160, 210, 0.1); border: 1px solid rgba(120, 160, 210, 0.2);
-  border-radius: 20px; padding: 1px 7px;
+.agent-head { display: flex; align-items: center; gap: 8px; }
+.name { font-weight: 600; font-size: 0.95rem; }
+.tag { color: var(--dim); font-size: 0.68rem; letter-spacing: 0.1em; }
+.badge {
+  margin-left: auto; font-size: 0.6rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  border-radius: 20px; padding: 2px 9px;
+  border: 1px solid;
 }
-.body { margin-top: 5px; display: flex; align-items: center; gap: 6px; }
-.body .blabel {
-  font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
-  color: #9fb3c8; flex: 0 0 62px;
+.pos { color: var(--dim); font: 0.68rem var(--mono); margin-top: 3px; }
+.body { margin-top: 7px; display: grid; grid-template-columns: 52px 1fr 34px; gap: 3px 8px; align-items: center; }
+.body .vlabel {
+  font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--dimmer); text-align: right;
 }
-.body.downed .blabel { color: #ff7a6b; font-weight: 700; }
 .vbar {
-  height: 4px; width: 46px; background: #16202c; border-radius: 2px;
-  overflow: hidden; flex: 0 0 auto;
+  height: 5px; background: #131c28; border-radius: 3px; overflow: hidden;
 }
-.vbar i { display: block; height: 100%; border-radius: 2px; }
-.vbar.b-hunger i { background: #d8a04e; }
-.vbar.b-warmth i { background: #5aa8d8; }
-.vbar.b-vital i { background: #6bd88a; }
-.vbar.b-wet i { background: #4e7fd8; }
+.vbar i { display: block; height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.vbar.b-hunger i { background: linear-gradient(90deg, #8a5a2a, #d8a04e); }
+.vbar.b-warmth i { background: linear-gradient(90deg, #2a5a8a, #5aa8d8); }
+.vbar.b-vital i { background: linear-gradient(90deg, #2a8a52, #6bd88a); }
+.vbar.b-wet i { background: linear-gradient(90deg, #2a4a8a, #4e7fd8); }
+.vnum { font: 0.62rem var(--mono); color: var(--dim); }
+.inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.chip {
+  font-size: 0.66rem; color: #b9c6d8;
+  background: rgba(120, 160, 210, 0.1); border: 1px solid rgba(120, 160, 210, 0.18);
+  border-radius: 20px; padding: 1px 8px;
+}
+.downed-badge {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 .stat-row { display: flex; gap: 6px; }
 .stat {
   flex: 1; text-align: center; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 10px; padding: 8px 2px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 2px;
 }
-.stat .num { font: 700 1rem "Cascadia Mono", Consolas, monospace; color: #eaf2ff; }
-.stat .label { color: var(--dim); font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.stat .num { font: 600 0.95rem var(--mono); color: #eaf2ff; }
+.stat .label { color: var(--dimmer); font-size: 0.56rem; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px; }
+.chronicle { position: relative; padding-left: 14px; }
+.chronicle::before {
+  content: ""; position: absolute; left: 3px; top: 6px; bottom: 6px;
+  width: 1px; background: var(--line);
+}
+.ch-event { position: relative; padding: 3px 0 3px 6px; font-size: 0.78rem; color: #bcc9da; }
+.ch-event::before {
+  content: ""; position: absolute; left: -14px; top: 9px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--dim); box-shadow: 0 0 6px rgba(0,0,0,0.5);
+}
+.ch-event.build::before { background: var(--warn); }
+.ch-event.eat::before { background: var(--good); }
+.ch-event.ask::before { background: #a88ad8; }
+.ch-event.collapse::before { background: var(--crit); }
+.ch-event .chwho { color: var(--text); font-weight: 600; }
+.ch-event .chhb { color: var(--dimmer); font: 0.62rem var(--mono); margin-left: 5px; }
 .msg {
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 10px; padding: 7px 10px; margin-bottom: 6px; font-size: 0.82rem;
+  border-radius: 10px; padding: 7px 10px; margin-bottom: 6px; font-size: 0.8rem;
   color: #c3cedd;
 }
 .msg.adam { border-left: 3px solid var(--adam); }
 .msg.eve { border-left: 3px solid var(--eve); }
-.who { font-weight: 700; color: var(--text); font-size: 0.78rem; }
-.hb { color: var(--dim); font-weight: 400; font-size: 0.68rem; margin-left: 4px; }
+.who { font-weight: 700; color: var(--text); font-size: 0.76rem; }
+.hb { color: var(--dimmer); font-weight: 400; font-size: 0.66rem; margin-left: 4px; font-family: var(--mono); }
 .obj-item {
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 20px; padding: 2px 9px; margin: 0 4px 4px 0; font-size: 0.75rem;
+  border-radius: 20px; padding: 2px 9px; margin: 0 4px 4px 0; font-size: 0.72rem;
 }
 .obj-item .type { color: var(--text); }
-.obj-item .cnt { color: var(--dim); font: 0.7rem "Cascadia Mono", Consolas, monospace; }
+.obj-item .cnt { color: var(--dim); font: 0.66rem var(--mono); }
 #tooltip {
   position: fixed; display: none; z-index: 50; max-width: 300px;
   background: rgba(8, 10, 16, 0.94); border: 1px solid rgba(130, 170, 220, 0.3);
-  border-radius: 10px; padding: 9px 12px; font-size: 0.78rem; color: #c9d4e2;
+  border-radius: 10px; padding: 9px 12px; font-size: 0.76rem; color: #c9d4e2;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
   pointer-events: none;
@@ -167,8 +226,14 @@ h1 span { color: var(--adam); }
 </head>
 <body>
 <header>
-  <div><h1>GENE<span>SIS</span></h1><div class="sub">Two Civilizations</div></div>
-  <div style="text-align:right"><div class="tick" id="tick-label">—</div><div id="weather-line" style="font-size:.78rem;color:var(--dim)"></div><div id="clock">—</div></div>
+  <div class="masthead">
+    <h1>Gene<b>sis</b></h1>
+    <span class="sub">a live world · two civilizations</span>
+  </div>
+  <div class="readouts">
+    <div class="weather-strip" id="weather-strip"></div>
+    <div><div class="tick" id="tick-label">—</div><div id="clock">—</div></div>
+  </div>
 </header>
 <div id="main">
   <div id="map-panel">
@@ -179,7 +244,8 @@ h1 span { color: var(--adam); }
   </div>
   <div id="sidebar">
     <div class="section"><h2>Agents</h2><div id="agents"></div></div>
-    <div class="section"><h2>World</h2><div class="stat-row" id="stats"></div></div>
+    <div class="section"><h2>The World</h2><div class="stat-row" id="stats"></div></div>
+    <div class="section"><h2>Chronicle</h2><div class="chronicle" id="chronicle"></div></div>
     <div class="section"><h2>Messages</h2><div id="messages"></div></div>
     <div class="section"><h2>Objects</h2><div id="objects"></div></div>
   </div>
@@ -918,19 +984,40 @@ document.getElementById("clock").textContent =
   newestStamp ? "updated " + new Date(newestStamp).toLocaleString() : "";
 
 (function renderWeather() {
-  const el = document.getElementById("weather-line");
-  const forecasts = [];
+  const el = document.getElementById("weather-strip");
+  const ICONS = { clear: "☀", overcast: "☁", rain: "☂", storm: "⚡",
+                  blizzard: "❄" };
+  let html = "";
   for (const [pn, pair] of Object.entries(PAIRS)) {
     const w = pair.weather;
     if (!w || !w.current) continue;
-    const name = (x) => x === "storm" && pn === "east" ? x : x;
-    forecasts.push(`${pn}: ${w.current} → ${w.next} @ HB${w.changes_at_heartbeat}`);
+    const tick = pair.exported_tick || 0;
+    const soon = w.changes_at_heartbeat - tick;
+    const icon = ICONS[w.current] || "·";
+    const nextIn = soon <= 0 ? "changing" : `${soon} hb`;
+    html += `<div class="wchip" title="${pn}: ${esc(w.current)}, then ${esc(w.next)}">
+      <span class="wicon">${icon}</span>
+      <span class="wpair">${esc(pn)}</span>
+      <span>${esc(w.current)}</span>
+      <span class="wnext">→ ${esc(w.next)} in ${nextIn}</span>
+    </div>`;
   }
-  el.textContent = forecasts.join("   ·   ") || "";
+  el.innerHTML = html;
 })();
 
 (function renderAgents() {
   const el = document.getElementById("agents");
+  const STATE_COLORS = {
+    well: "var(--good)", hungry: "var(--warn)", cold: "#5aa8d8",
+    starving: "var(--bad)", freezing: "#4e9fd8", failing: "var(--crit)",
+    collapsed: "var(--crit)",
+  };
+  const label = (v) => v.downed ? "collapsed"
+    : (v.vitality <= 25 ? "failing"
+    : (v.hunger >= 88 ? "starving"
+    : (v.warmth <= 20 ? "freezing"
+    : (v.hunger >= 60 ? "hungry"
+    : (v.warmth <= 40 ? "cold" : "well")))));
   let html = "";
   for (const [pn, pair] of Object.entries(PAIRS)) {
     const inventories = pair.inventories || {};
@@ -938,29 +1025,56 @@ document.getElementById("clock").textContent =
     for (const [ref, tileId] of Object.entries(pair.current_positions || {})) {
       const name = ref.split("_")[1] || ref;
       const inv = inventories[ref] || {};
-      const chips = Object.entries(inv).filter(([, v]) => v > 0).slice(0, 6)
-        .map(([k, v]) => `<span class="chip">${esc(k)} ×${v}</span>`).join("");
-      const more = Object.entries(inv).filter(([, v]) => v > 0).length > 6
+      const chips = Object.entries(inv).filter(([, x]) => x > 0).slice(0, 6)
+        .map(([k, x]) => `<span class="chip">${esc(k)} ×${x}</span>`).join("");
+      const more = Object.entries(inv).filter(([, x]) => x > 0).length > 6
         ? `<span class="chip">…</span>` : "";
-      const v = vitalsAll[ref] || null;
+      const v = vitalsAll[ref];
       let bodyHtml = "";
       if (v) {
-        const label = v.downed ? "COLLAPSED" : (v.vitality <= 25 ? "failing" : (v.hunger >= 88 ? "starving" : (v.warmth <= 20 ? "freezing" : (v.hunger >= 60 ? "hungry" : (v.warmth <= 40 ? "cold" : "well")))));
-        const bar = (cls, val) => `<div class="vbar ${cls}"><i style="width:${clamp(val,0,100)}%"></i></div>`;
-        bodyHtml = `<div class="body${v.downed ? " downed" : ""}">
-          <span class="blabel">${esc(label)}</span>
-          ${bar("b-hunger", 100 - v.hunger)}${bar("b-warmth", v.warmth)}${bar("b-vital", v.vitality)}${bar("b-wet", v.wetness || 0)}
+        const st = label(v);
+        const col = STATE_COLORS[st] || "var(--good)";
+        const bar = (lbl, cls, val, note) =>
+          `<span class="vlabel">${lbl}</span>` +
+          `<span class="vbar ${cls}"><i style="width:${clamp(note,0,100)}%"></i></span>` +
+          `<span class="vnum">${Math.round(note)}</span>`;
+        bodyHtml = `<div class="body">` +
+          bar("hunger", "b-hunger", null, 100 - v.hunger) +
+          bar("warmth", "b-warmth", null, v.warmth) +
+          bar("vital", "b-vital", null, v.vitality) +
+          bar("wet", "b-wet", null, v.wetness || 0) +
+          `</div>`;
+        html += `<div class="agent-card ${pn === "east" ? "adam" : "eve"}">
+          <div class="agent-head">
+            <span class="name">${esc(name)}</span>
+            <span class="tag">${esc(pn)}</span>
+            <span class="badge ${v.downed ? "downed-badge" : ""}" style="color:${col};border-color:${col}">${esc(st)}</span>
+          </div>
+          <div class="pos">${esc(tileId)}</div>
+          ${bodyHtml}
+          <div class="inv">${chips || '<span class="chip" style="opacity:.5">empty</span>'}${more}</div>
         </div>`;
       }
-      html += `<div class="agent-card ${pn === "east" ? "adam" : "eve"}">
-        <div class="dot"></div>
-        <div><div class="name">${esc(name)} <span style="color:var(--dim);font-size:.72rem">${esc(pn)}</span></div>
-        <div class="pos">${esc(tileId)}</div>
-        ${bodyHtml}
-        <div class="inv">${chips || '<span class="chip" style="opacity:.5">empty</span>'}${more}</div></div></div>`;
     }
   }
   el.innerHTML = html || '<div style="color:var(--dim)">No agents.</div>';
+})();
+
+(function renderChronicle() {
+  const el = document.getElementById("chronicle");
+  const all = [];
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    for (const e of (pair.chronicle || [])) {
+      all.push({ ...e, _pair: pn });
+    }
+  }
+  all.sort((a, b) => (a.hb || 0) - (b.hb || 0));
+  let html = "";
+  for (const e of all.slice(-16)) {
+    const name = String(e.who || "?").split("_")[1] || e.who;
+    html += `<div class="ch-event ${esc(e.kind)}"><span class="chwho">${esc(name)}</span> ${esc(e.text)}<span class="chhb">HB${e.hb}</span></div>`;
+  }
+  el.innerHTML = html || '<div style="color:var(--dimmer);font-size:.8rem">Quiet, so far.</div>';
 })();
 
 (function renderStats() {
