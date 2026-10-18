@@ -59,4 +59,12 @@ GATHER_YIELD = 1
 # objects hold things. Eve at HB1864 asked for exactly this mechanic.
 # No longer true: that objects are inert records. The use_object action
 # is in the contract.
-PHYSICS_VERSION = "epistemic.3"
+# epistemic.4 is a REAL physics change (docs/survival_physics_spec.md):
+# the body. Hunger rises with time; cold nights and winters drain
+# warmth; vitality fails under neglect and collapse takes the agent
+# down until fed or warmed. Designed against the measured board
+# (21k berry tiles: abundance), so the pressure is time, warmth and
+# safety — never famine. The v1 trap (income == consumption pinning an
+# agent at zero) is structurally impossible here: slack is a tested
+# invariant (tests/test_survival_physics.py).
+PHYSICS_VERSION = "epistemic.4"

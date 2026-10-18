@@ -276,6 +276,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "exported_at_utc": world_state.get("updated_at_utc"),
         "home_continent": home_continent,
         "current_positions": world_state.get("tile_occupancy", {}),
+        "vitals": world_state.get("vitals", {}),
         "public_objects": world_state.get("public_objects", {}),
         "public_messages": [
             {**m, "sender": msg_sender(m)} for m in world_state.get("public_messages", [])

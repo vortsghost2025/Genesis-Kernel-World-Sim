@@ -97,10 +97,10 @@ class TestRetiredMechanicsAreGone:
         assert GATHER_YIELD == 1
 
     def test_version_moved_to_the_new_era(self):
-        # epistemic.3: objects hold things (docs/object_interaction_spec.md).
+        # epistemic.4: the body (docs/survival_physics_spec.md).
         # Bumped deliberately — the version test pins the CURRENT era, and
         # the gate (new_to_agent) re-arms once per agent to announce it.
-        assert PHYSICS_VERSION == "epistemic.3"
+        assert PHYSICS_VERSION == "epistemic.4"
 
     def test_runtime_has_no_pressure_step(self):
         rt = FirstPairRuntime(heartbeat_limit=1, store=_fresh_store(Path(".")))
@@ -333,12 +333,12 @@ class TestTermsChangelog:
         prompt = build_system_prompt(rt._build_context("east_adam", 1))
         assert "terms have changed" in prompt
         assert "No longer true" in prompt
-        # epistemic.3: objects hold things (object_interaction_spec §4).
-        # Pins the CURRENT changelog — when the version moves again, this
-        # pin moves with it, deliberately.
-        assert "objects are inert" in prompt
-        assert "use_object" in prompt
-        assert "hold materials" in prompt
+        # epistemic.4: the body (survival_physics_spec.md). Pins the
+        # CURRENT changelog — when the version moves again, this pin
+        # moves with it, deliberately.
+        assert "your body costs nothing" in prompt
+        assert "eat" in prompt
+        assert "collapse" in prompt
 
     def test_prompt_does_not_repeat_the_changelog_every_heartbeat(self, tmp_path):
         store = _fresh_store(tmp_path)

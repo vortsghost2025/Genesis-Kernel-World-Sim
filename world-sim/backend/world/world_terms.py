@@ -64,8 +64,27 @@ TERMS_CHANGELOG["epistemic.3"] = (
     "what it is called or who built it."
 )
 
-CURRENT_TERMS = "epistemic.3"
-PREVIOUS_TERMS = "epistemic.2"
+# epistemic.4: the body (docs/survival_physics_spec.md). A real physics
+# change. Stated as facts about the body and the world, never as advice:
+# the world now imposes costs of time, warmth and safety. Abundance was
+# measured first (audit_tile_resources.py) — hunger is a clock, not a
+# famine.
+TERMS_CHANGELOG["epistemic.4"] = (
+    "No longer true: that your body costs nothing. You have a body now. "
+    "Hunger rises with every heartbeat; the eat action consumes food "
+    "from your belongings and satisfies it — cooked food satisfies far "
+    "more than raw. Night and winter are cold: cold drains warmth, "
+    "standing near a lit fire restores it, and shelter slows the drain. "
+    "Vitality fails when hunger or cold is neglected; at zero vitality "
+    "you collapse and cannot act until your body recovers — food "
+    "deposited on your tile feeds you even while you are down. Your "
+    "body is in your observation under self_body; the hour, season and "
+    "temperature are under environment. Nothing here tells you what to "
+    "do about any of it."
+)
+
+CURRENT_TERMS = "epistemic.4"
+PREVIOUS_TERMS = "epistemic.3"
 
 
 def terms_change_line(version: str) -> str:

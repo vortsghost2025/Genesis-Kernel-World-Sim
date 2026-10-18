@@ -88,6 +88,7 @@ from backend.world.first_pair_persistence import (
 )
 from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
+from backend.world import survival
 from backend.world.world_pressure import (
     GATHER_YIELD,
     PHYSICS_VERSION,
@@ -646,6 +647,20 @@ class FirstPairRuntime:
         if fog_obs_error:
             observation["fog_error"] = "geography observation unavailable"
 
+        # epistemic.4: the body and the hour, in every observation. The
+        # prompt embeds the observation JSON, so this is how an agent
+        # feels its own hunger and notices night falling.
+        vitals = dict(self._vitals_for(agent_ref))
+        vitals["state"] = survival.vitals_state_label(vitals)
+        observation["self_body"] = vitals
+        observation["environment"] = {
+            "time_of_day": "night" if survival.is_night(heartbeat_number) else "day",
+            "season": survival.season(heartbeat_number),
+            "temperature": round(survival.ambient_temperature(heartbeat_number), 1),
+            "by_fire": self._nearby_fire(position) if position else False,
+            "sheltered": self._in_shelter(position) if position else False,
+        }
+
         # Visible public messages (addressed to this agent or public "all")
         visible_msgs = [
             m for m in self._world_state.public_messages
@@ -988,6 +1003,106 @@ class FirstPairRuntime:
         )
 
     # ------------------------------------------------------------------
+    # Survival physics (epistemic.4: the body)
+    # ------------------------------------------------------------------
+
+    def _vitals_for(self, agent_ref: str) -> dict:
+        """This agent's vitals, seeded healthy on first read. Absent
+        vitals on an old store mean the body never existed yet — no
+        retroactive famine; agents learn the new terms, they do not
+        wake up mid-crisis."""
+        vitals = self._world_state.vitals.get(agent_ref)
+        if not isinstance(vitals, dict) or not vitals:
+            vitals = survival.initial_vitals()
+            self._world_state.vitals[agent_ref] = vitals
+        return vitals
+
+    @staticmethod
+    def _tile_xy(tile_id: str) -> tuple[int, int] | None:
+        """Parse x,y out of a generated tile id (cont_X_gen_{x}_{y})."""
+        try:
+            parts = str(tile_id).rsplit("_", 2)
+            return int(parts[1]), int(parts[2])
+        except (IndexError, ValueError):
+            return None
+
+    def _nearby_fire(self, tile_id: str) -> bool:
+        """A lit fire within FIRE_RADIUS (Chebyshev): warmth climbs."""
+        pos = self._tile_xy(tile_id)
+        if pos is None:
+            return False
+        px, py = pos
+        fire_kinds = ("fire", "forge", "furnace", "brazier", "hearth",
+                      "campfire")
+        for record in self._world_state.public_objects.values():
+            if not isinstance(record, dict):
+                continue
+            otype = str(record.get("object_type", "")).lower()
+            if not any(k in otype for k in fire_kinds):
+                continue
+            other = self._tile_xy(record.get("tile_id", ""))
+            if other is None:
+                continue
+            if max(abs(other[0] - px), abs(other[1] - py)) <= survival.FIRE_RADIUS:
+                return True
+        return False
+
+    def _in_shelter(self, tile_id: str) -> bool:
+        """Shelter here or adjacent: the cold drains less than half as fast."""
+        pos = self._tile_xy(tile_id)
+        if pos is None:
+            return False
+        px, py = pos
+        shelter_kinds = ("shelter", "hut", "wall", "roof", "cabin", "tent",
+                         "lean")
+        for record in self._world_state.public_objects.values():
+            if not isinstance(record, dict):
+                continue
+            otype = str(record.get("object_type", "")).lower()
+            if not any(k in otype for k in shelter_kinds):
+                continue
+            other = self._tile_xy(record.get("tile_id", ""))
+            if other is None:
+                continue
+            if max(abs(other[0] - px), abs(other[1] - py)) <= 1:
+                return True
+        return False
+
+    def apply_survival_to_all(self, heartbeat_number: int) -> None:
+        """One heartbeat of embodiment for every agent. Called once per
+        heartbeat BEFORE the cognition cycles, so the observation the
+        agent reasons from includes the body it is about to act with."""
+        for agent_ref in (self._adam_ref, self._eve_ref):
+            vitals = self._vitals_for(agent_ref)
+            position = self._world_state.tile_occupancy.get(agent_ref)
+            by_fire = self._nearby_fire(position) if position else False
+            in_shelter = self._in_shelter(position) if position else False
+            self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
+                vitals, heartbeat_number, by_fire=by_fire,
+                in_shelter=in_shelter)
+
+    def _eat_satisfaction(self, agent_ref: str, resource_kind: str) -> dict:
+        """Consume one unit of food from belongings, satisfy hunger."""
+        kind = str(resource_kind or "").strip()
+        if not kind:
+            return {"status": "rejected", "reason": "Missing resource_kind"}
+        inventory = dict(load_inventory(self._store).get(agent_ref, {}))
+        held = inventory.get(kind, 0)
+        if not isinstance(held, int) or held <= 0:
+            return {"status": "rejected",
+                    "reason": f"You hold no {kind} to eat"}
+        vitals = self._vitals_for(agent_ref)
+        satisfaction = survival.eat_satisfaction(kind)
+        vitals["hunger"] = round(max(0.0, vitals["hunger"] - satisfaction), 2)
+        add_to_inventory(self._store, agent_ref, kind, -1)
+        return {
+            "status": "success",
+            "resource_kind": kind,
+            "hunger_satisfied": satisfaction,
+            "hunger_now": vitals["hunger"],
+        }
+
+    # ------------------------------------------------------------------
     # Action execution
     # ------------------------------------------------------------------
 
@@ -995,6 +1110,21 @@ class FirstPairRuntime:
         if action is None:
             return {"status": "no_action", "detail": "No action chosen"}
         action_type = action.get("action_type")
+
+        # A collapsed body cannot act. A faint cry for help is the one
+        # thing left — the partner can bring food to the tile.
+        if self._vitals_for(agent_ref).get("downed"):
+            if action_type not in ("leave_public_message", "ask_human",
+                                   "no_action"):
+                return {
+                    "status": "rejected",
+                    "reason": ("You have collapsed (vitality 0). Your body "
+                               "cannot act. If food is brought to your tile "
+                               "you will eat and recover; otherwise rest."),
+                }
+
+        if action_type == "eat":
+            return self._eat_satisfaction(agent_ref, action.get("resource_kind"))
         if action_type == "move":
             return self._execute_move(agent_ref, action)
         if action_type == "create_public_object":
@@ -1805,6 +1935,12 @@ class FirstPairRuntime:
             self._load_tile_resources()
             self._pressure_tick = {}
             self._reconcile_capability_requests()
+
+            # epistemic.4: one heartbeat of embodiment before the agents
+            # reason — hunger rises, night cold bites, fires warm. The
+            # observation each agent receives this heartbeat carries the
+            # body it is about to act with.
+            self.apply_survival_to_all(hb)
 
             hb_observations: dict = {}
             for agent_ref in (self._adam_ref, self._eve_ref):

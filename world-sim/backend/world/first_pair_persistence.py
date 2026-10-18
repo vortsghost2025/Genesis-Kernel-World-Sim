@@ -292,6 +292,10 @@ class WorldStateRecord:
     public_messages: list[dict] = field(default_factory=list)
     capability_requests: list[dict] = field(default_factory=list)
     tile_occupancy: dict[str, str] = field(default_factory=dict)
+    # epistemic.4: per-agent_ref survival vitals (hunger/warmth/vitality/
+    # downed). Absent for stores written before the body existed; the
+    # runtime seeds healthy defaults on first read (no retroactive famine).
+    vitals: dict[str, dict] = field(default_factory=dict)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = "world_state.1"

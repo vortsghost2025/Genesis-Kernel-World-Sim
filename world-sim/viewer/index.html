@@ -113,6 +113,20 @@ h1 span { color: var(--adam); }
   background: rgba(120, 160, 210, 0.1); border: 1px solid rgba(120, 160, 210, 0.2);
   border-radius: 20px; padding: 1px 7px;
 }
+.body { margin-top: 5px; display: flex; align-items: center; gap: 6px; }
+.body .blabel {
+  font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #9fb3c8; flex: 0 0 62px;
+}
+.body.downed .blabel { color: #ff7a6b; font-weight: 700; }
+.vbar {
+  height: 4px; width: 46px; background: #16202c; border-radius: 2px;
+  overflow: hidden; flex: 0 0 auto;
+}
+.vbar i { display: block; height: 100%; border-radius: 2px; }
+.vbar.b-hunger i { background: #d8a04e; }
+.vbar.b-warmth i { background: #5aa8d8; }
+.vbar.b-vital i { background: #6bd88a; }
 .stat-row { display: flex; gap: 6px; }
 .stat {
   flex: 1; text-align: center; background: var(--panel);
@@ -907,6 +921,7 @@ document.getElementById("clock").textContent =
   let html = "";
   for (const [pn, pair] of Object.entries(PAIRS)) {
     const inventories = pair.inventories || {};
+    const vitalsAll = pair.vitals || {};
     for (const [ref, tileId] of Object.entries(pair.current_positions || {})) {
       const name = ref.split("_")[1] || ref;
       const inv = inventories[ref] || {};
@@ -914,10 +929,21 @@ document.getElementById("clock").textContent =
         .map(([k, v]) => `<span class="chip">${esc(k)} ×${v}</span>`).join("");
       const more = Object.entries(inv).filter(([, v]) => v > 0).length > 6
         ? `<span class="chip">…</span>` : "";
+      const v = vitalsAll[ref] || null;
+      let bodyHtml = "";
+      if (v) {
+        const label = v.downed ? "COLLAPSED" : (v.vitality <= 25 ? "failing" : (v.hunger >= 88 ? "starving" : (v.warmth <= 20 ? "freezing" : (v.hunger >= 60 ? "hungry" : (v.warmth <= 40 ? "cold" : "well")))));
+        const bar = (cls, val) => `<div class="vbar ${cls}"><i style="width:${clamp(val,0,100)}%"></i></div>`;
+        bodyHtml = `<div class="body${v.downed ? " downed" : ""}">
+          <span class="blabel">${esc(label)}</span>
+          ${bar("b-hunger", 100 - v.hunger)}${bar("b-warmth", v.warmth)}${bar("b-vital", v.vitality)}
+        </div>`;
+      }
       html += `<div class="agent-card ${pn === "east" ? "adam" : "eve"}">
         <div class="dot"></div>
         <div><div class="name">${esc(name)} <span style="color:var(--dim);font-size:.72rem">${esc(pn)}</span></div>
         <div class="pos">${esc(tileId)}</div>
+        ${bodyHtml}
         <div class="inv">${chips || '<span class="chip" style="opacity:.5">empty</span>'}${more}</div></div></div>`;
     }
   }

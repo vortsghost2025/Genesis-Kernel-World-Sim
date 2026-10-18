@@ -402,6 +402,7 @@ _VALID_ACTIONS = frozenset({
     "revise_charter",
     "build",
     "use_object",
+    "eat",
 })
 
 
@@ -635,6 +636,8 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     "use_object": frozenset({
         "action_type", "target_object_id", "operation", "materials",
     }),
+    # eat: epistemic.4 — consume food from belongings to satisfy hunger.
+    "eat": frozenset({"action_type", "resource_kind", "reason"}),
 }
 
 
@@ -739,6 +742,14 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             errors.append(err)
 
     elif at == "gather":
+        rk = raw.get("resource_kind", "")
+        if not isinstance(rk, str) or not rk.strip():
+            errors.append("action:empty_resource_kind")
+        err = _check_length(rk, _MAX_TARGET_CHARS, "action:resource_kind")
+        if err:
+            errors.append(err)
+
+    elif at == "eat":
         rk = raw.get("resource_kind", "")
         if not isinstance(rk, str) or not rk.strip():
             errors.append("action:empty_resource_kind")
@@ -1223,6 +1234,7 @@ Available actions:
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt" and "craft" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (only works on crafting_surface objects)
+- eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
 """
 
 # Free speech. One optional top-level field, documented in the contract and
