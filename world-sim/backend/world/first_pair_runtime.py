@@ -1077,9 +1077,47 @@ class FirstPairRuntime:
             position = self._world_state.tile_occupancy.get(agent_ref)
             by_fire = self._nearby_fire(position) if position else False
             in_shelter = self._in_shelter(position) if position else False
+            ate = 0.0
+            if vitals.get("downed"):
+                ate = self._downed_tile_feed(agent_ref, position)
             self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
                 vitals, heartbeat_number, by_fire=by_fire,
-                in_shelter=in_shelter)
+                in_shelter=in_shelter, ate_satisfaction=ate)
+
+    def _downed_tile_feed(self, agent_ref: str, position: str | None) -> float:
+        """A collapsed body eats from objects on its own tile.
+
+        The changelog promised: 'food deposited on your tile feeds you
+        even while you are down.' This is that mechanism — the partner's
+        rescue path. One unit of the most nourishing food in any object
+        here is consumed per heartbeat; hunger falls, and with care the
+        body stands again. Silent physics: the partner sees the object's
+        materials drop, the downed agent feels hunger ease.
+        """
+        if not position:
+            return 0.0
+        best_kind, best_sat, best_obj_id = None, 0.0, None
+        for oid, record in self._world_state.public_objects.items():
+            if not isinstance(record, dict) or record.get("tile_id") != position:
+                continue
+            materials = record.get("materials")
+            if not isinstance(materials, dict):
+                continue
+            for kind, amount in materials.items():
+                if not isinstance(amount, int) or amount <= 0:
+                    continue
+                sat = survival.eat_satisfaction(str(kind))
+                if sat > best_sat:
+                    best_kind, best_sat, best_obj_id = str(kind), sat, oid
+        if best_kind is None:
+            return 0.0
+        obj = self._world_state.public_objects[best_obj_id]
+        remaining = obj["materials"][best_kind] - 1
+        if remaining > 0:
+            obj["materials"][best_kind] = remaining
+        else:
+            del obj["materials"][best_kind]
+        return best_sat
 
     def _eat_satisfaction(self, agent_ref: str, resource_kind: str) -> dict:
         """Consume one unit of food from belongings, satisfy hunger."""
@@ -1111,11 +1149,14 @@ class FirstPairRuntime:
             return {"status": "no_action", "detail": "No action chosen"}
         action_type = action.get("action_type")
 
-        # A collapsed body cannot act. A faint cry for help is the one
-        # thing left — the partner can bring food to the tile.
+        # A collapsed body cannot act. What it CAN do: cry for help, and
+        # eat — a hand can still reach a pocket, and food on the tile is
+        # auto-fed by the physics (see apply_survival_to_all). Blocking
+        # eat while holding food would recreate the retired model's
+        # impossible board: starving with full pockets.
         if self._vitals_for(agent_ref).get("downed"):
             if action_type not in ("leave_public_message", "ask_human",
-                                   "no_action"):
+                                   "no_action", "eat"):
                 return {
                     "status": "rejected",
                     "reason": ("You have collapsed (vitality 0). Your body "

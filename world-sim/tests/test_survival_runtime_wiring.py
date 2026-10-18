@@ -16,6 +16,10 @@ WORLD_SIM = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORLD_SIM))
 
 from backend.world import survival  # noqa: E402
+from backend.world.first_pair_persistence import (  # noqa: E402
+    FirstPairPersistenceStore,
+    add_to_inventory,
+)
 
 
 class _FakeWorldState:
@@ -154,6 +158,69 @@ class TestEat:
             "action_type": "eat", "resource_kind": "wild_berries"}, 100)
         assert out["status"] == "success"
         assert load_inventory(rt._store)["east_adam"]["wild_berries"] == 4
+
+
+class TestDownedFeeding:
+    """The changelog promised: food brought to a downed agent feeds
+    them. These pin both rescue paths — own pocket, and the partner's
+    deposit on the tile. Blocking eat while holding food would be the
+    retired model's impossible board reborn."""
+
+    def test_downed_agent_can_eat_own_food(self, tmp_path):
+        rt = _runtime_stub()
+        rt._store = FirstPairPersistenceStore(tmp_path / "s1")
+        add_to_inventory(rt._store, "east_adam", "wild_berries", 3)
+        rt._vitals_for("east_adam")["downed"] = True
+        rt._vitals_for("east_adam")["hunger"] = 95.0
+        out = rt._execute_action("east_adam", {
+            "action_type": "eat", "resource_kind": "wild_berries"}, 100)
+        assert out["status"] == "success", (
+            "a collapsed body must still reach its own pocket"
+        )
+
+    def test_downed_agent_auto_eats_from_tile_object(self, tmp_path):
+        rt = _runtime_stub()
+        rt._store = FirstPairPersistenceStore(tmp_path / "s2")
+        rt._world_state.public_objects = {
+            "cache1": {"tile_id": "cont_a_gen_0_0",
+                       "object_type": "storage",
+                       "materials": {"wild_berries": 4}},
+        }
+        v = rt._vitals_for("east_adam")
+        v["downed"] = True
+        v["hunger"] = 90.0
+        rt.apply_survival_to_all(300)
+        v2 = rt._world_state.vitals["east_adam"]
+        # 90 rises 1.4 then drops by the berry's 18 satisfaction
+        assert v2["hunger"] < 90.0
+        assert rt._world_state.public_objects["cache1"]["materials"]["wild_berries"] == 3
+
+    def test_downed_with_no_food_stays_hungry(self, tmp_path):
+        rt = _runtime_stub()
+        rt._world_state.public_objects = {}
+        v = rt._vitals_for("east_adam")
+        v["downed"] = True
+        v["vitality"] = 5.0
+        v["hunger"] = 90.0
+        rt.apply_survival_to_all(300)
+        # no food: hunger only rises; passive recovery stays below standing
+        assert rt._world_state.vitals["east_adam"]["hunger"] > 90.0
+        assert rt._world_state.vitals["east_adam"]["downed"] is True
+
+    def test_standing_agent_does_not_auto_eat(self, tmp_path):
+        rt = _runtime_stub()
+        rt._store = FirstPairPersistenceStore(tmp_path / "s3")
+        rt._world_state.public_objects = {
+            "cache1": {"tile_id": "cont_a_gen_0_0",
+                       "object_type": "storage",
+                       "materials": {"wild_berries": 4}},
+        }
+        v = rt._vitals_for("east_adam")
+        v["downed"] = False
+        v["hunger"] = 90.0
+        rt.apply_survival_to_all(300)
+        # standing bodies choose to eat; objects are not raided silently
+        assert rt._world_state.public_objects["cache1"]["materials"]["wild_berries"] == 4
 
 
 class TestObservationExposure:
