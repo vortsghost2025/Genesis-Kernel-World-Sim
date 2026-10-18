@@ -6,6 +6,8 @@ Adam and Eve wake up with no memory on opposite ends of a small habitat. They fi
 
 They are simulation entities — canonical identities with bounded perception and append-only provenance — not conscious beings. But the emergent behavior is real: they coordinate patrols, leave messages, create landmarks, and genuinely appear to reason about the world they're in.
 
+☕ Support this work on [Ko-fi](https://ko-fi.com/meshcast)
+
 ## What's actually running right now
 
 - **150+ heartbeats** of autonomous civilization (one action per agent per heartbeat)
