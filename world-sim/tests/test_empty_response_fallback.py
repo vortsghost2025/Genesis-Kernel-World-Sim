@@ -158,6 +158,17 @@ class TestContentFailureClassification:
     def test_real_content_is_not_a_failure(self):
         assert _content_failure(_Resp('{"a":1}')) is None
 
+    def test_reasoning_field_is_used_when_content_is_empty(self):
+        class _Msg:
+            content = None
+            reasoning = '{"a":1}'
+        class _Choice:
+            message = _Msg()
+            finish_reason = "stop"
+        class _RespReasoning:
+            choices = [_Choice()]
+        assert _content_failure(_RespReasoning()) is None
+
 
 class TestEmptyPrimaryReachesTheFallback:
     def test_empty_primary_falls_back_and_serves(self, sample_context):

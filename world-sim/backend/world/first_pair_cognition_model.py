@@ -224,7 +224,8 @@ def _content_failure(response: Any) -> str | None:
         if not choices:
             return "no_choices_in_response"
         choice = choices[0]
-        raw_text = getattr(choice.message, "content", None)
+        msg = getattr(choice, "message", None)
+        raw_text = getattr(msg, "content", None) or getattr(msg, "reasoning", None)
         finish_reason = getattr(choice, "finish_reason", None)
     except Exception:
         return "no_choices_in_response"
@@ -2108,7 +2109,8 @@ class ModelCognitionBackend(CognitionBackend):
             return None, content_err
 
         choices = response.choices
-        raw_text = choices[0].message.content if choices else None
+        msg = choices[0].message if choices else None
+        raw_text = (getattr(msg, "content", None) or getattr(msg, "reasoning", None)) if msg else None
 
         raw_json = _extract_json(raw_text)
         if raw_json is None:
@@ -2139,10 +2141,12 @@ class ModelCognitionBackend(CognitionBackend):
         if response2 is None:
             return None, err2
 
-        raw_text2 = response2.choices[0].message.content if response2.choices else None
+        choices2 = response2.choices if response2 else None
+        msg2 = choices2[0].message if choices2 else None
+        raw_text2 = (getattr(msg2, "content", None) or getattr(msg2, "reasoning", None)) if msg2 else None
         finish_reason2 = (
-            getattr(response2.choices[0], "finish_reason", None)
-            if response2.choices
+            getattr(choices2[0], "finish_reason", None)
+            if choices2
             else None
         )
         if not raw_text2 or not raw_text2.strip():
