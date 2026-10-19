@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import struct
 import sys
@@ -144,20 +145,66 @@ def write_world_backdrop(true_map: dict, out_path: Path) -> dict | None:
 
 
 def read_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    with open(path, "rb") as f:
+        return json.load(f)
 
 
-def reconstruct_positions(heartbeats: list[dict], start_tiles: dict) -> dict:
+def reconstruct_positions(heartbeats: list[dict], start_tiles: dict,
+                          id_map: dict | None = None) -> dict:
     positions = dict(start_tiles)
     timeline: dict[int, dict[str, str]] = {}
     for hb in heartbeats:
         actions = hb.get("action_taken") or {}
+        outcomes = hb.get("action_outcomes") or {}
+        mutations = hb.get("world_mutations") or []
         if isinstance(actions, dict):
             for agent_id, action in actions.items():
                 if agent_id not in positions or not isinstance(action, dict):
                     continue
                 if action.get("action_type") == "move" and action.get("target_tile"):
-                    positions[agent_id] = action["target_tile"]
+                    target = action["target_tile"]
+                    # 1. Authoritative check: action_outcomes
+                    outcome = outcomes.get(agent_id) if isinstance(outcomes, dict) else None
+                    if isinstance(outcome, dict) and outcome:
+                        status = outcome.get("status")
+                        if status == "rejected" or outcome.get("success") is False:
+                            continue  # move explicitly rejected, do not advance
+                        elif status == "success" or outcome.get("success") is True:
+                            positions[agent_id] = outcome.get("to") or target
+                            continue
+
+                    # 2. Authoritative check: world_mutations
+                    moved_in_mutations = False
+                    for m in mutations:
+                        if not isinstance(m, dict):
+                            continue
+                        if m.get("action_type") == "move":
+                            acting_id = m.get("acting_agent_id")
+                            matched = (
+                                acting_id == agent_id
+                                or (id_map and id_map.get(acting_id) == agent_id)
+                                or (id_map and id_map.get(agent_id) == acting_id)
+                                or (m.get("input", {}).get("target_tile") == target and (
+                                    acting_id is None or acting_id == agent_id or
+                                    any(part in str(acting_id) for part in agent_id.split("_"))
+                                ))
+                            )
+                            if matched:
+                                m_outcome = m.get("outcome") or {}
+                                m_status = m_outcome.get("status")
+                                if m_status == "success" or m_outcome.get("to"):
+                                    positions[agent_id] = m_outcome.get("to") or target
+                                    moved_in_mutations = True
+                                    break
+                                elif m_status == "rejected":
+                                    moved_in_mutations = True
+                                    break
+                    if moved_in_mutations:
+                        continue
+
+                    # 3. Missing outcome evidence: Never silently assume an unverified
+                    # move attempt succeeded. Position remains unchanged.
+
         timeline[int(hb.get("heartbeat_number", 0))] = dict(positions)
     return {str(k): v for k, v in timeline.items()}
 
@@ -184,10 +231,21 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
             at = action.get("action_type")
             outcome = outcomes.get(who) if isinstance(outcomes, dict) else {}
             outcome = outcome if isinstance(outcome, dict) else {}
-            if at in ("build", "create_public_object"):
-                events.append({"hb": hb, "kind": "build",
+
+            # Priority 1: Check for rejected collapse events BEFORE action-type filtering
+            if outcome.get("status") == "rejected" and "collapse" in str(
+                    outcome.get("reason", "")).lower():
+                events.append({"hb": hb, "kind": "collapse",
                                "who": name,
-                               "text": f"built a {action.get('object_type', 'thing')}"})
+                               "text": "collapsed"})
+                continue
+
+            # Priority 2: Notable actions
+            if at in ("build", "create_public_object"):
+                if outcome.get("status") != "rejected":
+                    events.append({"hb": hb, "kind": "build",
+                                   "who": name,
+                                   "text": f"built a {action.get('object_type', 'thing')}"})
             elif at == "eat":
                 outcome_status = outcome.get("status")
                 if outcome_status == "success":
@@ -202,11 +260,12 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
                                    "text": f"asked: {q}"})
             elif at in ("move", "gather", "no_action", "leave_public_message"):
                 continue
-            elif outcome.get("status") == "rejected" and "collapse" in str(
-                    outcome.get("reason", "")):
-                events.append({"hb": hb, "kind": "collapse",
-                               "who": name,
-                               "text": "collapsed"})
+            elif outcome.get("status") == "rejected":
+                reason = str(outcome.get("reason", ""))
+                if "vitality" in reason.lower() or "hunger" in reason.lower():
+                    events.append({"hb": hb, "kind": "collapse",
+                                   "who": name,
+                                   "text": "action failed: exhausted"})
     return events[-limit:]
 
 
@@ -225,9 +284,13 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
     identity = read_json(store / "identity.json") if (store / "identity.json").exists() else {}
     idata = identity.get("data", identity)
     name_by_hash = {}
+    agent_id_map = {}
     for idk, short in (("adam_agent_id", "adam"), ("eve_agent_id", "eve")):
         if idata.get(idk):
             name_by_hash[idata[idk]] = short
+            full_id = idata[idk]
+            agent_id_map[full_id] = f"{pair_name}_{short}"
+            agent_id_map[f"{pair_name}_{short}"] = full_id
 
     habitat = world_state.get("habitat", {})
     start_tiles = habitat.get("starting_tile_ids") or {}
@@ -292,10 +355,14 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         try:
             for rec in read_json(asks_path).get("data", []):
                 agent_asks.append({
+                    "question_id": rec.get("question_id"),
                     "heartbeat": rec.get("heartbeat"),
                     "agent": rec.get("agent_ref", "?"),
-                    "urgency": rec.get("urgency"),
+                    "urgency": rec.get("urgency", "normal"),
+                    "status": rec.get("status", "unheard"),
                     "question": rec.get("question", ""),
+                    "reason_for_asking": rec.get("reason_for_asking", ""),
+                    "answer": rec.get("answer") or rec.get("operator_answer"),
                 })
         except Exception:
             agent_asks = []
@@ -353,10 +420,10 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "known_maps": known_maps,
         "charters": charters,
         "inventories": inventories,
-        "agent_asks": agent_asks[-10:],
+        "agent_asks": agent_asks[-30:],
         "operator_messages": operator_messages,
         "heartbeats": extract_per_heartbeat(heartbeats),
-        "position_timeline": reconstruct_positions(heartbeats, start_tiles),
+        "position_timeline": reconstruct_positions(heartbeats, start_tiles, id_map=agent_id_map),
     }
 
 
@@ -414,6 +481,7 @@ def main() -> int:
     if world_size:
         print(f"WORLD-BACKDROP=OK {world_size['width']}x{world_size['height']} "
               f"({world_size['png_bytes']} bytes) -> {BASE_PNG.name}")
+    gc.collect()
     map_snapshot = {
         "continents": true_map.get("continents", []),
         "regions": true_map.get("regions", []),
@@ -425,27 +493,30 @@ def main() -> int:
 
     pairs = {}
     for pair_name, store in PAIRS:
+        gc.collect()
         snap = build_pair_snapshot(pair_name, store, true_map)
         if snap:
             pairs[pair_name] = snap
+        gc.collect()
 
     if not pairs:
         print("NO PAIR STORES FOUND", file=sys.stderr)
         return 1
 
     # shared geography layer: home tiles per pair + known tiles anywhere
+    tiles_by_id = {t["tile_id"]: t for t in map_snapshot["tiles"]}
     shared_tiles: dict[str, dict] = {}
     for snap in pairs.values():
         for km in snap["known_maps"].values():
             for tid in km.get("known_tiles", {}):
-                t = next((x for x in map_snapshot["tiles"] if x["tile_id"] == tid), None)
+                t = tiles_by_id.get(tid)
                 if t:
                     shared_tiles[tid] = t
         for tid in list(snap["current_positions"].values()) + [
             t for t in (snap.get("position_timeline", {}).values())
             for t in t.values()
         ]:
-            t2 = next((x for x in map_snapshot["tiles"] if x["tile_id"] == tid), None)
+            t2 = tiles_by_id.get(tid)
             if t2:
                 shared_tiles[tid] = t2
 
