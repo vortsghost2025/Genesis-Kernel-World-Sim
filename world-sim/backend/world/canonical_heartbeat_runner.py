@@ -80,10 +80,10 @@ CREATE_NO_WINDOW = 0x08000000
 # rejecting the entire configuration even though the primary (nano)
 # was alive. Setting fallback to the same nano model: it's the only
 # route answering right now, and a dead fallback is worse than none.
-PRIMARY_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-FALLBACK_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-ADAM_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-EVE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+FALLBACK_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+ADAM_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+EVE_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 # Single source of truth for the lane endpoint. build_clean_env() writes this
 # and resolution_proof() asserts the resolver honored it, so the configured

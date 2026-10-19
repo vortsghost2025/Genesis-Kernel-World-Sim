@@ -29,12 +29,11 @@ from backend.world.first_pair_cognition_interface import (  # noqa: E402
     AgentContext,
 )
 
-# Model era 4b (Oct 2026): the only contract-valid route alive is the
-# nemotron nano omni route. dots-studio is 429-rate-limited, nemotron-ultra
-# is 404, ling is paid-only. Primary and fallback are the same route by
-# necessity — when this route dies, the era changes and so does this file.
-BOTH_VALID_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-DIVERSE_FALLBACK_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+# Model era 4c (Oct 19, 2026): nemotron nano omni hit upstream worker exhaustion
+# (ResourceExhausted: Worker local total request limit reached 16/16).
+# nvidia/nemotron-3-super-120b-a12b:free is live, healthy, and contract-valid.
+BOTH_VALID_ROUTE = "nvidia/nemotron-3-super-120b-a12b:free"
+DIVERSE_FALLBACK_ROUTE = "nvidia/nemotron-3-super-120b-a12b:free"
 
 _FALLBACK_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",

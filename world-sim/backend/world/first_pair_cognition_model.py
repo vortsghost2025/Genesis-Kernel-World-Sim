@@ -637,7 +637,7 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
         "action_type", "target_object_id", "operation", "materials",
     }),
     # eat: epistemic.4 — consume food from belongings to satisfy hunger.
-    "eat": frozenset({"action_type", "resource_kind", "reason"}),
+    "eat": frozenset({"action_type", "resource_kind", "reason", "food_type", "food", "item"}),
 }
 
 
@@ -750,12 +750,14 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             errors.append(err)
 
     elif at == "eat":
-        rk = raw.get("resource_kind", "")
+        rk = raw.get("resource_kind") or raw.get("food_type") or raw.get("food") or raw.get("item") or ""
         if not isinstance(rk, str) or not rk.strip():
             errors.append("action:empty_resource_kind")
-        err = _check_length(rk, _MAX_TARGET_CHARS, "action:resource_kind")
-        if err:
-            errors.append(err)
+        else:
+            raw["resource_kind"] = rk.strip()
+            err = _check_length(raw["resource_kind"], _MAX_TARGET_CHARS, "action:resource_kind")
+            if err:
+                errors.append(err)
 
     elif at == "revise_charter":
         ct = raw.get("charter_text", "")
@@ -983,12 +985,11 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
             errors.append(f"memory_candidates:exceeds_{_MAX_MEMORY_CANDIDATES}")
         else:
             for i, m in enumerate(mem_raw):
+                if isinstance(m, str):
+                    m = {"type": "observation", "content": m}
                 if not isinstance(m, dict):
                     errors.append(f"memory_candidates[{i}]:not_a_dict")
                     continue
-                errors.extend(_reject_unknown_fields(
-                    m, frozenset({"type", "content"}), f"memory_candidates[{i}]",
-                ))
                 for f in ("type", "content"):
                     if f not in m or not isinstance(m[f], str):
                         errors.append(f"memory_candidates[{i}]:missing_or_invalid_{f}")
@@ -1000,7 +1001,10 @@ def validate_model_output(raw: dict, context_agent_id: str) -> ModelOutput:
                     elif _casefolded_contaminated(content):
                         errors.append(f"memory_candidates[{i}]:contaminated")
                 if not errors or all("memory_candidates" not in e for e in errors[-10:]):
-                    output.memory_candidates.append(m)
+                    output.memory_candidates.append({
+                        "type": str(m.get("type", "observation")),
+                        "content": str(m.get("content", "")),
+                    })
     elif "memory_candidates" in raw:
         errors.append("memory_candidates:wrong_type")
 
@@ -2171,12 +2175,46 @@ class ModelCognitionBackend(CognitionBackend):
 
 
 def _extract_json(text: str) -> dict | None:
-    text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    if not text or not isinstance(text, str):
         return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
+    # 1. Strip reasoning model <think>...</think> blocks if present
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+    target_texts = [cleaned] if cleaned else [text.strip()]
+
+    for candidate in target_texts:
+        # 2. Check for markdown fenced code blocks: ```json ... ``` or ``` ... ```
+        for block in re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", candidate, flags=re.IGNORECASE):
+            b = block.strip()
+            s = b.find("{")
+            e = b.rfind("}")
+            if s != -1 and e > s:
+                try:
+                    res = json.loads(b[s : e + 1])
+                    if isinstance(res, dict):
+                        return res
+                except Exception:
+                    pass
+
+        # 3. Try standard outermost braces on candidate
+        s = candidate.find("{")
+        e = candidate.rfind("}")
+        if s != -1 and e > s:
+            try:
+                res = json.loads(candidate[s : e + 1])
+                if isinstance(res, dict):
+                    return res
+            except Exception:
+                pass
+
+        # 4. Scan forward for any valid JSON object using JSONDecoder
+        decoder = json.JSONDecoder()
+        for i in range(len(candidate)):
+            if candidate[i] == "{":
+                try:
+                    obj, _ = decoder.raw_decode(candidate[i:])
+                    if isinstance(obj, dict):
+                        return obj
+                except Exception:
+                    continue
+
+    return None

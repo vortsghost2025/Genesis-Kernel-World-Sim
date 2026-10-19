@@ -514,6 +514,20 @@ class TestExactSchema:
         assert not result.is_valid
         assert any("exceeds_16" in e for e in result.validation_errors)
 
+    def test_memory_candidates_with_metadata_pruned_cleanly(self):
+        raw = self._valid_minimal()
+        raw["memory_candidates"] = [{"type": "observation", "content": "I see food", "heartbeat": 3996, "timestamp_utc": "2026-10-19"}]
+        result = validate_model_output(raw, self.CONTEXT_AGENT)
+        assert result.is_valid
+        assert result.memory_candidates == [{"type": "observation", "content": "I see food"}]
+
+    def test_memory_candidates_string_items_normalized(self):
+        raw = self._valid_minimal()
+        raw["memory_candidates"] = ["I see food"]
+        result = validate_model_output(raw, self.CONTEXT_AGENT)
+        assert result.is_valid
+        assert result.memory_candidates == [{"type": "observation", "content": "I see food"}]
+
     def test_questions_for_humans_too_many(self):
         raw = self._valid_minimal()
         raw["questions_for_humans"] = [
@@ -735,6 +749,24 @@ class TestActionSchemas:
         errs = validate_action_exact({"action_type": "delete_all"}, self.CONTEXT_AGENT)
         assert any("invalid_action_type" in e for e in errs)
 
+    def test_eat_valid(self):
+        errs = validate_action_exact({
+            "action_type": "eat",
+            "resource_kind": "wild_berries",
+            "reason": "Satisfy hunger",
+        }, self.CONTEXT_AGENT)
+        assert not errs
+
+    def test_eat_aliases_accepted(self):
+        action = {
+            "action_type": "eat",
+            "food_type": "wild_berries",
+            "reason": "Hungry",
+        }
+        errs = validate_action_exact(action, self.CONTEXT_AGENT)
+        assert not errs
+        assert action.get("resource_kind") == "wild_berries"
+
 
 # ---------------------------------------------------------------------------
 # JSON extraction
@@ -755,6 +787,18 @@ class TestJsonExtraction:
 
     def test_malformed_json(self):
         assert _extract_json("{broken json") is None
+
+    def test_json_wrapped_in_markdown_codeblock(self):
+        text = '```json\n{"observation_summary": "test"}\n```'
+        assert _extract_json(text) == {"observation_summary": "test"}
+
+    def test_json_with_reasoning_think_tags_and_braces(self):
+        text = '<think>\nI should consider {"action": "eat"}. Now output:\n</think>\n```json\n{"observation_summary": "ate", "confidence": 0.9}\n```'
+        assert _extract_json(text) == {"observation_summary": "ate", "confidence": 0.9}
+
+    def test_json_with_unclosed_or_raw_think_tags(self):
+        text = '<think>Thinking about options</think> {"observation_summary": "direct", "confidence": 0.8}'
+        assert _extract_json(text) == {"observation_summary": "direct", "confidence": 0.8}
 
 
 # ---------------------------------------------------------------------------
