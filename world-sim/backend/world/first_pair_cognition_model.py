@@ -1237,7 +1237,7 @@ Available actions:
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
-- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3}) — you may only spend what your belongings list shows; the object is placed on your current tile with your description and stands permanently
+- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt" and "craft" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (only works on crafting_surface objects)
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
 """
@@ -1478,6 +1478,17 @@ def build_system_prompt(context: AgentContext) -> str:
     body_section = ""
     if _sb:
         _lines = []
+        hunger = round(_sb.get("hunger", 0))
+        warmth = round(_sb.get("warmth", 100))
+        vitality = round(_sb.get("vitality", 100))
+        wetness = round(_sb.get("wetness", 0))
+        state = _sb.get("state", "well")
+        tod = _env.get("time_of_day", "day")
+        weather = _env.get("weather", "clear")
+        temp = _env.get("temperature", 50.0)
+        sheltered = _env.get("sheltered", False)
+        by_fire = _env.get("by_fire", False)
+
         if _sb.get("downed"):
             _lines.append(
                 "Your body has collapsed (vitality 0). You cannot move, "
@@ -1489,33 +1500,27 @@ def build_system_prompt(context: AgentContext) -> str:
                 "you while you are down. Vitality recovers slowly on its "
                 "own, and faster when fed.")
         else:
-            if (_sb.get("hunger", 0) or 0) >= 60:
-                _lines.append(
-                    f"Your hunger is {round(_sb.get('hunger', 0))}/100."
-                    + (" Your vitality drains while hunger stays at 88 or "
-                       "higher, and at 0 vitality you collapse."
-                       if (_sb.get("hunger", 0) or 0) >= 88 else ""))
-                _lines.append(
-                    "Fact: the eat action consumes one unit of a named "
-                    "food from your belongings. Each food satisfies a "
-                    "different amount; a meal tides you over for roughly "
-                    "a dozen heartbeats.")
-            if (_sb.get("warmth", 100) or 100) <= 40:
-                _lines.append(
-                    f"Your warmth is {round(_sb.get('warmth', 0))}/100."
-                    + (" Your vitality drains while warmth stays at 20 or "
-                       "lower." if (_sb.get("warmth", 0) or 100) <= 20 else ""))
-                _lines.append(
-                    "Facts: a lit fire within three tiles raises warmth. "
-                    "Shelter slows the cold but does not warm you. In "
-                    "rain an open fire is snuffed; a fire under a roof "
-                    "keeps burning. A soaked body (wetness 50+) cannot "
-                    "warm up until it dries.")
-        if _lines:
-            body_section = (
-                "--- YOUR BODY (the store, speaking at the moment of need) ---\n"
-                + "\n".join("- " + line for line in _lines)
-            )
+            _lines.append(
+                f"Vitals: vitality {vitality}/100, hunger {hunger}/100, warmth {warmth}/100, wetness {wetness}/100 (state: {state}).")
+            _lines.append(
+                f"Environment: {tod}, weather {weather}, temperature {temp}° ({'sheltered' if sheltered else 'exposed'}, {'near fire' if by_fire else 'no fire nearby'}).")
+            _lines.append(
+                "Hunger & Food: Hunger rises 1.4 every heartbeat. The eat action consumes 1 unit of food from belongings to restore hunger. "
+                "Storing gathered food in containers (built with build, operated via use_object deposit) on your tile maintains shared stockpiles.")
+            _lines.append(
+                "Shelter & Elements: Cold, rain, and storms drain warmth and vitality. Building a structure (object_type containing shelter, cabin, hut, wall, roof, or tent) "
+                "shelters your tile and adjacent tiles, cutting cold drain by more than half, blocking rain wetness, and keeping campfires burning in rain.")
+            if by_fire:
+                _lines.append("You are within 3 tiles of a fire; warmth is actively restored.")
+            elif warmth <= 40:
+                _lines.append("Warning: Warmth is low. Build or stand near a campfire, or enter shelter to slow heat loss.")
+            if hunger >= 60:
+                _lines.append("Warning: Hunger is high. Eat food from belongings before reaching 88 (where vitality begins draining).")
+
+        body_section = (
+            "--- YOUR BODY & ENVIRONMENT (living physical state) ---\n"
+            + "\n".join("- " + line for line in _lines)
+        )
 
     # --- Operator: a human is watching and can write ---
     if context.operator_messages:

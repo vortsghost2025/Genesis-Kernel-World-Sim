@@ -1000,35 +1000,71 @@ function drawWornTrails(g, pn, origin, s) {
   g.restore();
 }
 
-// Day/Night & Atmospheric Shading (Illustrative visual cycle; not canonical simulation clock)
+// Day/Night, Seasons & Weather (Aligned with survival physics epistemic.4/5)
+const WEATHER_TYPES = ["clear", "overcast", "rain", "storm"];
+const WEATHER_TABLE = {
+  spring: [0.55, 0.20, 0.20, 0.05],
+  summer: [0.78, 0.12, 0.08, 0.02],
+  autumn: [0.50, 0.22, 0.21, 0.07],
+  winter: [0.52, 0.20, 0.18, 0.10],
+};
+function getSeason(hb) {
+  const seasons = ["spring", "summer", "autumn", "winter"];
+  const seasonLen = 72 * 12;
+  const idx = Math.floor(hb / seasonLen) % 4;
+  return seasons[idx];
+}
+function getWeatherAt(pair, hb) {
+  let seed = 0;
+  for (let i = 0; i < pair.length; i++) seed = (seed * 131 + pair.charCodeAt(i)) >>> 0;
+  const windowIndex = Math.floor(hb / 36);
+  let x = ((seed * 2654435761) >>> 0 + (windowIndex * 40503) >>> 0) >>> 0;
+  x ^= x >>> 13;
+  x = Math.imul(x, 1274126177) >>> 0;
+  const roll = (((x ^ (x >>> 16)) >>> 0)) / 0x100000000;
+  const probs = WEATHER_TABLE[getSeason(hb)] || [0.6, 0.2, 0.15, 0.05];
+  let acc = 0, wtype = "clear";
+  for (let i = 0; i < WEATHER_TYPES.length; i++) {
+    acc += probs[i];
+    if (roll < acc) { wtype = WEATHER_TYPES[i]; break; }
+  }
+  return wtype;
+}
+
 function getAtmosphericLighting(hb) {
-  // Illustrative visual cycle repeats every 120 heartbeats
-  const phase = (hb % 120) / 120;
+  // Aligned with 72-hb day cycle from survival.py (sunrise 0.25, sunset 0.75)
+  const phase = (hb % 72) / 72;
   let timeName = "Midday ☀️";
   let sunColor = "rgba(255, 255, 230, 0)";
   let ambientDarkness = 0;
   let isNight = false;
 
-  if (phase < 0.20) {
+  if (phase < 0.25) {
+    timeName = "Night 🌙";
+    sunColor = "rgba(20, 35, 75, 0.35)";
+    ambientDarkness = 0.58;
+    isNight = true;
+  } else if (phase < 0.35) {
+    const pDawn = (phase - 0.25) / 0.10;
     timeName = "Dawn 🌄";
-    sunColor = "rgba(255, 180, 120, 0.12)";
-    ambientDarkness = 0.15 * (1 - phase / 0.20);
+    sunColor = `rgba(255, 180, 120, ${(0.14 * (1 - pDawn)).toFixed(3)})`;
+    ambientDarkness = 0.58 * (1 - pDawn);
   } else if (phase < 0.65) {
-    timeName = "Midday ☀️";
-    sunColor = "rgba(255, 255, 240, 0.05)";
+    timeName = "Day ☀️";
+    sunColor = "rgba(255, 255, 240, 0.04)";
     ambientDarkness = 0;
-  } else if (phase < 0.85) {
-    const pDusk = (phase - 0.65) / 0.20;
+  } else if (phase < 0.75) {
+    const pDusk = (phase - 0.65) / 0.10;
     timeName = "Dusk 🌅";
-    sunColor = `rgba(255, 120, 60, ${0.18 * Math.sin(pDusk * Math.PI)})`;
-    ambientDarkness = pDusk * 0.48;
+    sunColor = `rgba(255, 120, 60, ${(0.22 * Math.sin(pDusk * Math.PI)).toFixed(3)})`;
+    ambientDarkness = pDusk * 0.58;
   } else {
     timeName = "Night 🌙";
     sunColor = "rgba(20, 35, 75, 0.35)";
     ambientDarkness = 0.58;
     isNight = true;
   }
-  return { phase, timeName, sunColor, ambientDarkness, isNight, illustrativeTag: "ILLUSTRATIVE SUN CYCLE" };
+  return { phase, timeName, sunColor, ambientDarkness, isNight, season: getSeason(hb) };
 }
 
 // Procedural Living Audio Ambience (Web Audio API)
@@ -1185,7 +1221,9 @@ const sprites = {
   landmark: new Image(),
   tree_cluster: new Image(),
   boulder_rock: new Image(),
-  berry_bush: new Image()
+  berry_bush: new Image(),
+  shelter_hut: new Image(),
+  storage_cache: new Image()
 };
 for (const [key, img] of Object.entries(sprites)) {
   img._ok = false;
@@ -1499,9 +1537,11 @@ function recomputeScene() {
 
 function objCategory(type) {
   const s = String(type || "").toLowerCase();
+  if (s.includes("shelter") || s.includes("cabin") || s.includes("hut") || s.includes("tent") || s.includes("roof") || s.includes("wall") || s.includes("lean")) return "shelter";
+  if (s.includes("container") || s.includes("storage") || s.includes("chest") || s.includes("cache") || s.includes("pantry") || s.includes("processor")) return "storage";
   if (s.includes("road")) return "road";
   if (s.includes("tower") || s.includes("landmark") || s.includes("monument")) return "landmark";
-  if (s.includes("fire") || s.includes("hearth")) return "fire";
+  if (s.includes("fire") || s.includes("hearth") || s.includes("campfire")) return "fire";
   return "craft";
 }
 
@@ -1929,6 +1969,40 @@ function drawFrame(ts) {
 
         g.drawImage(sprites.landmark, sx - lmW / 2, sy - lmH * 0.75, lmW, lmH);
       }
+    } else if (cat === "shelter") {
+      // Warm Hearth Glow from Shelter
+      const shelterGlow = g.createRadialGradient(sx, sy, 0, sx, sy, s * 2.2);
+      shelterGlow.addColorStop(0, "rgba(255, 170, 50, 0.38)");
+      shelterGlow.addColorStop(0.5, "rgba(255, 120, 20, 0.15)");
+      shelterGlow.addColorStop(1, "rgba(255, 80, 0, 0)");
+      g.fillStyle = shelterGlow;
+      g.beginPath(); g.arc(sx, sy, s * 2.2, 0, Math.PI * 2); g.fill();
+
+      if (sprites.shelter_hut && sprites.shelter_hut._ok) {
+        const hutW = Math.max(42, s * 1.65);
+        const hutH = hutW * (sprites.shelter_hut.height / sprites.shelter_hut.width);
+
+        // Shelter Ground Shadow
+        g.fillStyle = "rgba(0, 8, 16, 0.55)";
+        g.beginPath();
+        g.ellipse(sx, sy + s * 0.2, hutW * 0.48, hutW * 0.22, 0, 0, Math.PI * 2);
+        g.fill();
+
+        g.drawImage(sprites.shelter_hut, sx - hutW / 2, sy - hutH * 0.78, hutW, hutH);
+      }
+    } else if (cat === "storage") {
+      if (sprites.storage_cache && sprites.storage_cache._ok) {
+        const cacheW = Math.max(28, s * 1.1);
+        const cacheH = cacheW * (sprites.storage_cache.height / sprites.storage_cache.width);
+
+        // Cache Ground Shadow
+        g.fillStyle = "rgba(0, 8, 16, 0.46)";
+        g.beginPath();
+        g.ellipse(sx, sy + s * 0.12, cacheW * 0.42, cacheW * 0.18, 0, 0, Math.PI * 2);
+        g.fill();
+
+        g.drawImage(sprites.storage_cache, sx - cacheW / 2, sy - cacheH * 0.72, cacheW, cacheH);
+      }
     }
   }
 
@@ -1983,14 +2057,15 @@ function drawFrame(ts) {
       const c = t.coordinates;
       const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
       const cat = objCategory(o.object_type);
-      if (cat === "fire" || cat === "landmark") {
-        const fireRad = mg.createRadialGradient(sx, sy, 0, sx, sy, s * 3.2);
+      if (cat === "fire" || cat === "landmark" || cat === "shelter") {
+        const radSize = cat === "shelter" ? s * 2.8 : s * 3.2;
+        const fireRad = mg.createRadialGradient(sx, sy, 0, sx, sy, radSize);
         fireRad.addColorStop(0, "rgba(0, 0, 0, 1)");
         fireRad.addColorStop(0.5, "rgba(0, 0, 0, 0.8)");
         fireRad.addColorStop(1, "rgba(0, 0, 0, 0)");
         mg.fillStyle = fireRad;
         mg.beginPath();
-        mg.arc(sx, sy, s * 3.2, 0, Math.PI * 2);
+        mg.arc(sx, sy, radSize, 0, Math.PI * 2);
         mg.fill();
       }
     }
@@ -2013,6 +2088,49 @@ function drawFrame(ts) {
     // Blend the darkness mask over the terrain
     g.save();
     g.drawImage(window._atmoMask, 0, 0, cssW, cssH);
+    g.restore();
+  }
+
+  // Dynamic Atmospheric Weather Overlay (Rain / Storm / Embers / Fireflies)
+  const currentSky = getWeatherAt(selectedPair, currentHb);
+  const weatherHud = document.getElementById("weather-hud");
+  if (weatherHud) {
+    const skyIcons = { clear: "☀️ Clear", overcast: "☁️ Overcast", rain: "🌧️ Rain", storm: "⛈️ Storm" };
+    const seasonNames = { spring: "🌱 Spring", summer: "☀️ Summer", autumn: "🍂 Autumn", winter: "❄️ Winter" };
+    weatherHud.textContent = `${seasonNames[atmo.season] || atmo.season.toUpperCase()} // ${skyIcons[currentSky] || currentSky.toUpperCase()}`;
+  }
+
+  if (currentSky === "rain" || currentSky === "storm") {
+    g.save();
+    g.strokeStyle = currentSky === "storm" ? "rgba(180, 215, 255, 0.40)" : "rgba(160, 200, 240, 0.24)";
+    g.lineWidth = currentSky === "storm" ? 1.4 : 0.9;
+    const dropCount = currentSky === "storm" ? 120 : 65;
+    const dropSpeed = currentSky === "storm" ? 2.4 : 1.5;
+    for (let i = 0; i < dropCount; i++) {
+      const rx = (Math.sin(i * 997 + ts * 0.001) * 0.5 + 0.5) * cssW;
+      const ry = ((i * 53 + ts * dropSpeed) % cssH);
+      g.beginPath();
+      g.moveTo(rx, ry);
+      g.lineTo(rx - 7, ry + 15);
+      g.stroke();
+    }
+    if (currentSky === "storm") {
+      g.fillStyle = "rgba(10, 22, 45, 0.10)";
+      g.fillRect(0, 0, cssW, cssH);
+    }
+    g.restore();
+  } else if (atmo.isNight) {
+    // Drifting Warm Embers near settlements & bioluminescent fireflies
+    g.save();
+    for (let i = 0; i < 16; i++) {
+      const fx = (Math.sin(i * 137 + ts * 0.0005) * 0.5 + 0.5) * cssW;
+      const fy = (Math.cos(i * 269 + ts * 0.0007) * 0.5 + 0.5) * cssH;
+      const pulse = Math.sin(ts * 0.003 + i) * 0.5 + 0.5;
+      g.fillStyle = `rgba(254, 202, 87, ${(pulse * 0.42).toFixed(3)})`;
+      g.beginPath();
+      g.arc(fx, fy, 1.2 + pulse * 1.4, 0, Math.PI * 2);
+      g.fill();
+    }
     g.restore();
   }
 
