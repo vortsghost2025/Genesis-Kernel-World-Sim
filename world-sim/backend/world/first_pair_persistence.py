@@ -130,19 +130,41 @@ class FirstPairPersistenceStore:
         Process-crash durability is guaranteed (a completed write is visible to a
         subsequent open and a torn write leaves only the .tmp file). OS/power-loss
         durability beyond os.replace is NOT claimed (no directory-entry fsync).
+
+        The tmp name is pid-unique (Oct 18 2026): two writers sharing one
+        `memory.tmp` interleaved their writes and produced a file that was
+        valid JSON followed by trailing garbage — "Extra data" — which froze
+        the east pair at the runtime's next startup. A shared tmp name is a
+        shared mutable file; pid-unique tmp names make every replace atomic
+        against every other writer.
         """
-        tmp_path = path.with_suffix(".tmp")
+        tmp_path = path.with_suffix(f".{os.getpid()}.tmp")
         with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+        for attempt in range(6):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.005 * (2 ** attempt))
 
     def _read_json(self, path: Path) -> dict | None:
         if not path.exists():
             return None
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        for attempt in range(6):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (PermissionError, FileNotFoundError):
+                if attempt == 5:
+                    if not path.exists():
+                        return None
+                    raise
+                time.sleep(0.005 * (2 ** attempt))
 
     def _append_jsonl(self, path: Path, record: dict) -> None:
         with open(path, "a", encoding="utf-8", newline="\n") as f:
