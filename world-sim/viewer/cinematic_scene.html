@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440, height=900, initial-scale=1.0">
+<title>Genesis — Cinematic Documentary Re-enactment: The Downed Vital (HB 3946–4014)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-dark: #05080f;
+  --panel-bg: rgba(7, 12, 22, 0.94);
+  --gold-amber: #feca57;
+  --cyan-ice: #70a1ff;
+  --rose-crimson: #ff6b81;
+  --text-main: #f1f5f9;
+  --text-dim: #94a3b8;
+  --accent-downed: #ff4757;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #000;
+  color: var(--text-main);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  overflow: hidden;
+  width: 1440px;
+  height: 900px;
+  user-select: none;
+}
+#stage-container {
+  position: relative;
+  width: 1440px;
+  height: 900px;
+  background: var(--bg-dark);
+}
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  display: block;
+}
+/* Cinematic Letterbox Bars */
+.cinema-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(3, 7, 14, 0.92);
+  backdrop-filter: blur(16px);
+  z-index: 20;
+  pointer-events: none;
+}
+.cinema-bar.top {
+  top: 0;
+  height: 70px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 44px;
+}
+.cinema-bar.bottom {
+  bottom: 0;
+  height: 168px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 0 44px;
+}
+.masthead-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.92rem;
+  letter-spacing: 0.16em;
+  color: #f1f5f9;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.masthead-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  background: rgba(255, 71, 87, 0.18);
+  border: 1px solid rgba(255, 71, 87, 0.45);
+  color: #ff6b81;
+  padding: 3px 10px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.masthead-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.70rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.time-chip {
+  color: var(--gold-amber);
+  font-weight: 600;
+}
+/* High-Contrast Accessible Subtitle Deck */
+#subtitle-deck {
+  max-width: 1320px;
+  width: 100%;
+  text-align: center;
+}
+.deck-pill-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.provenance-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: var(--gold-amber);
+  background: rgba(254, 202, 87, 0.12);
+  border: 1px solid rgba(254, 202, 87, 0.35);
+  padding: 3px 12px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.staging-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 12px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.subtitle-text {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.08rem;
+  line-height: 1.45;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+  margin-bottom: 5px;
+}
+.subtitle-text .speaker {
+  font-family: 'Cinzel', serif;
+  font-weight: 800;
+  color: #ff6b81;
+  letter-spacing: 0.08em;
+}
+.rationale-row {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--cyan-ice);
+  margin-bottom: 4px;
+  letter-spacing: 0.03em;
+}
+.rationale-row strong {
+  color: #60a5fa;
+}
+.state-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.64rem;
+  color: #94a3b8;
+  letter-spacing: 0.03em;
+}
+.state-grid span strong {
+  color: #f1f5f9;
+}
+.state-grid .unknown-note {
+  color: #fbbf24;
+}
+/* On-Screen Watermark / Integrity Tag */
+.integrity-watermark {
+  position: absolute;
+  top: 82px;
+  right: 28px;
+  background: rgba(8, 14, 24, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  z-index: 10;
+  pointer-events: none;
+}
+.integrity-watermark strong {
+  color: #38bdf8;
+}
+</style>
+</head>
+<body>
+
+<div id="stage-container">
+  <canvas id="c" width="1440" height="900"></canvas>
+
+  <!-- Top Letterbox Bar -->
+  <div class="cinema-bar top">
+    <div class="masthead-title">
+      GENESIS // CINEMATIC OBSERVATORY
+      <span class="masthead-tag">DOCUMENTARY RE-ENACTMENT: THE DOWNED VITAL (HB 3946–4014)</span>
+    </div>
+    <div class="masthead-meta">
+      <span>SECTOR: <strong>cont_b_origin_000 (Coast)</strong></span>
+      <span>CIVILIZATION: <strong>West Dawn</strong></span>
+      <span class="time-chip" id="time-tag">HB 3946 // MORNING TWILIGHT 🌅</span>
+    </div>
+  </div>
+
+  <!-- Lower Third Subtitle Bar (High-Contrast, Accessible, Strictly Categorized) -->
+  <div class="cinema-bar bottom">
+    <div id="subtitle-deck">
+      <div class="deck-pill-row">
+        <span class="provenance-pill" id="prov-pill">RECORDED EVENT // UNHEARD OPERATOR QUERY [HB 3946]</span>
+        <span class="staging-pill" id="staging-pill">ILLUSTRATIVE 2.5D SCENIC STAGING</span>
+      </div>
+      <div class="subtitle-text" id="sub-text">
+        <span class="speaker">EVE:</span> “What should I do now that I am downed at cont_b_origin_000 with 18 clay and 2 stone?”
+      </div>
+      <div class="rationale-row" id="rationale-text">
+        <strong>ACTION RATIONALE:</strong> “Need clarification on intended action after being downed; no new operator direction received since heartbeat 3938.”
+      </div>
+      <div class="state-grid">
+        <span id="state-recorded"><strong>RECORDED STATE:</strong> Eve downed at cont_b_origin_000 | Pack: clay ×18, stone ×2 | Adam at cont_b_gen_33_51</span>
+        <span class="unknown-note" id="state-unknown">[UNKNOWN STATE: Numerical vitality/hunger unlogged at this tick]</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="integrity-watermark">
+    <div>● <strong>DOCUMENTARY RE-ENACTMENT</strong> // HB 3946–4014</div>
+    <div>Verbatim Recorded Dialogue & Actions</div>
+    <div>Illustrative 2.5D Staging (Dawn Cove lm_dawn_cove)</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const W = 1440, H = 900;
+
+  // Asset Loading
+  const assets = {
+    eve_collapsed: "eve_collapsed.png",
+    adam_standing: "adam_standing.png",
+    campfire: "campfire.png",
+    tree_cluster: "tree_cluster.png",
+    boulder_rock: "boulder_rock.png",
+    berry_bush: "berry_bush.png",
+    landmark: "landmark.png"
+  };
+
+  const images = {};
+  for (const [k, src] of Object.entries(assets)) {
+    const img = new Image();
+    img.src = src;
+    images[k] = img;
+  }
+
+  // Authentic Documentary Narrative Beats from Canonical Records
+  // Exactly 4 beats within HB 3946–4014; cycle = 18000ms (18 seconds)
+  const BEATS = [
+    {
+      timeRange: [0, 4500],
+      hb: 3946,
+      sunTime: "Morning Twilight 🌅 (ILLUSTRATIVE SUN)",
+      prov: "RECORDED EVENT // UNHEARD OPERATOR QUERY [HB 3946]",
+      staging: "ILLUSTRATIVE 2.5D STAGING: DAWN COVE SHORELINE",
+      speaker: "EVE",
+      text: "“What should I do now that I am downed at cont_b_origin_000 with 18 clay and 2 stone?”",
+      rationale: "“Need clarification on intended action after being downed; no new operator direction received since heartbeat 3938.”",
+      recordedState: "Eve downed at cont_b_origin_000 | Pack: clay ×18, stone ×2 | Adam at cont_b_gen_33_51 | 0 food",
+      unknownState: "[UNKNOWN HISTORICAL STATE: Continuous vitality decay unlogged in ledger]",
+      cam: { x: 720, y: 520, zoom: 1.05 }
+    },
+    {
+      timeRange: [4500, 9000],
+      hb: 3980,
+      sunTime: "Dusk Twilight 🌅 (ILLUSTRATIVE SUN)",
+      prov: "RECORDED EVENT // ASKS LOG & ACTION [HB 3980]",
+      staging: "ILLUSTRATIVE 2.5D STAGING: SETTLEMENT HEARTH",
+      speaker: "EVE",
+      text: "“Please provide wild_berries so I can recover my vitality.”",
+      rationale: "Eve: “I am downed with low vitality and need food to survive.” | Adam: action=eat(wild_berries)",
+      recordedState: "Eve downed at cont_b_origin_000 (0 food on tile) | Adam at cont_b_gen_33_51 eats wild_berries",
+      unknownState: "[UNKNOWN HISTORICAL STATE: Per-tick vitality unlogged; requires >12 vitality to stand]",
+      cam: { x: 580, y: 550, zoom: 1.22 }
+    },
+    {
+      timeRange: [9000, 13500],
+      hb: 4007,
+      sunTime: "Nightfall 🌙 (ILLUSTRATIVE SUN)",
+      prov: "RECORDED EVENT // PHYSICS REJECTION [HB 4007]",
+      staging: "ILLUSTRATIVE 2.5D STAGING: NOCTURNAL SHORELINE",
+      speaker: "KERNEL PHYSICS",
+      text: "“REJECTED: You have collapsed (vitality 0). Your body cannot act. If food is brought to your tile you will eat and recover; otherwise rest.”",
+      rationale: "Eve attempted move to cont_b_origin_001 “to gather wild_berries and recover vitality” (HB 4002 self-report: vitality 9.75, hunger 100)",
+      recordedState: "Engine collapse threshold triggered | Move rejected; Eve remains at cont_b_origin_000 | Adam eats wild_berries",
+      unknownState: "[RECORDED EVENT: Vitality 0 triggered by physics engine collapse]",
+      cam: { x: 560, y: 560, zoom: 1.30 }
+    },
+    {
+      timeRange: [13500, 18000],
+      hb: 4014,
+      sunTime: "Dawn Twilight 🌄 (ILLUSTRATIVE SUN)",
+      prov: "RECORDED EVENT // UNHEARD OPERATOR QUERY [HB 4014]",
+      staging: "ILLUSTRATIVE 2.5D STAGING: DAWN PAN ACROSS SHORE",
+      speaker: "EVE",
+      text: "“Can you provide wild_berries or feed me while I am downed at cont_b_origin_000?”",
+      rationale: "Eve: “I am downed with 0 wild_berries and need food to restore vitality.” | Adam: action=eat(wild_berries)",
+      recordedState: "Eve asks for remote feed/delivery | Adam eating wild_berries on bluff (cont_b_gen_33_51)",
+      unknownState: "[CONFIRMED POSITION: Eve at cont_b_origin_000; exporter bug corrected — HB 4007 rejection leaves position unchanged]",
+      cam: { x: 640, y: 530, zoom: 1.15 }
+    }
+  ];
+
+  const startTime = performance.now();
+  let currentCam = { x: 720, y: 520, zoom: 1.05 };
+
+  // Ember particles rising from hearth
+  const embers = [];
+  for (let i = 0; i < 45; i++) {
+    embers.push({
+      x: 840 + (Math.random() - 0.5) * 50,
+      y: 600 + Math.random() * 40,
+      vx: (Math.random() - 0.5) * 0.8 - 0.2,
+      vy: -0.8 - Math.random() * 1.5,
+      size: 1.5 + Math.random() * 2,
+      birth: performance.now() - Math.random() * 2000,
+      life: 1400 + Math.random() * 1400
+    });
+  }
+
+  function render(ts) {
+    const elapsed = (ts - startTime) % 18000;
+
+    let activeBeat = BEATS[0];
+    for (const b of BEATS) {
+      if (elapsed >= b.timeRange[0] && elapsed < b.timeRange[1]) {
+        activeBeat = b;
+        break;
+      }
+    }
+
+    // Update Subtitles and Telemetry Deck
+    const provEl = document.getElementById("prov-pill");
+    const stagingEl = document.getElementById("staging-pill");
+    const subEl = document.getElementById("sub-text");
+    const ratEl = document.getElementById("rationale-text");
+    const recEl = document.getElementById("state-recorded");
+    const unkEl = document.getElementById("state-unknown");
+    const timeEl = document.getElementById("time-tag");
+
+    provEl.textContent = activeBeat.prov;
+    stagingEl.textContent = activeBeat.staging;
+    subEl.innerHTML = `<span class="speaker">${activeBeat.speaker}:</span> ${activeBeat.text}`;
+    ratEl.innerHTML = `<strong>ACTION RATIONALE:</strong> ${activeBeat.rationale}`;
+    recEl.innerHTML = `<strong>RECORDED STATE:</strong> ${activeBeat.recordedState}`;
+    unkEl.textContent = activeBeat.unknownState;
+    timeEl.textContent = `HB ${activeBeat.hb} // ${activeBeat.sunTime}`;
+
+    // Smooth Camera Interpolation
+    currentCam.x += (activeBeat.cam.x - currentCam.x) * 0.04;
+    currentCam.y += (activeBeat.cam.y - currentCam.y) * 0.04;
+    currentCam.zoom += (activeBeat.cam.zoom - currentCam.zoom) * 0.04;
+
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.save();
+    // Center camera on current focus point
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(currentCam.zoom, currentCam.zoom);
+    ctx.translate(-currentCam.x, -currentCam.y);
+
+    // 1. SKY & DISTANT HORIZON (Atmospheric Dawn/Dusk Marine Lighting)
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, 500);
+    skyGrad.addColorStop(0, "#08101d");
+    skyGrad.addColorStop(0.45, "#14253d");
+    skyGrad.addColorStop(0.75, "#2a3d52");
+    skyGrad.addColorStop(1, "#4f5556");
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(-200, -200, 1840, 750);
+
+    // Distant mountain ridges across the ocean bay
+    ctx.fillStyle = "#182638";
+    ctx.beginPath();
+    ctx.moveTo(-100, 360);
+    ctx.lineTo(150, 290);
+    ctx.lineTo(400, 340);
+    ctx.lineTo(650, 270);
+    ctx.lineTo(950, 330);
+    ctx.lineTo(1300, 280);
+    ctx.lineTo(1600, 350);
+    ctx.lineTo(1600, 500);
+    ctx.lineTo(-100, 500);
+    ctx.closePath();
+    ctx.fill();
+
+    // 2. OCEAN WATER & SURF (Multi-plane animated waves)
+    const seaGrad = ctx.createLinearGradient(0, 340, 0, 650);
+    seaGrad.addColorStop(0, "rgba(18, 48, 76, 0.95)");
+    seaGrad.addColorStop(0.4, "rgba(24, 68, 102, 0.92)");
+    seaGrad.addColorStop(1, "rgba(35, 95, 136, 0.88)");
+    ctx.fillStyle = seaGrad;
+    ctx.fillRect(-200, 340, 1840, 320);
+
+    // Dynamic wave caustics along the shoreline
+    for (let i = 0; i < 4; i++) {
+      const wavePhase = ts * 0.0018 + i * 1.6;
+      const waveY = 490 + i * 26 + Math.sin(wavePhase) * 6;
+      ctx.fillStyle = `rgba(180, 220, 240, ${0.12 - i * 0.025})`;
+      ctx.beginPath();
+      ctx.moveTo(-100, waveY);
+      for (let x = -100; x <= 1600; x += 60) {
+        const dy = Math.sin(x * 0.015 + wavePhase * 2) * 5;
+        ctx.lineTo(x, waveY + dy);
+      }
+      ctx.lineTo(1600, waveY + 18);
+      ctx.lineTo(-100, waveY + 18);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 3. TERRAIN LANDFORMS (Shoreline Sand Spit & Overlooking Coastal Bluff)
+    // Coastal Bluff Cliff (Elevated Ridge where Adam watches)
+    ctx.fillStyle = "#2c3e2f";
+    ctx.beginPath();
+    ctx.moveTo(700, 590);
+    ctx.bezierCurveTo(850, 520, 1100, 470, 1600, 460);
+    ctx.lineTo(1600, 950);
+    ctx.lineTo(700, 950);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rocky cliff strata bands
+    ctx.fillStyle = "#3d352c";
+    ctx.beginPath();
+    ctx.moveTo(700, 590);
+    ctx.bezierCurveTo(860, 530, 1050, 495, 1600, 485);
+    ctx.lineTo(1600, 520);
+    ctx.bezierCurveTo(1050, 530, 860, 570, 700, 630);
+    ctx.closePath();
+    ctx.fill();
+
+    // Sandy Shoreline Spit (Where Eve collapsed)
+    ctx.fillStyle = "#a89060";
+    ctx.beginPath();
+    ctx.moveTo(-100, 600);
+    ctx.bezierCurveTo(300, 580, 500, 620, 800, 580);
+    ctx.bezierCurveTo(1050, 550, 1300, 490, 1600, 480);
+    ctx.lineTo(1600, 950);
+    ctx.lineTo(-100, 950);
+    ctx.closePath();
+    ctx.fill();
+
+    // Sandy Shoreline Wet Sand Fringe
+    ctx.fillStyle = "rgba(194, 178, 128, 0.52)";
+    ctx.beginPath();
+    ctx.moveTo(-100, 602);
+    ctx.bezierCurveTo(280, 585, 480, 624, 760, 588);
+    ctx.lineTo(760, 615);
+    ctx.bezierCurveTo(480, 645, 280, 610, -100, 620);
+    ctx.closePath();
+    ctx.fill();
+
+    // Desire path from shoreline to upper hearth
+    ctx.strokeStyle = "rgba(68, 48, 30, 0.62)";
+    ctx.lineWidth = 28;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(560, 615);
+    ctx.quadraticCurveTo(720, 610, 840, 595);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(138, 106, 74, 0.75)";
+    ctx.lineWidth = 14;
+    ctx.stroke();
+
+    // 4. SCENERY ASSETS (Visual Depth: Trees, Granite Boulders, Berry Shrub)
+    // Ridge Oak & Pine Groves
+    if (images.tree_cluster && images.tree_cluster.complete) {
+      ctx.drawImage(images.tree_cluster, 920, 340, 260, 260);
+      ctx.drawImage(images.tree_cluster, 1120, 310, 290, 290);
+      ctx.drawImage(images.tree_cluster, 220, 420, 210, 210);
+    }
+
+    // Weathered Granite Boulders
+    if (images.boulder_rock && images.boulder_rock.complete) {
+      ctx.drawImage(images.boulder_rock, 310, 570, 130, 130);
+      ctx.drawImage(images.boulder_rock, 740, 545, 110, 110);
+      ctx.drawImage(images.boulder_rock, 1020, 490, 160, 160);
+    }
+
+    // Wild Berry Bushes
+    if (images.berry_bush && images.berry_bush.complete) {
+      ctx.drawImage(images.berry_bush, 460, 590, 110, 110);
+      ctx.drawImage(images.berry_bush, 890, 540, 120, 120);
+      ctx.drawImage(images.berry_bush, 1240, 480, 140, 140);
+    }
+
+    // Settlement Center: Hearth Campfire
+    const fireX = 840, fireY = 575;
+    const flicker = 1 + Math.sin(ts / 120) * 0.08;
+    const fireGlow = ctx.createRadialGradient(fireX, fireY + 20, 10, fireX, fireY + 20, 190 * flicker);
+    fireGlow.addColorStop(0, "rgba(255, 140, 20, 0.48)");
+    fireGlow.addColorStop(0.5, "rgba(255, 70, 10, 0.16)");
+    fireGlow.addColorStop(1, "rgba(255, 40, 0, 0)");
+    ctx.fillStyle = fireGlow;
+    ctx.beginPath();
+    ctx.arc(fireX, fireY + 20, 190 * flicker, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (images.campfire && images.campfire.complete) {
+      const cw = 110 * flicker;
+      const ch = cw * (images.campfire.height / images.campfire.width);
+      ctx.drawImage(images.campfire, fireX - cw / 2, fireY - ch * 0.65, cw, ch);
+    }
+
+    // Rising Hearth Embers
+    for (const p of embers) {
+      const age = ts - p.birth;
+      if (age > p.life) {
+        p.birth = ts;
+        p.x = fireX + (Math.random() - 0.5) * 40;
+        p.y = fireY + 15;
+      }
+      const prog = age / p.life;
+      ctx.fillStyle = `rgba(254, 202, 87, ${1 - prog})`;
+      ctx.beginPath();
+      ctx.arc(p.x + p.vx * (age / 30), p.y + p.vy * (age / 30), p.size * (1 - prog * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 5. CHARACTERS (Prominent, Detailed, Recognizable)
+    // A. EVE: Collapsed Prone on Shoreline Sand (Focal Subject)
+    const eveX = 560, eveY = 620;
+    // Contact Shadow
+    ctx.fillStyle = "rgba(0, 5, 14, 0.55)";
+    ctx.beginPath();
+    ctx.ellipse(eveX, eveY + 45, 140, 36, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Subtle distress beacon wave
+    const pulseT = (ts % 2000) / 2000;
+    ctx.strokeStyle = `rgba(255, 71, 87, ${(1 - pulseT) * 0.55})`;
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    ctx.ellipse(eveX, eveY + 45, 90 + pulseT * 90, (90 + pulseT * 90) * 0.28, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Large Eve Prone Sprite (340px width, fine facial and cloth detail)
+    if (images.eve_collapsed && images.eve_collapsed.complete) {
+      const breath = Math.sin(ts / 900) * 3;
+      const ew = 340;
+      const eh = ew * (images.eve_collapsed.height / images.eve_collapsed.width);
+      ctx.drawImage(images.eve_collapsed, eveX - ew / 2, eveY - eh * 0.45 + breath, ew, eh);
+    }
+
+    // B. ADAM: Standing on the Overlooking Bluff
+    const adamX = 1040, adamY = 510;
+    // Contact Shadow
+    ctx.fillStyle = "rgba(0, 5, 14, 0.5)";
+    ctx.beginPath();
+    ctx.ellipse(adamX, adamY + 68, 48, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Large Adam Standing Sprite (240px height)
+    if (images.adam_standing && images.adam_standing.complete) {
+      const stride = Math.sin(ts / 700) * 1.5;
+      const ah = 240;
+      const aw = ah * (images.adam_standing.width / images.adam_standing.height);
+      ctx.drawImage(images.adam_standing, adamX - aw / 2, adamY - ah + 70 + stride, aw, ah);
+    }
+
+    // 6. FOREGROUND DEPTH LAYER (Framing silhouette branches)
+    ctx.save();
+    ctx.fillStyle = "rgba(3, 8, 14, 0.68)";
+    ctx.beginPath();
+    ctx.moveTo(-50, -50);
+    ctx.bezierCurveTo(120, 20, 240, 110, 310, 80);
+    ctx.bezierCurveTo(240, 160, 120, 140, -50, 180);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+
+  // In-Browser Recording Helper for 18-second video playback
+  window._startVideoRecording = function(durationMs = 18000) {
+    return new Promise((resolve, reject) => {
+      try {
+        const stream = canvas.captureStream(30);
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+        const chunks = [];
+        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        };
+        recorder.start();
+        console.log("Started in-browser canvas recording for", durationMs, "ms...");
+        setTimeout(() => recorder.stop(), durationMs);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
+})();
+</script>
+</body>
+</html>
