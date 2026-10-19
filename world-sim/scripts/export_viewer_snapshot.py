@@ -473,6 +473,8 @@ def main() -> int:
     ap.add_argument("--out", default=str(OUT_FILE))
     ap.add_argument("--slim", action="store_true",
                     help="web payload: only tiles any agent has touched/known")
+    ap.add_argument("--sync-vps", action="store_true",
+                    help="sync viewer_data.js to Hostinger VPS after export")
     args = ap.parse_args()
     out_path = Path(args.out)
 
@@ -558,6 +560,12 @@ def main() -> int:
                    len(v["public_messages"])) for k, v in pairs.items()}
     print(f"VIEWER-SNAPSHOT=OK slim={args.slim} pairs={list(pairs)} "
           f"details={summary} -> {out_path} ({len(payload)/1e6:.1f} MB)")
+    if args.sync_vps:
+        try:
+            from scripts.sync_viewer_to_vps import sync_file
+            sync_file(out_path)
+        except Exception as e:
+            print(f"VPS-SYNC-ERROR: {e}")
     return 0
 
 
