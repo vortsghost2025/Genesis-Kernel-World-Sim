@@ -78,16 +78,20 @@ def ambient_temperature(heartbeat_number: int) -> float:
 
 
 # --- hunger ----------------------------------------------------------------
-HUNGER_RATE = 1.4          # rise per heartbeat (slack invariant: ~70 hb)
+HUNGER_RATE = 0.6          # rise per heartbeat (human scale: ~147 hb / 2+ days before weakening)
 HUNGER_CAP = 100.0
 HUNGER_WEAKEN = 88.0       # at/above this: weakening (vitality drains)
-EAT_SATISFACTION = {       # raw food: hunger points satisfied
-    "wild_berries": 18.0,
-    "mushrooms": 14.0,
-    "edible_roots": 22.0,
-    "fish": 26.0,
-    "shellfish": 20.0,
-    "cooked_meal": 55.0,   # exists only through fire (phase 2 craft)
+EAT_SATISFACTION = {       # raw food: hunger points satisfied (human scale meals)
+    "wild_berries": 28.0,
+    "mushrooms": 22.0,
+    "edible_roots": 34.0,
+    "wild_apples": 36.0,
+    "nuts": 25.0,
+    "honeycomb": 32.0,
+    "wild_grain": 22.0,
+    "fish": 40.0,
+    "shellfish": 30.0,
+    "cooked_meal": 75.0,   # fire-cooked hearty meal (lasts nearly two full days)
 }
 COOKED_MULTIPLIER = 2.5    # any raw food cooked satisfies this much more
 
