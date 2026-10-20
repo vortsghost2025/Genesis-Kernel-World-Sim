@@ -217,7 +217,7 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     network calls and never prints credential values."""
     code = (
         "import sys; sys.path.insert(0, '.'); "
-        "from backend.world.first_pair_cognition_model import ("
+        "from backend.world.provider_resolver import ("
         "resolve_provider, resolve_fallback_provider); "
         "c = resolve_provider(); f = resolve_fallback_provider(c); "
         "print('RESOLUTION_PROVIDER=' + c.provider_type); "

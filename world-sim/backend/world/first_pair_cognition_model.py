@@ -408,143 +408,16 @@ _VALID_ACTIONS = frozenset({
 
 
 # ---------------------------------------------------------------------------
-# Provider configuration
+# Provider configuration (delegated to lightweight stdlib provider_resolver)
 # ---------------------------------------------------------------------------
 
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    provider_type: str
-    base_url: str
-    model: str
-    api_key: str | None = None
-
-
-class ProviderError(Exception):
-    pass
-
-
-def _check_url(url: str) -> str:
-    url = url.strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise ProviderError(f"URL must start with http:// or https://: {url[:40]}")
-    # Strip /v1 or /v1/ to avoid doubling
-    url = re.sub(r"/v1/?$", "", url)
-    return url + "/v1"
-
-
-def resolve_provider() -> ProviderConfig:
-    """Resolve model provider from environment. Never silently selects Ollama."""
-    base = os.environ.get("GENESIS_FIRST_PAIR_BASE_URL", "").strip()
-    key = os.environ.get("GENESIS_FIRST_PAIR_API_KEY", "").strip()
-    model = os.environ.get("GENESIS_FIRST_PAIR_MODEL", "").strip()
-    nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
-    or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    ollama_host = os.environ.get("OLLAMA_HOST", "").strip()
-
-    # --- Explicit base URL ---
-    if base:
-        if not model:
-            raise ProviderError(
-                "GENESIS_FIRST_PAIR_BASE_URL is set but GENESIS_FIRST_PAIR_MODEL is not set"
-            )
-        # localhost / 127.0.0.1 / [::1] may omit the API key
-        url_lower = base.lower()
-        is_local = any(h in url_lower for h in ("localhost", "127.0.0.1", "[::1]", "::1"))
-        if not is_local and not key:
-            raise ProviderError(
-                "Remote GENESIS_FIRST_PAIR_BASE_URL requires GENESIS_FIRST_PAIR_API_KEY"
-            )
-        url = _check_url(base)
-        return ProviderConfig("explicit_url", url, model, key or None)
-
-    # --- NVIDIA ---
-    if nv_key:
-        if not model:
-            raise ProviderError(
-                "NVIDIA_API_KEY is set but GENESIS_FIRST_PAIR_MODEL is not set"
-            )
-        url = "https://integrate.api.nvidia.com/v1"
-        return ProviderConfig("nvidia", url, model, nv_key)
-
-    # --- OpenRouter ---
-    if or_key:
-        if not model:
-            raise ProviderError(
-                "OPENROUTER_API_KEY is set but GENESIS_FIRST_PAIR_MODEL is not set"
-            )
-        url = "https://openrouter.ai/api/v1"
-        return ProviderConfig("openrouter", url, model, or_key)
-
-    # --- Ollama ---
-    if ollama_host:
-        if not model:
-            raise ProviderError(
-                "OLLAMA_HOST is set but GENESIS_FIRST_PAIR_MODEL is not set"
-            )
-        url = _check_url(ollama_host)
-        return ProviderConfig("ollama", url, model, None)
-
-    # --- No provider ---
-    raise ProviderError(
-        "No usable provider configuration. Set one of: "
-        "GENESIS_FIRST_PAIR_BASE_URL (+ GENESIS_FIRST_PAIR_MODEL, "
-        "+ GENESIS_FIRST_PAIR_API_KEY for remote), "
-        "NVIDIA_API_KEY (+ GENESIS_FIRST_PAIR_MODEL), "
-        "OPENROUTER_API_KEY (+ GENESIS_FIRST_PAIR_MODEL), "
-        "OLLAMA_HOST (+ GENESIS_FIRST_PAIR_MODEL)"
-    )
-
-
-def resolve_fallback_provider(primary: ProviderConfig) -> ProviderConfig | None:
-    """Resolve an optional single fallback lane for graceful degradation.
-
-    Reads ``GENESIS_FIRST_PAIR_FALLBACK_MODEL``. A ``:free`` model id is
-    OpenRouter convention and rides the OpenRouter lane whenever an
-    OpenRouter credential exists (10JH: it is invalid on NVIDIA direct,
-    where it 404s); without one there is no viable lane and this
-    returns ``None``. A non-``:free`` id keeps the legacy lanes: the
-    other credentialled provider, NVIDIA first. An NVIDIA primary still
-    falls back to OpenRouter (``OPENROUTER_API_KEY``).
-
-    FREE-ONLY GUARD: an OpenRouter fallback model must be explicitly free
-    (model id ending in ``:free``). A paid OpenRouter fallback fails closed
-    here with ``ProviderError`` — it is never silently accepted. The NVIDIA
-    fallback lane carries no such guard.
-
-    Returns ``None`` when no fallback model is set or no second-lane
-    credential exists. Credentials are never logged or persisted.
-    """
-    model = os.environ.get("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "").strip()
-    if not model:
-        return None
-    nv_key = os.environ.get("NVIDIA_API_KEY", "").strip()
-    or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    # 10JH: a `:free` id is OpenRouter convention and is invalid on the
-    # NVIDIA direct lane (measured Oct-02: fallback 404s under an
-    # `explicit_url` primary). Route `:free` ids to OpenRouter whenever
-    # credentialled; without an OpenRouter credential there is no viable
-    # lane, so resolve to None rather than offering a lane that 404s.
-    if model.endswith(":free"):
-        if not or_key:
-            return None
-        return ProviderConfig(
-            "openrouter", "https://openrouter.ai/api/v1", model, or_key
-        )
-    if primary.provider_type != "nvidia" and nv_key:
-        return ProviderConfig(
-            "nvidia", "https://integrate.api.nvidia.com/v1", model, nv_key
-        )
-    if primary.provider_type != "openrouter" and or_key:
-        if not model.endswith(":free"):
-            raise ProviderError(
-                "OpenRouter fallback model must end with ':free' "
-                "(free-only fallback policy): " + model[:60]
-            )
-        return ProviderConfig(
-            "openrouter", "https://openrouter.ai/api/v1", model, or_key
-        )
-    return None
+from backend.world.provider_resolver import (
+    ProviderConfig,
+    ProviderError,
+    _check_url,
+    resolve_provider,
+    resolve_fallback_provider,
+)
 
 
 # ---------------------------------------------------------------------------
