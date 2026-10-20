@@ -20,7 +20,7 @@ from backend.world.first_pair_cognition_model import (  # noqa: E402
 )
 
 
-def _ctx(observation):
+def _ctx(observation, inventory=None):
     """A minimal context carrying just the observation the prompt reads."""
     from backend.world.first_pair_cognition_model import AgentContext
     return AgentContext(
@@ -41,12 +41,13 @@ def _ctx(observation):
         other_agent_id="b" * 64,
         other_agent_name="Eve",
         other_agent_ref="east_eve",
+        inventory=inventory or {},
     )
 
 
-def _prompt_for(vitals, env=None):
+def _prompt_for(vitals, env=None, inventory=None):
     obs = {"self_body": vitals, "environment": env or {}}
-    return build_system_prompt(_ctx(obs))
+    return build_system_prompt(_ctx(obs, inventory=inventory))
 
 
 def _well():
@@ -78,6 +79,17 @@ class TestStarvingFacts:
         assert "Your hunger is 95/100" in prompt
         assert "vitality drains" in prompt
         assert "eat action" in prompt
+
+    def test_hunger_lists_held_edible_foods(self):
+        v = dict(_well(), hunger=87.0)
+        inv = {"wild_berries": 50, "edible_roots": 32, "stone": 200}
+        prompt = _prompt_for(v, inventory=inv)
+        assert "Your hunger is 87/100" in prompt
+        assert "vitality drains" in prompt
+        assert "edible food in your belongings" in prompt
+        assert "wild_berries (x50)" in prompt
+        assert "edible_roots (x32)" in prompt
+        assert "stone" not in prompt.split("carrying edible food")[1].split(".")[0]
 
     def test_mild_hunger_is_quiet(self):
         """The body does not nag below 60 — a well-fed body says

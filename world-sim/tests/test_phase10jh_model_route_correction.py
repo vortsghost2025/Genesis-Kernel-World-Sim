@@ -29,11 +29,10 @@ from backend.world.first_pair_cognition_interface import (  # noqa: E402
     AgentContext,
 )
 
-# Model era 4c (Oct 19, 2026): nemotron nano omni hit upstream worker exhaustion
-# (ResourceExhausted: Worker local total request limit reached 16/16).
-# nvidia/nemotron-3-super-120b-a12b:free is live, healthy, and contract-valid.
-BOTH_VALID_ROUTE = "nvidia/nemotron-3-super-120b-a12b:free"
-DIVERSE_FALLBACK_ROUTE = "nvidia/nemotron-3-super-120b-a12b:free"
+# Model era 4d (Oct 20, 2026): OpenRouter returned 404 on the 120b model.
+# nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free is online (0.25s), healthy, and contract-valid.
+BOTH_VALID_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+DIVERSE_FALLBACK_ROUTE = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 _FALLBACK_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",

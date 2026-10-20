@@ -1362,17 +1362,43 @@ def build_system_prompt(context: AgentContext) -> str:
                 "you while you are down. Vitality recovers slowly on its "
                 "own, and faster when fed.")
         else:
-            if (_sb.get("hunger", 0) or 0) >= 60:
+            hunger_val = _sb.get("hunger", 0) or 0
+            if hunger_val >= 60:
+                hunger_int = round(hunger_val)
+                vitality_drain_note = (
+                    " Your vitality drains while hunger stays at 88 or higher, and at 0 vitality you collapse."
+                )
                 _lines.append(
-                    f"Your hunger is {round(_sb.get('hunger', 0))}/100."
-                    + (" Your vitality drains while hunger stays at 88 or "
-                       "higher, and at 0 vitality you collapse."
-                       if (_sb.get("hunger", 0) or 0) >= 88 else ""))
+                    f"Your hunger is {hunger_int}/100.{vitality_drain_note}"
+                )
+
+                # Check belongings for edible foods and state them as grounded facts
+                inventory = context.inventory if isinstance(context.inventory, dict) else {}
+                edible_held = [
+                    f"{k} (x{v})"
+                    for k, v in sorted(inventory.items())
+                    if k in (
+                        "wild_berries", "mushrooms", "edible_roots",
+                        "wild_apples", "nuts", "honeycomb", "wild_grain",
+                        "fish", "shellfish", "cooked_meal"
+                    ) and isinstance(v, int) and v > 0
+                ]
+                if edible_held:
+                    _lines.append(
+                        f"Fact: you are carrying edible food in your belongings: {', '.join(edible_held)}. "
+                        'The eat action consumes one unit of a named food from your belongings (e.g. {"action_type": "eat", "resource_kind": "<food_name>"}).'
+                    )
+                else:
+                    _lines.append(
+                        "Fact: the eat action consumes one unit of a named food from your belongings. "
+                        "You currently hold no food in your belongings."
+                    )
+
                 _lines.append(
-                    "Fact: the eat action consumes one unit of a named "
-                    "food from your belongings. Each food satisfies a "
-                    "different amount; a hearty meal tides you over for roughly "
-                    "a day or more. Storing food in containers protects your supply.")
+                    "Fact: each food satisfies hunger (wild_apples: 36, edible_roots: 34, honeycomb: 32, "
+                    "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22, fish: 40, cooked_meal: 75). "
+                    "Storing food in containers protects your supply."
+                )
             if (_sb.get("warmth", 100) or 100) <= 40:
                 _lines.append(
                     f"Your warmth is {round(_sb.get('warmth', 0))}/100."

@@ -73,17 +73,13 @@ CREATE_NO_WINDOW = 0x08000000
 # validate_model_output with a real proposed action
 # (.scratch/contract_probe.json). A 200 is not evidence; a validated
 # action is. Re-verify with that same probe before trusting either.
-# MODEL ERA 4b (2026-10-17). The overnight logs showed 65+ failed chain
-# restarts with "provider resolution proof rejected (no paid fallback
-# permitted)". The dots-studio fallback was 429-rate-limited all night,
-# and the runner's proof check treated the dead fallback as invalid,
-# rejecting the entire configuration even though the primary (nano)
-# was alive. Setting fallback to the same nano model: it's the only
-# route answering right now, and a dead fallback is worse than none.
-PRIMARY_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-FALLBACK_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-ADAM_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-EVE_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+# MODEL ERA 4d (2026-10-20). OpenRouter returned HTTP 404 on the
+# 120b model upstream backend. Switching back to the fast, responsive
+# nemotron-3-nano-omni-30b-a3b-reasoning:free which is live (0.25s response).
+PRIMARY_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+FALLBACK_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+ADAM_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+EVE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 # Single source of truth for the lane endpoint. build_clean_env() writes this
 # and resolution_proof() asserts the resolver honored it, so the configured
