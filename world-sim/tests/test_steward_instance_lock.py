@@ -24,6 +24,21 @@ WORLD_SIM = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORLD_SIM / "scripts"))
 
 import world_steward as ws  # noqa: E402
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_steward_lock_to_tmp(tmp_path, monkeypatch):
+    """Hermetic isolation: redirect all steward lock and counter state
+    to tmp_path so tests never touch the live .scratch/lockstep runtime state."""
+    test_lock_dir = tmp_path / "lockstep"
+    test_lock_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(ws, "LOCK_DIR", test_lock_dir)
+    monkeypatch.setattr(ws, "STEWARD_LOCK", test_lock_dir / "world_steward.lock")
+    if hasattr(ws, "FIRE_COUNTER"):
+        monkeypatch.setattr(ws, "FIRE_COUNTER", test_lock_dir / "steward_fires.json")
+    yield test_lock_dir
+
 
 
 def _fresh_lock(pid: int) -> None:

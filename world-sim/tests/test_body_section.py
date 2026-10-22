@@ -107,3 +107,49 @@ class TestStarvingFacts:
     def test_well_body_is_silent(self):
         prompt = _prompt_for(_well())
         assert "YOUR BODY" not in prompt
+
+
+class TestElementsAndPrimitiveSurvival:
+    def test_night_environment_triggers_element_awareness(self):
+        env = {
+            "time_of_day": "night",
+            "season": "autumn",
+            "temperature": 38.5,
+            "weather": "clear",
+            "by_fire": False,
+            "sheltered": False,
+        }
+        prompt = _prompt_for(_well(), env=env)
+        assert "Night has fallen" in prompt
+        assert "ambient temperature 38.5" in prompt
+        assert "exposed to the open sky without fire or shelter" in prompt
+        assert "Facts of the elements" in prompt
+        assert "A lit campfire or hearth within three tiles restores warmth" in prompt
+        assert "cave shelter" in prompt
+        assert "Storing gathered provisions into containers" in prompt
+
+    def test_sheltered_by_fire_states_protection(self):
+        env = {
+            "time_of_day": "night",
+            "season": "winter",
+            "temperature": 18.0,
+            "weather": "clear",
+            "by_fire": True,
+            "sheltered": True,
+        }
+        prompt = _prompt_for(_well(), env=env)
+        assert "resting near shelter" in prompt
+        assert "Winter nights drop warmth toward cold levels" in prompt
+
+    def test_rain_triggers_campfire_warning(self):
+        env = {
+            "time_of_day": "day",
+            "season": "spring",
+            "temperature": 55.0,
+            "weather": "rain",
+            "by_fire": False,
+            "sheltered": False,
+        }
+        prompt = _prompt_for(_well(), env=env)
+        assert "Weather is rain" in prompt
+        assert "Open campfires are snuffed by rain unless protected under shelter" in prompt

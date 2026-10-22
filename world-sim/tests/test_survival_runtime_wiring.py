@@ -107,6 +107,14 @@ class TestFireAndShelterDetection:
         assert rt._in_shelter("cont_a_gen_0_0") is True
         assert rt._in_shelter("cont_a_gen_5_5") is False
 
+    def test_cave_and_overhang_shelter_detected(self):
+        rt = _runtime_stub()
+        rt._world_state.public_objects = {
+            "o1": {"tile_id": "cont_a_gen_1_0", "object_type": "rock_cave_shelter"},
+        }
+        assert rt._in_shelter("cont_a_gen_0_0") is True
+        assert rt._in_shelter("cont_a_gen_1_0") is True
+
     def test_nonfire_heat_sources_do_not_count(self):
         rt = _runtime_stub()
         rt._world_state.public_objects = {

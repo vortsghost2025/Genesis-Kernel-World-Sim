@@ -205,29 +205,18 @@ def chain_alive() -> dict[str, bool]:
 
 
 def interpreter_can_import_cognition() -> tuple[bool, str]:
-    """Can THIS python import the cognition model? The scheduled task's
-    PATH `python` may resolve to an interpreter without the project's
-    dependencies (measured Oct 19: 3.14 without openai), in which case
-    every spawned chain dies in the resolution proof before its first
-    model call. Detect that here, name it plainly."""
-    code = ("import sys; sys.path.insert(0, '.'); "
-            "import backend.world.first_pair_cognition_model")
+    """Lightweight check: does THIS interpreter have the required dependencies?
+
+    Oct 19: Windows PATH resolved python to an unconfigured 3.14 without
+    openai, killing every spawned chain before its first model call.
+    Verifying import openai is fast (<5ms), lightweight, and avoids loading
+    the full simulation model into the steward process.
+    """
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=str(WORLD_SIM),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            creationflags=CREATE_NO_WINDOW,
-        )
+        import openai  # noqa: F401
+        return True, "ok"
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()
-        reason = tail[-1] if tail else f"exit {proc.returncode}"
-        return False, f"{sys.executable}: {reason}"
-    return True, "ok"
 
 
 def start_chain(pair: str, start: int, end: int) -> int | None:
@@ -377,16 +366,28 @@ def build_narrative_summary(pair: str, since_hb: int) -> dict:
                 if text:
                     quotes.append(f"{name} said: {text}")
                 did.setdefault(name, []).append("sent a message")
-            elif at == "ask_human":
-                q = str(a.get("question", ""))[:160]
-                if q:
-                    question = f"{name} is asking: {q}"
             elif at == "use_object":
                 op = a.get("operation", "")
-                target = a.get("target_object_id", "")
                 did.setdefault(name, []).append(f"used an object ({op})")
             elif at == "revise_charter":
                 did.setdefault(name, []).append("revised their charter")
+    # An active question is one that is currently unheard in agent_questions.json.
+    # An answered question is never reported as an active ask.
+    unanswered_q = None
+    q_file = store / "agent_questions.json"
+    if q_file.is_file():
+        try:
+            q_data = _read_json(q_file)
+            for rec in q_data.get("data", []):
+                if isinstance(rec, dict) and rec.get("status") == "unheard":
+                    asker = rec.get("agent_ref", "")
+                    asker_name = asker.split("_")[1] if "_" in asker else (asker or "Someone")
+                    q_text = str(rec.get("question", "")).strip()[:140]
+                    if q_text:
+                        unanswered_q = f"{asker_name} is asking: {q_text}"
+                        break
+        except Exception:
+            pass
 
     # Build the summary sentence
     parts = []
@@ -399,7 +400,7 @@ def build_narrative_summary(pair: str, since_hb: int) -> dict:
     return {
         "summary": summary,
         "quote": quotes[-1] if quotes else None,
-        "question": question,
+        "question": unanswered_q,
     }
 
 
@@ -456,12 +457,17 @@ def poll_once(digest: bool = False) -> dict:
 
     result = {"at_utc": _utc_now(), "actions": all_actions}
 
+    if all_actions:
+        try:
+            log_line = f"{_utc_now()} {'; '.join(all_actions)}\n"
+            (LOCK_DIR / "steward_actions.log").open("a", encoding="utf-8").write(log_line)
+        except Exception:
+            pass
+
     if digest:
         east_data = build_narrative_summary("east", _read_tick(STORES["east"]) - 60)
         west_data = build_narrative_summary("west", _read_tick(STORES["west"]) - 60)
         msg = build_digest(east_data, west_data)
-        if all_actions:
-            msg += f" Steward note: {'; '.join(all_actions)}."
         sent = send_telegram(msg)
         result["digest_sent"] = sent
         result["digest"] = msg

@@ -1076,7 +1076,7 @@ class FirstPairRuntime:
             return False
         px, py = pos
         shelter_kinds = ("shelter", "hut", "wall", "roof", "cabin", "tent",
-                         "lean")
+                         "lean", "cave", "cavern", "overhang", "grotto", "burrow")
         for record in self._world_state.public_objects.values():
             if not isinstance(record, dict):
                 continue

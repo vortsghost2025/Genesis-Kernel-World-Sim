@@ -1380,7 +1380,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     if k in (
                         "wild_berries", "mushrooms", "edible_roots",
                         "wild_apples", "nuts", "honeycomb", "wild_grain",
-                        "fish", "shellfish", "cooked_meal"
+                        "fish", "shellfish"
                     ) and isinstance(v, int) and v > 0
                 ]
                 if edible_held:
@@ -1395,21 +1395,67 @@ def build_system_prompt(context: AgentContext) -> str:
                     )
 
                 _lines.append(
-                    "Fact: each food satisfies hunger (wild_apples: 36, edible_roots: 34, honeycomb: 32, "
-                    "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22, fish: 40, cooked_meal: 75). "
+                    "Fact: each food satisfies hunger (fish: 40, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
+                    "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22). "
                     "Storing food in containers protects your supply."
                 )
-            if (_sb.get("warmth", 100) or 100) <= 40:
+            if (_sb.get("warmth", 100) or 100) <= 60:
                 _lines.append(
                     f"Your warmth is {round(_sb.get('warmth', 0))}/100."
                     + (" Your vitality drains while warmth stays at 20 or "
                        "lower." if (_sb.get("warmth", 0) or 100) <= 20 else ""))
                 _lines.append(
-                    "Facts: a lit fire within three tiles raises warmth. "
-                    "Shelter (or a built roof/cabin/hut) slows the cold and blocks rain. "
+                    "Facts: a lit fire within three tiles raises warmth (+9 per heartbeat). "
+                    "Shelter (or a built roof/cabin/hut/lean-to) slows the cold and blocks rain. "
                     "In rain an open fire is snuffed; a fire under a roof "
                     "keeps burning. A soaked body (wetness 50+) cannot "
                     "warm up until it dries.")
+
+            # Sensory awareness of the elements and primitive survival
+            if _env:
+                tod = _env.get("time_of_day")
+                season_name = _env.get("season")
+                temp = _env.get("temperature")
+                weather = _env.get("weather")
+                by_fire = _env.get("by_fire")
+                sheltered = _env.get("sheltered")
+
+                # Environmental triggers: night, cold, rain, winter/autumn, or warmth dropping
+                needs_element_salience = (
+                    tod == "night"
+                    or (temp is not None and temp <= 50.0)
+                    or weather in ("rain", "storm", "blizzard")
+                    or season_name in ("autumn", "winter")
+                    or (_sb.get("warmth", 100) or 100) <= 60
+                )
+
+                if needs_element_salience:
+                    env_desc = []
+                    if tod == "night":
+                        env_desc.append(f"Night has fallen (ambient temperature {temp}). The night chill drains warmth from exposed bodies.")
+                    elif temp is not None and temp <= 50.0:
+                        env_desc.append(f"The ambient temperature is cool ({temp}).")
+
+                    if weather in ("rain", "storm", "blizzard"):
+                        env_desc.append(f"Weather is {weather}. Open campfires are snuffed by rain unless protected under shelter.")
+
+                    if season_name in ("autumn", "winter"):
+                        env_desc.append(f"Season is {season_name}. Winter nights drop warmth toward cold levels (20 or lower), draining vitality directly.")
+
+                    if sheltered:
+                        env_desc.append("You are resting near shelter (a built hut, cabin, roof, wall, lean-to, or cave object), which slows warmth loss by more than half.")
+                    elif by_fire:
+                        env_desc.append("A nearby fire radiates warmth, protecting you from the cold.")
+                    else:
+                        env_desc.append("You are exposed to the open sky without fire or shelter.")
+
+                    _lines.append(" ".join(env_desc))
+                    _lines.append(
+                        "Facts of the elements: "
+                        "(1) Fire: A lit campfire or hearth within three tiles restores warmth fast (+9 per heartbeat). "
+                        "(2) Shelter: A constructed object (lean-to, hut, cabin, roof, wall, or cave shelter) protects fires from rain and cuts warmth loss by more than half. "
+                        "(3) Storage: Storing gathered provisions into containers (baskets, chests, caches, storage objects) on your tile creates shared reserves with your companion via use_object deposit and extract."
+                    )
 
         if _lines:
             body_section = (
