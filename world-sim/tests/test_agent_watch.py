@@ -277,14 +277,21 @@ class TestDedupe:
 
 
 class TestRenderAndDeliver:
-    def test_render_contains_the_essentials(self):
+    def test_render_is_one_tts_sentence(self):
+        """The Oct-19 TTS rework: no severity labels, no heartbeat
+        numbers, no context lines — one clean sentence Sean can hear."""
         sig = {"severity": "high", "title": "T", "pair": "west",
                "agent": "west_eve", "heartbeat": 723, "body": "B",
                "reply_hint": "H"}
         text = render(sig)
-        assert "[HIGH] T" in text
-        assert "west_eve" in text and "723" in text
-        assert "B" in text and "-> H" in text
+        assert text == "eve: B"
+        assert "[HIGH]" not in text and "723" not in text
+
+    def test_render_ask_reads_like_speech(self):
+        sig = {"severity": "high", "title": "asks (unanswered)",
+               "pair": "west", "agent": "west_eve", "heartbeat": 723,
+               "body": "why not", "reply_hint": "H"}
+        assert render(sig) == "eve is asking: why not"
 
     def test_telegram_unconfigured_is_not_an_error(self):
         ok, detail = send_telegram({"severity": "low", "title": "t", "pair": "p",
@@ -344,6 +351,11 @@ class TestRenderAndDeliver:
         monkeypatch.setattr(agent_watch, "STATE_PATH", tmp_path / "scratch" / "l.json")
         monkeypatch.setattr(agent_watch, "ALERT_LOG", tmp_path / "scratch" / "a.log")
         monkeypatch.setattr(agent_watch, "STATUS_PATH", tmp_path / "scratch" / "s.json")
+        # isolation: this test must never fire a real Telegram message.
+        # Since the operator's credentials landed in the ambient env,
+        # an unmocked run_once() actually sends.
+        monkeypatch.setattr(agent_watch, "telegram_config",
+                            lambda env=None: ("", ""))
         first = agent_watch.run_once()
         assert first["alerts_logged"] == 1
         assert first["telegram_sent"] == 0

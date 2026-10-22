@@ -116,11 +116,14 @@ class TestRetiredMechanicsAreGone:
         assert "carrying" not in ctx.observation
         assert ctx.physics["version"] == PHYSICS_VERSION
 
-    def test_prompt_has_no_body_section(self, tmp_path):
+    def test_prompt_has_no_retired_pressure_vocabulary(self, tmp_path):
+        """The RETIRED pressure model's vocabulary stays retired
+        (famished, food_units as a gate). The body section that
+        epistemic.4 added is a different thing: facts about vitals,
+        never the old consumption gate."""
         store = _fresh_store(tmp_path)
         rt = _runtime(store)
         prompt = build_system_prompt(rt._build_context("east_adam", 2))
-        assert "YOUR BODY" not in prompt
         assert "famished" not in prompt.lower()
         assert "THE WORLD'S TERMS" in prompt
 
