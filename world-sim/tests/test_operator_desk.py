@@ -101,6 +101,38 @@ class TestAnswerBank:
             "What is the meaning of the triangle?", _facts()) is None
 
 
+class TestMapLookup:
+    def test_wood_question_answers_from_the_true_map(self):
+        """The question that escalated for a day: eve asked whether
+        wood exists on a named tile. The map knows; the desk reads it."""
+        f = _facts()
+        a = desk.draft_answer(
+            "Is there any wood resource available on cont_b_origin_002 "
+            "or any adjacent tile that I can gather?", f)
+        assert a is not None, "the map can answer this - no escalation"
+        assert "wood" in a.lower()
+        assert "cont_b_origin_002" in a
+
+    def test_map_answer_names_real_tiles_only(self):
+        f = _facts()
+        a = desk.draft_answer(
+            "Is there any stone resource available on cont_b_origin_002 "
+            "or any adjacent tile?", f)
+        import re as _re
+        tm = desk._load_true_map()
+        known = {t.get("tile_id") for t in tm.get("tiles", [])}
+        named = _re.findall(r"cont_[ab]_[\w]+", a)
+        assert named, "the answer must name at least one tile"
+        for tid in named:
+            assert tid in known, f"fabricated tile: {tid}"
+
+    def test_unanswerable_area_escalates(self):
+        a = desk.draft_answer(
+            "Is there wood on cont_a_gen_-9999_-9999?", _facts())
+        assert a is not None
+        assert "not surveyed" in a.lower() or "no surveyed" in a.lower()
+
+
 class TestDeskRun:
     def _store_with_questions(self, tmp_path, questions):
         store = desk.FirstPairPersistenceStore(tmp_path / "store")

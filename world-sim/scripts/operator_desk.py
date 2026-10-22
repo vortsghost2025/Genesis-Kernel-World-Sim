@@ -111,7 +111,7 @@ def ground_facts(pair_name: str, store: FirstPairPersistenceStore,
                     and isinstance(amount, int) and amount > 0):
                 tile_food.append(f"{kind} ×{amount}")
 
-    return {
+    facts = {
         "agent_ref": agent_ref,
         "hunger": vitals.get("hunger"),
         "warmth": vitals.get("warmth"),
@@ -133,6 +133,93 @@ def ground_facts(pair_name: str, store: FirstPairPersistenceStore,
         "terms": __import__("backend.world.world_pressure",
                             fromlist=["PHYSICS_VERSION"]).PHYSICS_VERSION,
     }
+    facts["tile_resources"] = _tile_resources(position)
+    return facts
+
+
+_TRUE_MAP_CACHE: dict | None = None
+
+
+def _load_true_map() -> dict:
+    global _TRUE_MAP_CACHE
+    if _TRUE_MAP_CACHE is None:
+        try:
+            _TRUE_MAP_CACHE = json.loads(
+                (WORLD_SIM / "data" / "world" / "true_map.json")
+                .read_text(encoding="utf-8"))
+        except Exception:
+            _TRUE_MAP_CACHE = {"tiles": [], "resources": []}
+    return _TRUE_MAP_CACHE
+
+
+def _tile_resources(tile_id: str) -> list:
+    """Gatherable resources on one tile, from the true map."""
+    tm = _load_true_map()
+    out = []
+    for res in tm.get("resources", []):
+        if res.get("tile_id") == tile_id:
+            amount = res.get("amount", 0)
+            if isinstance(amount, int) and amount > 0:
+                out.append(f"{res.get('kind')} x{amount}")
+    return out
+
+
+def _tile_and_neighbors_resources(tile_id: str) -> dict:
+    """Resources on the named tile and its eight neighbors."""
+    tm = _load_true_map()
+    coord_by_id = {}
+    for t in tm.get("tiles", []):
+        c = t.get("coordinates")
+        if c:
+            coord_by_id[t.get("tile_id")] = (c.get("x"), c.get("y"))
+    id_by_coord = {v: k for k, v in coord_by_id.items()}
+    xy = coord_by_id.get(tile_id)
+    if xy is None:
+        return {}
+    x, y = xy
+    out = {}
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nid = id_by_coord.get((x + dx, y + dy))
+            if nid:
+                out[nid] = _tile_resources(nid)
+    return out
+
+
+def _resource_location_answer(question: str, f: dict):
+    """Answer 'is there <resource> near <tile>?' from the true map."""
+    m = re.search(r"cont_[ab]_(?:gen_[-0-9]+|origin_[-0-9]+)", question)
+    if not m:
+        return None
+    named = m.group(0)
+    kinds = re.findall(
+        r"wood|stone|clay|fiber|berries|mushroom|roots|fish|shellfish|"
+        r"flint|iron|salt|nuts|apples|grain|honeycomb|water", question.lower())
+    want = kinds[0] if kinds else None
+    here_and_near = _tile_and_neighbors_resources(named)
+    if not here_and_near:
+        return assert_no_advice(
+            "The map shows no surveyed tiles around " + named +
+            " - that area has not been explored enough to answer from.")
+    if want:
+        hits = [(tid, [r for r in res if r.startswith(want[:5])])
+                for tid, res in here_and_near.items()]
+        hits = [(tid, rs) for tid, rs in hits if rs]
+        if hits:
+            lines = [f"{tid}: {', '.join(rs)}" for tid, rs in hits[:5]]
+            return assert_no_advice(
+                "The map shows " + want + " there. " + " ".join(lines) +
+                ". These are the map's contents; the fog decides what "
+                "you can reach.")
+        return assert_no_advice(
+            "The map shows no " + want + " on " + named +
+            " or the tiles beside it. What the map shows nearby: " +
+            "; ".join(f"{tid}: {', '.join(res) or 'nothing'}"
+                      for tid, res in list(here_and_near.items())[:5]) + ".")
+    return assert_no_advice(
+        "The map shows around " + named + ": " +
+        "; ".join(f"{tid}: {', '.join(res) or 'nothing'}"
+                  for tid, res in list(here_and_near.items())[:6]) + ".")
 
 
 def draft_answer(question: str, f: dict) -> str | None:
@@ -142,6 +229,13 @@ def draft_answer(question: str, f: dict) -> str | None:
     No branch assigns a task or orders an action.
     """
     text = str(question or "").lower()
+
+    if re.search(r"is there|where.*(find|gather|wood|stone|clay|resource)|"
+                 r"available on|any .*(wood|stone|clay|berries|resource)",
+                 text):
+        located = _resource_location_answer(question, f)
+        if located:
+            return located
 
     if re.search(r"provide|give me|give us|feed me|send me|bring me", text):
         return assert_no_advice(

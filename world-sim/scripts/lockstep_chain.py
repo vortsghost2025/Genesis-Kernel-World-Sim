@@ -59,9 +59,12 @@ STORES = {
 
 MAX_RETRIES = 3
 RETRY_DELAY_S = 45
-# Per-heartbeat budget for the detached runner. Generous - a free-tier model
-# can be slow - but finite, so a dead runner cannot spin the chain forever.
-STATUS_TIMEOUT_S = 600
+# Per-heartbeat budget for the detached runner. Measured Oct 22: the east
+# pair's cycles run past 600s on the free route (its prompt is the older,
+# object-heavier world), so the budget timed out on first attempts and
+# churned the chain through retry-restarts even though heartbeats
+# eventually succeeded. 1200s fits the measured latency; still finite.
+STATUS_TIMEOUT_S = 1200
 SNAPSHOT_EVERY = 10
 
 # Detached runners spawned this run (their status files carry the pid).
