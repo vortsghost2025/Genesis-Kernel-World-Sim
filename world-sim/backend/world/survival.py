@@ -119,11 +119,15 @@ def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
     """Warmth drifts toward the ambient comfort level.
 
     A fire dominates: warmth climbs toward 100 fast regardless of season.
-    Shelter does not heat — it slows the drain (you hold what you have).
+    A shelter insulates: inside, comfort never falls below the floor -
+    a structure traps heat and blocks wind, so a winter night inside is
+    cool, not lethal, and a cold body warms toward the floor.
     A soaked body (wet >= 50) holds almost no heat: warmth moves at 0.4x
-    speed in both directions — you cannot warm up while wet. epistemic.5.
+    speed in both directions - you cannot warm up while wet. epistemic.6.
     """
     comfort = max(0.0, min(100.0, ambient_temp))
+    if in_shelter:
+        comfort = max(comfort, SHELTER_COMFORT_FLOOR)
     if by_fire and wet < 50.0:
         return min(100.0, warmth + FIRE_WARMTH_PER_HB)
     gap = comfort - warmth
@@ -135,39 +139,14 @@ def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
     return max(0.0, min(100.0, warmth + change))
 
 
-# --- vitality ------------------------------------------------------------------
-VITALITY_CAP = 100.0
-STARVING_DRAIN = 0.6        # per heartbeat at hunger >= HUNGER_WEAKEN
-FREEZING_DRAIN = 0.8        # per heartbeat at warmth <= FREEZE_THRESHOLD
-REGEN_RATE = 0.5            # fed and warm: slow recovery
-COLLAPSE_THRESHOLD = 0.0    # vitality at/below: down
-RECOVERY_STAND_AT = 12.0    # vitality needed to stand again after collapse
-DOWNED_PASSIVE_REGEN = 0.15  # slow self-recovery while down (rescue is better)
-
-
-# --- weather: the sky (epistemic.5) -----------------------------------------
-# Weather is a PURE function of (pair seed, heartbeat): no state file, no
-# drift, no split-brain — the sky is part of the physics, not a process.
-# Stable windows give agents something to plan around, and the forecast
-# (the next window) is visible in every observation: weather is planning
-# material, not dice.
-WEATHER_WINDOW = 36            # heartbeats per weather window (half a day)
-WEATHER_TYPES = ("clear", "overcast", "rain", "storm")
-# per-season probabilities (clear, overcast, rain, storm); a winter storm
-# reads as a blizzard in the observation, but the math is one thing
-WEATHER_TABLE = {
-    "spring": (0.55, 0.20, 0.20, 0.05),
-    "summer": (0.78, 0.12, 0.08, 0.02),
-    "autumn": (0.50, 0.22, 0.21, 0.07),
-    "winter": (0.52, 0.20, 0.18, 0.10),
-}
-WEATHER_TEMP_MODIFIER = {"clear": 0.0, "overcast": -3.0,
-                         "rain": -6.0, "storm": -11.0}
-WETNESS_GAIN_EXPOSED = 9.0     # per heartbeat in rain, unsheltered
-WETNESS_DRY_RATE = 4.0         # per heartbeat in clear/overcast
-WETNESS_FIRE_DRY_RATE = 14.0   # drying by a fire
-WET_THRESHOLD = 50.0           # soaked: cannot warm up (see warmth_next)
-STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
+# --- comfort (epistemic.6) ---------------------------------------------------
+# A shelter is not just less bad - it is good. The comfort floor means
+# inside never feels colder than 45 even in a blizzard; rest inside
+# heals vitality twice as fast. Summer days make shelters optional;
+# winter nights and storms make them the difference between 13 and 45.
+SHELTER_COMFORT_FLOOR = 45.0
+REST_REGEN_IN_SHELTER = 1.0      # fed + sheltered: heals 2x
+DOWNED_REGEN_IN_SHELTER = 0.4    # downed in shelter: stands ~2.5x sooner
 
 
 def _pair_seed(pair_name: str) -> int:
@@ -242,21 +221,56 @@ def fire_is_snuffed(weather: str, fire_tile_sheltered: bool) -> bool:
     valuable."""
     return weather in ("rain", "storm") and not fire_tile_sheltered
 
+# --- vitality ------------------------------------------------------------------
+VITALITY_CAP = 100.0
+STARVING_DRAIN = 0.6        # per heartbeat at hunger >= HUNGER_WEAKEN
+FREEZING_DRAIN = 0.8        # per heartbeat at warmth <= FREEZE_THRESHOLD
+REGEN_RATE = 0.5            # fed and warm: slow recovery
+COLLAPSE_THRESHOLD = 0.0    # vitality at/below: down
+RECOVERY_STAND_AT = 12.0    # vitality needed to stand again after collapse
+DOWNED_PASSIVE_REGEN = 0.15  # slow self-recovery while down (rescue is better)
+
+
+# --- weather: the sky (epistemic.5) -----------------------------------------
+# Weather is a PURE function of (pair seed, heartbeat): no state file, no
+# drift, no split-brain â€” the sky is part of the physics, not a process.
+# Stable windows give agents something to plan around, and the forecast
+# (the next window) is visible in every observation: weather is planning
+# material, not dice.
+WEATHER_WINDOW = 36            # heartbeats per weather window (half a day)
+WEATHER_TYPES = ("clear", "overcast", "rain", "storm")
+# per-season probabilities (clear, overcast, rain, storm); a winter storm
+# reads as a blizzard in the observation, but the math is one thing
+WEATHER_TABLE = {
+    "spring": (0.55, 0.20, 0.20, 0.05),
+    "summer": (0.78, 0.12, 0.08, 0.02),
+    "autumn": (0.50, 0.22, 0.21, 0.07),
+    "winter": (0.52, 0.20, 0.18, 0.10),
+}
+WEATHER_TEMP_MODIFIER = {"clear": 0.0, "overcast": -3.0,
+                         "rain": -6.0, "storm": -11.0}
+WETNESS_GAIN_EXPOSED = 9.0     # per heartbeat in rain, unsheltered
+WETNESS_DRY_RATE = 4.0         # per heartbeat in clear/overcast
+WETNESS_FIRE_DRY_RATE = 14.0   # drying by a fire
+WET_THRESHOLD = 50.0           # soaked: cannot warm up (see warmth_next)
+STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
+
+
 def vitality_next(vitality: float, hunger: float, warmth: float,
-                  downed: bool) -> float:
-    """Vitality drains under neglect, regenerates under care."""
+                  downed: bool, in_shelter: bool = False) -> float:
+    """Vitality drains under neglect, regenerates under care.
+    Rest inside a shelter heals twice as fast - comfort is medicine."""
     if downed:
-        return min(RECOVERY_STAND_AT, vitality + DOWNED_PASSIVE_REGEN)
+        rate = DOWNED_REGEN_IN_SHELTER if in_shelter else DOWNED_PASSIVE_REGEN
+        return min(RECOVERY_STAND_AT, vitality + rate)
     v = vitality
     if hunger >= HUNGER_WEAKEN:
         v -= STARVING_DRAIN
     if warmth <= FREEZE_THRESHOLD:
         v -= FREEZING_DRAIN
     if hunger <= 45.0 and warmth >= 50.0:
-        v += REGEN_RATE
+        v += REST_REGEN_IN_SHELTER if in_shelter else REGEN_RATE
     return max(0.0, min(VITALITY_CAP, v))
-
-
 # --- the vitals block -------------------------------------------------------
 def initial_vitals() -> dict:
     """Healthy start. No retroactive famine for existing agents."""
@@ -283,7 +297,7 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
                          by_fire, in_shelter, wetness)
     downed = bool(vitals.get("downed", False))
     vitality = vitality_next(vitals.get("vitality", 100.0), hunger,
-                             warmth, downed)
+                             warmth, downed, in_shelter)
     if weather == "storm" and not in_shelter and not downed:
         vitality = max(0.0, vitality - STORM_EXPOSURE_DRAIN)
     if downed and vitality >= RECOVERY_STAND_AT:

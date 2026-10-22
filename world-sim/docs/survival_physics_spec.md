@@ -59,3 +59,27 @@ Weather is a **pure function of (pair seed, heartbeat)** — no state file, no d
 | **the shelter rule** | **rain snuffs open fires; a fire under a roof keeps burning** |
 
 The shelter rule is the reason this update exists: it makes roof-building *permanently* valuable — not a warmth percentage, but the difference between having heat and not having it, every time it rains, forever. The causal chain closes: rain → wet → cold that fire cannot fix until you are dry or roofed → **build a roof over the fire** → the first real house is a house because the sky demanded it.
+
+
+## Comfort (epistemic.6) - 2026-10-21
+
+Sean, after the rain arcs: "there needs to be a bonus to being in a
+shelter + to warmth comfort something along those lines."
+
+Shelter was damage control: less cold, no rain, never an upside in
+fine weather. Comfort makes it a good place, not just a less bad one.
+
+| mechanic | rule |
+|---|---|
+| **comfort floor** | inside a shelter, warmth never falls below 45 - insulation: a winter night inside is cool (45), outside lethal (13) |
+| **rest** | fed + sheltered: vitality regen 0.5 -> 1.0 per heartbeat (2x) |
+| **downed rest** | a downed body in a shelter recovers at 0.4/hb vs 0.15 - standing again ~2.5x sooner |
+| fire | unchanged: +9/hb inside or out; still snuffed by rain unless roofed |
+
+The gradient this buys: a summer day makes shelters optional (the
+floor is below ambient, no penalty for being outside); a winter night
+makes inside 45 against 13 outside; a storm makes inside the only dry
+warm place. Shelter stops being damage control and becomes the warm
+dry good place - and the agents' storm-building (east) and
+hearth-keeping (west) both become rational investments instead of
+panic responses.
