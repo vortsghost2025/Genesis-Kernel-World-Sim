@@ -450,10 +450,26 @@ def send_telegram(text: str) -> bool:
 
 
 def poll_once(digest: bool = False) -> dict:
-    """One steward poll: repair, restart, optionally digest."""
+    """One steward poll: repair, restart, answer, optionally digest."""
     all_actions = []
     for pair in ("east", "west"):
         all_actions.extend(ensure_running(pair))
+
+    # the operator desk: unheard questions answered factually in the
+    # operator's register; only unanswerable ones escalate to Sean
+    try:
+        from operator_desk import run_desk
+        desk = run_desk()
+        if desk["answered"]:
+            all_actions.append(
+                f"operator desk: answered {desk['answered']} question(s)")
+        if desk["escalated"]:
+            all_actions.append(
+                f"operator desk: {desk['escalated']} question(s) "
+                f"escalated to the human")
+    except Exception as exc:
+        all_actions.append(f"operator desk: unavailable "
+                           f"({type(exc).__name__}: {exc})")
 
     result = {"at_utc": _utc_now(), "actions": all_actions}
 
