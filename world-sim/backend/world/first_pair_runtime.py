@@ -2593,5 +2593,3 @@ def run_first_pair_demo(
     if export_path:
         runtime.export_evidence(export_path)
     return results
-
-
