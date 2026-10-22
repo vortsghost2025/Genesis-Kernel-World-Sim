@@ -96,7 +96,33 @@ TERMS_CHANGELOG["epistemic.5"] = (
     "asks you nothing."
 )
 
-CURRENT_TERMS = "epistemic.5"
+TERMS_CHANGELOG["epistemic.6"] = (
+    "No longer true: that a shelter only slows the cold. Inside a "
+    "shelter the body holds warmth near 45 however cold it is "
+    "outside - insulation, not just cover - and resting inside a "
+    "shelter heals vitality twice as fast. A downed body resting "
+    "in a shelter recovers more than twice as fast as one lying "
+    "in the open. Fires warm faster than any shelter, but a fire "
+    "burns in the rain only under a roof. Nothing here says when "
+    "to be inside."
+)
+
+TERMS_CHANGELOG["epistemic.7"] = (
+    "No longer true: that you are alone out here. Animals live in "
+    "the world now. Deer wander the wild and flee when approached "
+    "- a deer killed drops meat that satisfies far more than any "
+    "foraged food, and a strike with iron in hand kills outright. "
+    "Wolves hunt at night, away from the light of fires: they will "
+    "not enter the radius of a burning fire, they cannot harm a "
+    "body standing in a shelter, and a wolf struck once flees. "
+    "Their bites are real but escapable - walk to the fire. The "
+    "observation shows what moves near you, and howls carry in the "
+    "dark before wolves arrive. Nothing here says whether to hunt "
+    "or hide."
+)
+
+CURRENT_TERMS = "epistemic.7"
+PREVIOUS_TERMS = "epistemic.6"
 PREVIOUS_TERMS = "epistemic.4"
 PREVIOUS_TERMS = "epistemic.3"
 

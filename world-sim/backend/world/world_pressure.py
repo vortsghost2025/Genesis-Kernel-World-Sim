@@ -73,4 +73,10 @@ GATHER_YIELD = 1
 # roof keeps burning. The forecast is visible in every observation, so
 # the sky is planning material, not dice. Pure function of (pair seed,
 # heartbeat): no state, no drift, no split-brain.
-PHYSICS_VERSION = "epistemic.5"
+# epistemic.6 is a REAL physics change: comfort. Inside a shelter,
+# warmth never falls below 45, and resting inside heals twice as fast.
+# epistemic.7 is a REAL physics change: the wild. Wolves hunt at night
+# in wilderness - never in firelight, never a sheltered body, never an
+# ambush - and deer flee and carry meat. The survival trinity closes:
+# hunger, elements, threats. Tools finally have a purpose.
+PHYSICS_VERSION = "epistemic.7"

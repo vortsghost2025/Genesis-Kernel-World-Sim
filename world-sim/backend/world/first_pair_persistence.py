@@ -318,6 +318,9 @@ class WorldStateRecord:
     # downed). Absent for stores written before the body existed; the
     # runtime seeds healthy defaults on first read (no retroactive famine).
     vitals: dict[str, dict] = field(default_factory=dict)
+    # epistemic.7: living entities (wolves, deer). Tiles are coordinate
+    # tuples serialized as lists; hp in kind-specific units.
+    wildlife: list = field(default_factory=list)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = "world_state.1"

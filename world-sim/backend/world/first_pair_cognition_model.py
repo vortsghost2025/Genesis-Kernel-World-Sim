@@ -404,6 +404,7 @@ _VALID_ACTIONS = frozenset({
     "build",
     "use_object",
     "eat",
+    "attack",
 })
 
 
@@ -512,6 +513,7 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     }),
     # eat: epistemic.4 — consume food from belongings to satisfy hunger.
     "eat": frozenset({"action_type", "resource_kind", "reason", "food_type", "food", "item"}),
+    "attack": frozenset({"action_type", "target_id", "reason"}),
 }
 
 
@@ -1113,6 +1115,7 @@ Available actions:
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt" and "craft" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (only works on crafting_surface objects)
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
+- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops meat in your hands; a wolf struck flees. Tools matter: iron strikes kill outright, bare hands take longer. Wolves will not enter the light of a fire
 """
 
 # Free speech. One optional top-level field, documented in the contract and
@@ -1406,7 +1409,7 @@ def build_system_prompt(context: AgentContext) -> str:
                        "lower." if (_sb.get("warmth", 0) or 100) <= 20 else ""))
                 _lines.append(
                     "Facts: a lit fire within three tiles raises warmth (+9 per heartbeat). "
-                    "Shelter (or a built roof/cabin/hut/lean-to) slows the cold and blocks rain. "
+                    "A shelter (or a built roof/cabin/hut/lean-to) holds warmth near 45 however cold it is outside, blocks rain entirely, and resting inside heals vitality twice as fast. "
                     "In rain an open fire is snuffed; a fire under a roof "
                     "keeps burning. A soaked body (wetness 50+) cannot "
                     "warm up until it dries.")

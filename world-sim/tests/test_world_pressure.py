@@ -100,7 +100,7 @@ class TestRetiredMechanicsAreGone:
         # epistemic.5: the sky (docs/survival_physics_spec.md).
         # Bumped deliberately — the version test pins the CURRENT era, and
         # the gate (new_to_agent) re-arms once per agent to announce it.
-        assert PHYSICS_VERSION == "epistemic.5"
+        assert PHYSICS_VERSION == "epistemic.7"
 
     def test_runtime_has_no_pressure_step(self):
         rt = FirstPairRuntime(heartbeat_limit=1, store=_fresh_store(Path(".")))
@@ -339,9 +339,9 @@ class TestTermsChangelog:
         # epistemic.5: the sky (survival_physics_spec.md). Pins the
         # CURRENT changelog — when the version moves again, this pin
         # moves with it, deliberately.
-        assert "the sky is empty" in prompt
-        assert "rain" in prompt
-        assert "roof" in prompt
+        assert "you are alone out here" in prompt
+        assert "wolves" in prompt
+        assert "deer" in prompt
 
     def test_prompt_does_not_repeat_the_changelog_every_heartbeat(self, tmp_path):
         store = _fresh_store(tmp_path)

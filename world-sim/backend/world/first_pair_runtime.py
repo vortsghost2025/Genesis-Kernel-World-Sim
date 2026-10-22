@@ -89,6 +89,7 @@ from backend.world.first_pair_persistence import (
 from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
 from backend.world import survival
+from backend.world import wildlife
 from backend.world.world_pressure import (
     GATHER_YIELD,
     PHYSICS_VERSION,
@@ -657,6 +658,8 @@ class FirstPairRuntime:
         weather_name = forecast["current"]
         if weather_name == "storm" and survival.season(heartbeat_number) == "winter":
             weather_name = "blizzard"
+        observation["wildlife"] = self._wildlife_visible(
+            agent_ref, heartbeat_number)
         observation["environment"] = {
             "time_of_day": "night" if survival.is_night(heartbeat_number) else "day",
             "season": survival.season(heartbeat_number),
@@ -1034,6 +1037,17 @@ class FirstPairRuntime:
         except (IndexError, ValueError):
             return None
 
+
+    @staticmethod
+    def _entity_xy(entity_tile):
+        """Entities carry coordinate tuples (or serialized lists), not
+        string tile ids - accept both."""
+        if isinstance(entity_tile, (tuple, list)) and len(entity_tile) == 2:
+            try:
+                return int(entity_tile[0]), int(entity_tile[1])
+            except (TypeError, ValueError):
+                return None
+        return FirstPairRuntime._tile_xy(entity_tile)
     def _nearby_fire(self, tile_id: str,
                      heartbeat_number: int | None = None) -> bool:
         """A warming fire within FIRE_RADIUS (Chebyshev).
@@ -1089,6 +1103,118 @@ class FirstPairRuntime:
             if max(abs(other[0] - px), abs(other[1] - py)) <= 1:
                 return True
         return False
+
+    def wildlife_tick(self, heartbeat_number: int) -> None:
+        """One heartbeat of the wild: spawn, move, bite.
+
+        Wolves spawn at night in wilderness, approach agents in the
+        dark, bite when adjacent, and never enter fire radius or a
+        sheltered tile. Deer wander and flee. Entities persist in
+        world_state.wildlife.
+        """
+        import random as _random
+
+        rng = _random.Random(heartbeat_number * 7 + self._pair_id.__hash__()
+                             % 100000)
+        occupancy = self._world_state.tile_occupancy
+        agent_xys = []
+        for ref in (self._adam_ref, self._eve_ref):
+            xy = self._tile_xy(occupancy.get(ref, ""))
+            if xy is not None:
+                agent_xys.append(xy)
+        fire_xys = []
+        sheltered_tiles = set()
+        for o in (self._world_state.public_objects or {}).values():
+            if not isinstance(o, dict):
+                continue
+            ot = str(o.get("object_type", "")).lower()
+            otxy = self._tile_xy(o.get("tile_id", ""))
+            if otxy is None:
+                continue
+            if any(k in ot for k in ("fire", "forge", "furnace")):
+                fire_xys.append(otxy)
+            if any(k in ot for k in ("shelter", "roof", "wall", "hut",
+                                     "cabin", "lean")):
+                sheltered_tiles.add(otxy)
+
+        night = survival.is_night(heartbeat_number)
+        entities = list(self._world_state.wildlife or [])
+
+        # spawn: wolves at night in wilderness, deer any time
+        if agent_xys:
+            center = agent_xys[0]
+            candidates = [(center[0] + dx, center[1] + dy)
+                          for dx in range(-14, 15, 2)
+                          for dy in range(-14, 15, 2)]
+            entities = wildlife.spawn_wolves(
+                entities, heartbeat_number, night, candidates,
+                agent_xys, fire_xys, rng)
+            entities = wildlife.spawn_deer(
+                entities, heartbeat_number, candidates, agent_xys, rng)
+
+        # move
+        moved = []
+        for e in entities:
+            if e.get("kind") == "wolf":
+                e = wildlife.move_wolf(e, agent_xys, occupancy,
+                                       fire_xys, sheltered_tiles, rng)
+            elif e.get("kind") == "deer":
+                e = wildlife.move_deer(e, agent_xys, rng)
+            moved.append(e)
+
+        # wolves bite adjacent, unsheltered agents
+        for e in moved:
+            if e.get("kind") != "wolf":
+                continue
+            wxy = self._entity_xy(e.get("tile"))
+            # firelight repels at the moment, however the wolf got
+            # there: a wolf inside a fire radius is holding at the
+            # edge of the light, not striking into it
+            if any(wildlife._dist(fxy, wxy) <= wildlife.FIRE_SAFETY_RADIUS
+                   for fxy in fire_xys):
+                continue
+            for ref in (self._adam_ref, self._eve_ref):
+                pos = occupancy.get(ref)
+                pxy = self._tile_xy(pos)
+                if pxy is None or wxy is None:
+                    continue
+                if max(abs(pxy[0] - wxy[0]), abs(pxy[1] - wxy[1])) <= 1:
+                    vitals = self._vitals_for(ref)
+                    if vitals.get("downed"):
+                        continue  # a downed body is left for the story
+                    in_shelter = self._in_shelter(pos)
+                    if in_shelter:
+                        continue  # shelters are absolute safety
+                    vitals["vitality"] = round(max(
+                        0.0, vitals.get("vitality", 100.0)
+                        - wildlife.WOLF_BITE_DAMAGE), 2)
+                    if vitals["vitality"] <= 0.0:
+                        vitals["downed"] = True
+
+        # wolves dissolve at dawn
+        if not night:
+            moved = [e for e in moved if e.get("kind") != "wolf"]
+
+        self._world_state.wildlife = moved
+
+    def _wildlife_visible(self, agent_ref: str, heartbeat_number: int) -> dict:
+        """What this agent perceives of the wild: visible animals within
+        sight, howls in the dark, and the safe-zone truth."""
+        occupancy = self._world_state.tile_occupancy
+        pos = self._tile_xy(occupancy.get(agent_ref, ""))
+        visible = []
+        howling = False
+        for e in (self._world_state.wildlife or []):
+            exy = self._entity_xy(e.get("tile"))
+            if exy is None or pos is None:
+                continue
+            dist = max(abs(exy[0] - pos[0]), abs(exy[1] - pos[1]))
+            if dist <= 6:
+                visible.append({"kind": e.get("kind"), "distance": dist})
+            elif (e.get("kind") == "wolf" and dist <= 10
+                  and survival.is_night(heartbeat_number)):
+                howling = True
+        return {"nearby": visible, "howling": howling}
 
     def apply_survival_to_all(self, heartbeat_number: int) -> None:
         """One heartbeat of embodiment for every agent. Called once per
@@ -1165,6 +1291,43 @@ class FirstPairRuntime:
             "hunger_now": vitals["hunger"],
         }
 
+    def _execute_attack(self, agent_ref: str, action: dict) -> dict:
+        """Strike an adjacent animal. Tools decide: iron kills a deer
+        outright; bare hands take two strikes. A killed deer drops meat
+        into the hunter's hands; a struck wolf flees and leaves some."""
+        target_id = action.get("target_id", "")
+        entities = self._world_state.wildlife or []
+        entity = next((e for e in entities
+                       if e.get("id") == target_id), None)
+        if entity is None:
+            return {"status": "rejected",
+                    "reason": "No such animal here"}
+        etile = entity.get("tile")
+        if isinstance(etile, list):
+            etile = tuple(etile)
+        pos = self._world_state.tile_occupancy.get(agent_ref)
+        pxy = self._tile_xy(pos)
+        exy = self._entity_xy(etile)
+        if pxy is None or exy is None or max(
+                abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+            return {"status": "rejected",
+                    "reason": "The animal is not within reach"}
+        inventory = load_inventory(self._store).get(agent_ref, {})
+        entity, dmg, killed, meat = wildlife.strike(entity, inventory)
+        outcome = {"status": "success", "target_kind": entity.get("kind"),
+                   "damage": dmg, "killed": killed, "meat": meat}
+        if killed:
+            self._world_state.wildlife = [
+                e for e in entities if e.get("id") != target_id]
+            if meat:
+                add_to_inventory(self._store, agent_ref, wildlife.MEAT, meat)
+                outcome["meat_held"] = meat
+        else:
+            self._world_state.wildlife = [
+                e if e.get("id") != target_id else entity
+                for e in entities]
+        return outcome
+
     # ------------------------------------------------------------------
     # Action execution
     # ------------------------------------------------------------------
@@ -1191,6 +1354,8 @@ class FirstPairRuntime:
 
         if action_type == "eat":
             return self._eat_satisfaction(agent_ref, action.get("resource_kind"))
+        if action_type == "attack":
+            return self._execute_attack(agent_ref, action)
         if action_type == "move":
             return self._execute_move(agent_ref, action)
         if action_type == "create_public_object":
@@ -2008,6 +2173,10 @@ class FirstPairRuntime:
             # body it is about to act with.
             self.apply_survival_to_all(hb)
 
+            # epistemic.7: the wild. Spawn, move, bite - the entities
+            # live in world_state and persist across restarts.
+            self.wildlife_tick(hb)
+
             hb_observations: dict = {}
             for agent_ref in (self._adam_ref, self._eve_ref):
                 backend = self._get_cognition_backend(agent_ref)
@@ -2424,3 +2593,5 @@ def run_first_pair_demo(
     if export_path:
         runtime.export_evidence(export_path)
     return results
+
+
