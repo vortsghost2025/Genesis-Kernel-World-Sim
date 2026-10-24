@@ -81,6 +81,8 @@ from backend.world.first_pair_persistence import (
     save_goals,
     save_memory,
     save_world_state,
+    select_bounded_public_messages,
+    select_bounded_relationship_events,
     select_human_context,
     select_private_memories,
     update_continuity,
@@ -672,14 +674,12 @@ class FirstPairRuntime:
             "sheltered": self._in_shelter(position) if position else False,
         }
 
-        # Visible public messages (addressed to this agent or public "all")
-        visible_msgs = [
-            m for m in self._world_state.public_messages
-            if isinstance(m, dict) and (
-                m.get("recipient") in (agent_ref, "all", "public")
-                or m.get("recipient") == view["canonical_agent_ref"]
-            )
-        ]
+        # Visible public messages (addressed to this agent or public "all", bounded for model context)
+        visible_msgs = select_bounded_public_messages(
+            self._world_state.public_messages or [],
+            agent_ref=agent_ref,
+            canonical_agent_ref=view.get("canonical_agent_ref", ""),
+        )
 
         # --- Legible action outcome report (docs/action_outcome_visibility)
         # The store knows what happened; the record only shows it when failures
@@ -842,10 +842,11 @@ class FirstPairRuntime:
         if self._store:
             append_memory_selection_manifest(self._store, sel_manifest)
 
-        rel_events_export = [
-            asdict(e) for e in rel_events
-            if e.actor_agent_id == view["agent_id"] or e.other_agent_id == view["agent_id"]
-        ]
+        # Bounded relationship events involving this agent for model context
+        rel_events_export = select_bounded_relationship_events(
+            rel_events,
+            agent_id=view["agent_id"],
+        )
 
         # --- Charter (recognition layer): latest self-authored version, verbatim ---
         latest_charter = load_latest_charter(self._store, agent_ref, view["agent_id"])

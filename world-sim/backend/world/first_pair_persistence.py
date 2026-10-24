@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -927,6 +928,237 @@ def select_human_context(
     all_unresolved_ids = [s[3].get("question_id", "") for s in selected if s[3].get("status") == "pending"]
 
     return selected_records, all_answered_ids, all_unresolved_ids, len(omitted)
+
+
+# ---------------------------------------------------------------------------
+# Bounded Public Context Selection (Messages & Relationship Events)
+# ---------------------------------------------------------------------------
+
+_MAX_BOUNDED_PUBLIC_MESSAGES = 35
+_MAX_BOUNDED_RELATIONSHIP_EVENTS = 25
+_DEFAULT_RECENT_MESSAGE_TAIL = 12
+_DEFAULT_RECENT_COLOC_BUDGET = 8
+
+_COORD_PATTERNS = re.compile(
+    r"\b(charter|proposal|propose|agree|schedule|plan|commit|joint)\b",
+    re.IGNORECASE,
+)
+_DISC_PATTERNS = re.compile(
+    r"\b(discover|found|bug|extract|deposit|eat|food|campfire|test|survey)\b",
+    re.IGNORECASE,
+)
+_QUESTION_RECIPIENTS = {"operator", "the operator"}
+
+
+def select_bounded_public_messages(
+    messages: list[dict],
+    agent_ref: str,
+    canonical_agent_ref: str = "",
+    max_total_messages: int = _MAX_BOUNDED_PUBLIC_MESSAGES,
+    recent_tail_budget: int = _DEFAULT_RECENT_MESSAGE_TAIL,
+) -> list[dict]:
+    """Select a bounded, relevance-aware subset of public messages for model context.
+
+    Deterministic 5-Tier Priority Policy (Budget <= max_total_messages):
+    Tier 1 (Foundational): First message / first contact (always kept).
+    Tier 2 (Unresolved Questions & Appeals): Inquiries to operator or explicit questions to partner.
+    Tier 3 (Commitments & Proposals): Substantive coordination, agreements, charters.
+    Tier 4 (Discoveries & Physics): Empirical findings (campfire/deposit/eat/containers/resources).
+    Tier 5 (Recent Conversational Tail): Latest messages in reverse chronological order.
+
+    STRICT CAP ENFORCEMENT: Output length is guaranteed <= max_total_messages.
+    Full canon on disk is never altered.
+    """
+    visible = [
+        m for m in messages
+        if isinstance(m, dict) and (
+            m.get("recipient") in (agent_ref, "all", "public", "operator", "the operator")
+            or m.get("recipient") == canonical_agent_ref
+        )
+    ]
+    if len(visible) <= max_total_messages:
+        return sorted(visible, key=lambda m: (m.get("heartbeat", 0), m.get("message_id", "")))
+
+    selected_ids = set()
+    selected_by_tier: dict[int, list[dict]] = {1: [], 2: [], 3: [], 4: [], 5: []}
+
+    def _add(tier: int, m: dict) -> bool:
+        mid = m.get("message_id")
+        if mid and mid not in selected_ids:
+            selected_ids.add(mid)
+            selected_by_tier[tier].append(m)
+            return True
+        return False
+
+    # Tier 1: Foundational first message
+    if visible:
+        _add(1, visible[0])
+
+    # Tier 5: Recent Conversational Tail (collect up to recent_tail_budget)
+    recent_candidates = visible[-recent_tail_budget:]
+    for m in reversed(recent_candidates):
+        _add(5, m)
+
+    # Classify remaining candidates
+    for m in visible:
+        mid = m.get("message_id")
+        if mid in selected_ids:
+            continue
+        rec = str(m.get("recipient", "")).lower()
+        text = str(m.get("message", ""))
+
+        # Tier 2: Operator appeals or questions
+        if rec in _QUESTION_RECIPIENTS or "?" in text:
+            _add(2, m)
+        # Tier 3: Coordination & commitments
+        elif _COORD_PATTERNS.search(text):
+            _add(3, m)
+        # Tier 4: Discoveries & mechanics
+        elif _DISC_PATTERNS.search(text):
+            _add(4, m)
+
+    # Assemble final list respecting strict max_total_messages budget
+    final_selected = []
+    # Tier 1 (Foundational)
+    final_selected.extend(selected_by_tier[1])
+    # Tier 5 (Recent Tail)
+    final_selected.extend(selected_by_tier[5])
+
+    # Fill remaining capacity from Tier 2 (Questions), Tier 3 (Commitments), Tier 4 (Discoveries)
+    for tier in (2, 3, 4):
+        candidates = selected_by_tier[tier]
+        candidates.sort(
+            key=lambda m: (len(str(m.get("message", ""))), m.get("heartbeat", 0)),
+            reverse=True,
+        )
+        for m in candidates:
+            if len(final_selected) >= max_total_messages:
+                break
+            final_selected.append(m)
+
+    # If capacity still remains (e.g. synthetic data with no keywords), fill from remaining visible messages (most recent first)
+    if len(final_selected) < max_total_messages:
+        for m in reversed(visible):
+            if len(final_selected) >= max_total_messages:
+                break
+            mid = m.get("message_id")
+            if mid and mid not in selected_ids:
+                selected_ids.add(mid)
+                final_selected.append(m)
+
+    # Guaranteed strict cap
+    final_selected = final_selected[:max_total_messages]
+    # Stable chronological order by heartbeat, then message_id
+    final_selected.sort(key=lambda m: (m.get("heartbeat", 0), m.get("message_id", "")))
+    return final_selected
+
+
+def select_bounded_relationship_events(
+    events: list[Any],
+    agent_id: str,
+    max_total_events: int = _MAX_BOUNDED_RELATIONSHIP_EVENTS,
+    recent_coloc_budget: int = _DEFAULT_RECENT_COLOC_BUDGET,
+) -> list[dict]:
+    """Select a bounded, relevance-aware subset of relationship events for model context.
+
+    Deterministic Priority Policy (Budget <= max_total_events):
+    1. First Co-location (Foundational meeting, Rank 1).
+    2. Public Object Creations (Milestones, Rank 2).
+    3. Recent Co-locations (up to recent_coloc_budget, Rank 3).
+    4. Object Interactions / Inspections (Rank 4, prioritized by evidence and recency).
+
+    STRICT CAP ENFORCEMENT: Output length is guaranteed <= max_total_events.
+    Full relationship ledger on disk is never altered.
+    """
+    dict_events: list[dict] = []
+    for e in events:
+        if isinstance(e, dict):
+            dict_events.append(e)
+        elif hasattr(e, "__dataclass_fields__"):
+            dict_events.append(asdict(e))
+        elif hasattr(e, "__dict__"):
+            dict_events.append(e.__dict__)
+
+    my_events = [
+        e for e in dict_events
+        if e.get("actor_agent_id") == agent_id or e.get("other_agent_id") == agent_id
+    ]
+    if len(my_events) <= max_total_events:
+        return sorted(my_events, key=lambda e: (e.get("heartbeat", 0), e.get("event_id", "")))
+
+    selected_ids = set()
+    selected_by_category: dict[str, list[dict]] = {
+        "first_meeting": [],
+        "creations": [],
+        "recent_colocs": [],
+        "inspections": [],
+    }
+
+    def _add(cat: str, e: dict) -> bool:
+        eid = e.get("event_id")
+        if eid and eid not in selected_ids:
+            selected_ids.add(eid)
+            selected_by_category[cat].append(e)
+            return True
+        return False
+
+    # 1. First co-location (foundational first meeting)
+    colocs = [e for e in my_events if e.get("event_type") == "co_location"]
+    if colocs:
+        _add("first_meeting", colocs[0])
+
+    # 2. Public object creations
+    creations = [e for e in my_events if e.get("event_type") == "public_object_creation"]
+    for e in creations:
+        _add("creations", e)
+
+    # 3. Recent co-locations (up to recent_coloc_budget)
+    recent_colocs = colocs[-recent_coloc_budget:] if len(colocs) > 1 else []
+    for e in reversed(recent_colocs):
+        _add("recent_colocs", e)
+
+    # 4. Object inspections (prioritize those with evidence references, then recency)
+    inspections = [e for e in my_events if e.get("event_type") == "inspect_other_object"]
+    inspections.sort(
+        key=lambda e: (len(e.get("public_evidence_references") or []), e.get("heartbeat", 0)),
+        reverse=True,
+    )
+    for e in inspections:
+        _add("inspections", e)
+
+    # Strict budget assembly
+    final_events = []
+    # First meeting & creations always take top priority
+    final_events.extend(selected_by_category["first_meeting"])
+    final_events.extend(selected_by_category["creations"])
+
+    # Next, recent co-locations up to recent_coloc_budget
+    for e in selected_by_category["recent_colocs"]:
+        if len(final_events) >= max_total_events:
+            break
+        final_events.append(e)
+
+    # Next, inspections up to remaining budget
+    for e in selected_by_category["inspections"]:
+        if len(final_events) >= max_total_events:
+            break
+        final_events.append(e)
+
+    # If any budget remains, fill with earlier co-locations (most recent first)
+    if len(final_events) < max_total_events:
+        for e in reversed(colocs):
+            if len(final_events) >= max_total_events:
+                break
+            eid = e.get("event_id")
+            if eid and eid not in selected_ids:
+                selected_ids.add(eid)
+                final_events.append(e)
+
+    # Guaranteed strict cap
+    final_events = final_events[:max_total_events]
+    # Stable chronological order by heartbeat, then event_id
+    final_events.sort(key=lambda e: (e.get("heartbeat", 0), e.get("event_id", "")))
+    return final_events
 
 
 # ---------------------------------------------------------------------------
