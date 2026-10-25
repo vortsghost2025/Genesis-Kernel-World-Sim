@@ -494,6 +494,7 @@ def runner_main(argv=None) -> int:
             **serving,
         )
         print("[runner] original execution evidence present")
+        _apply_retention(evidence.parent, args.pair_id)
         return 0
 
     ok, detail = export_state_evidence(export_script, world_sim_root, evidence)
@@ -512,7 +513,18 @@ def runner_main(argv=None) -> int:
         **serving,
     )
     print("[runner] recovered state evidence exported (labeled)")
+    _apply_retention(evidence.parent, args.pair_id)
     return 0
+
+
+def _apply_retention(scratch_dir: Path, pair_id: str) -> None:
+    """Automatic scratch evidence retention: keep newest 50 completed per civilization."""
+    try:
+        from backend.world.scratch_retention import prune_scratch_evidence
+        if ".scratch" in str(scratch_dir).lower():
+            prune_scratch_evidence(scratch_dir, pair=pair_id, keep_count=50, log_fn=print)
+    except Exception as exc:
+        print(f"[runner] warning: scratch retention failed ({type(exc).__name__}): {exc}")
 
 
 def _launcher_arg_parser() -> argparse.ArgumentParser:

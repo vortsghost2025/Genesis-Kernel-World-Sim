@@ -355,6 +355,11 @@ def run_tick(hb: int) -> bool:
     for pair in need:
         _, _, occ = store_state(pair)
         print(f"HB{hb} {pair}: OK at {time.strftime('%H:%M:%S')} — {json.dumps(occ)}", flush=True)
+        try:
+            from backend.world.scratch_retention import prune_scratch_evidence
+            prune_scratch_evidence(EVIDENCE_DIR, pair=pair, keep_count=50, log_fn=print)
+        except Exception as exc:
+            print(f"HB{hb} {pair}: retention warning ({type(exc).__name__}): {exc}", flush=True)
     return True
 
 
