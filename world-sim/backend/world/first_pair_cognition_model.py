@@ -1110,12 +1110,12 @@ Available actions:
 - ask_human: ask a question to the human operator (requires: question_id, question, reason_for_asking, requested_human_capability, urgency)
 - request_capability: request a new capability from the human (requires: capability_id, capability_reason)
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
-- gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default
+- gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default. Holding tools (stone/iron axe, woven basket) increases gathering yield
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
-- use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt" and "craft" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (only works on crafting_surface objects)
+- use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
-- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops meat in your hands; a wolf struck flees. Tools matter: iron strikes kill outright, bare hands take longer. Wolves will not enter the light of a fire
+- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops meat in your hands; a wolf struck flees. Tools matter: spears, axes, and iron strike decisively, bare hands take longer. Wolves will not enter the light of a fire
 """
 
 # Free speech. One optional top-level field, documented in the contract and
@@ -1383,7 +1383,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     if k in (
                         "wild_berries", "mushrooms", "edible_roots",
                         "wild_apples", "nuts", "honeycomb", "wild_grain",
-                        "fish", "shellfish"
+                        "fish", "shellfish", "meat", "cooked_meal",
                     ) and isinstance(v, int) and v > 0
                 ]
                 if edible_held:
@@ -1398,7 +1398,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     )
 
                 _lines.append(
-                    "Fact: each food satisfies hunger (fish: 40, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
+                    "Fact: each food satisfies hunger (cooked_meal: 75, fish: 40, meat: 40, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
                     "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22). "
                     "Storing food in containers protects your supply."
                 )

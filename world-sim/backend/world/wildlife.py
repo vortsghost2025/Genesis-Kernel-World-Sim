@@ -48,6 +48,10 @@ DEER_HP = 2                 # two hits without a tool; one with iron
 
 TOOL_DAMAGE_BONUS = {       # multiplier on hit damage by best held tool
     "iron_tool": 4.0,
+    "iron_spear": 4.0,
+    "flint_spear": 3.0,
+    "stone_axe": 2.5,
+    "flint_knife": 2.0,
     "flint": 2.0,
 }
 UNARMED_DAMAGE = 1.0
@@ -215,11 +219,11 @@ def best_tool_multiplier(inventory: dict) -> float:
 
 def strike(entity: dict, inventory: dict) -> tuple:
     """One agent strike on an animal. Returns (entity, damage, killed,
-    meat_dropped). Iron kills a deer outright; a wolf flees after one
-    solid hit."""
+    meat_dropped). Tools decide: spears, axes, and iron strike with amplified
+    damage; a wolf flees when its HP is exhausted."""
     mult = best_tool_multiplier(inventory)
     dmg = UNARMED_DAMAGE * mult
-    hp = entity.get("hp", 1) - (dmg if entity.get("kind") == "deer" else 1)
+    hp = max(0, entity.get("hp", 1) - dmg)
     entity = dict(entity)
     entity["hp"] = hp
     killed = hp <= 0

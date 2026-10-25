@@ -197,6 +197,7 @@ class FirstPairRuntime:
         self._eve_memory: list[dict] = []
         self._runtime_policy: RuntimePolicyRecord | None = None
         self._capability_grant: CapabilityGrantRecord | None = None
+        self._current_tile_resources: dict[str, list[dict]] = {}
 
         # (The per-tick pressure state is retired - see
         # docs/epistemic_pressure_spec.md §0.1. The world has no per-agent
@@ -501,6 +502,8 @@ class FirstPairRuntime:
 
     def _get_agent_inventory(self, agent_ref: str) -> dict:
         """Return the agent's gathered-resource inventory (persisted)."""
+        if not hasattr(self._store, "_read_json"):
+            return {}
         return dict(load_inventory(self._store).get(agent_ref, {}))
 
     # ------------------------------------------------------------------
@@ -1311,15 +1314,24 @@ class FirstPairRuntime:
                     in_shelter = self._in_shelter(pos)
                     if in_shelter:
                         continue  # shelters are absolute safety
+                    # Causal weapon defense: armed agents repel wolves
+                    inv = self._get_agent_inventory(ref)
+                    has_spear = inv.get("flint_spear", 0) > 0 or inv.get("iron_spear", 0) > 0
+                    has_axe = inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0
+                    if has_spear or has_axe:
+                        e["hp"] = 0  # the weapon wounds and drives the wolf off
+                        continue
                     vitals["vitality"] = round(max(
                         0.0, vitals.get("vitality", 100.0)
                         - wildlife.WOLF_BITE_DAMAGE), 2)
                     if vitals["vitality"] <= 0.0:
                         vitals["downed"] = True
 
-        # wolves dissolve at dawn
+        # wolves dissolve at dawn or when repelled by armed agents
         if not night:
             moved = [e for e in moved if e.get("kind") != "wolf"]
+        else:
+            moved = [e for e in moved if e.get("kind") != "wolf" or e.get("hp", 1) > 0]
 
         self._world_state.wildlife = moved
 
@@ -1527,11 +1539,19 @@ class FirstPairRuntime:
         resource = tile_resources[0]
         available = resource.get("amount", 0)
 
-        # No cap, no consumption (retired with the pressure model): a
-        # gather takes what the tile offers, up to GATHER_YIELD. The only
-        # thing that can stop a gather is the tile genuinely not having
-        # any left, which is reported above as a truthful rejection.
-        take = min(GATHER_YIELD, available)
+        # Causal tool utility (Phase 10JI):
+        # Holding relevant tools significantly boosts gathering yields.
+        inv = self._get_agent_inventory(agent_ref)
+        gather_yield = GATHER_YIELD
+        tool_detail = ""
+        if resource_kind == "wood" and (inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0):
+            gather_yield = 5
+            tool_detail = " (hewn with axe)"
+        elif resource_kind in ("wild_berries", "mushrooms", "edible_roots") and inv.get("woven_basket", 0) > 0:
+            gather_yield = 3
+            tool_detail = " (gathered with woven basket)"
+
+        take = min(gather_yield, available)
 
         resource["amount"] = available - take
 
@@ -1545,6 +1565,8 @@ class FirstPairRuntime:
             "amount_gathered": take,
             "remaining_on_tile": resource.get("amount", 0),
         }
+        if tool_detail:
+            outcome["detail"] = f"Gathered {take} {resource_kind}{tool_detail}"
 
         # Micro-ecology: wild bee colonies defend honeycomb unless calmed or dormant
         if resource_kind == "honeycomb":
@@ -1822,9 +1844,9 @@ class FirstPairRuntime:
                     "reason": f"Object is on {obj.get('tile_id')}, not your current tile"}
 
         operation = action.get("operation", "inspect")
-        if operation not in ("deposit", "extract", "inspect", "smelt", "craft"):
+        if operation not in ("deposit", "extract", "inspect", "smelt", "craft", "cook"):
             return {"status": "rejected",
-                    "reason": f"Unknown operation: {operation}. Use deposit, extract, or inspect."}
+                    "reason": f"Unknown operation: {operation}. Use deposit, extract, inspect, smelt, craft, or cook."}
 
         obj_type = str(obj.get("object_type", "")).casefold()
 
@@ -1833,9 +1855,21 @@ class FirstPairRuntime:
         if operation == "smelt" and "furnace" not in obj_type and "foundry" not in obj_type:
             return {"status": "rejected",
                     "reason": f"Smelting requires a furnace or foundry, not a {obj.get('object_type')}"}
-        if operation == "craft" and "crafting_surface" not in obj_type and "forge" not in obj_type:
+        if operation == "craft" and not any(term in obj_type for term in ("crafting_surface", "forge", "workbench", "workshop")):
             return {"status": "rejected",
                     "reason": f"Crafting requires a crafting surface, not a {obj.get('object_type')}"}
+        if operation == "cook":
+            valid_cooking_types = ("fire", "campfire", "hearth", "cooker", "oven")
+            if not any(term in obj_type for term in valid_cooking_types):
+                return {"status": "rejected",
+                        "reason": f"Cooking requires a fire, campfire, or hearth, not a {obj.get('object_type')}"}
+            if not self._is_functional_fire(obj):
+                return {"status": "rejected",
+                        "reason": f"The {obj.get('object_type')} at {obj_id} has no fuel materials and is unlit"}
+            weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+            if weather in ("rain", "storm", "blizzard") and not self._in_shelter(obj.get("tile_id", "")):
+                return {"status": "rejected",
+                        "reason": f"The fire at {obj_id} is snuffed by the {weather} (build a shelter or roof to protect it)"}
 
         # Initialize contents if the object predates the field
         if "contents" not in obj or not isinstance(obj.get("contents"), dict):
@@ -1852,11 +1886,22 @@ class FirstPairRuntime:
                     "reason": f"{operation} requires a materials dict like "
                               f'{{"stone": 2}}'}
 
+        # Strict material validation for all mutating operations
+        if operation in ("craft", "cook", "deposit", "extract"):
+            for kind, amount in materials.items():
+                if not isinstance(kind, str) or not kind.strip():
+                    return {"status": "rejected", "reason": "Invalid material name"}
+                if not isinstance(amount, int) or isinstance(amount, bool) or amount < 1:
+                    return {"status": "rejected", "reason": f"Invalid amount for {kind}: {amount} (must be a positive integer)"}
+
         if operation == "smelt":
             return self._smelt_materials(obj_id, obj, materials)
 
         if operation == "craft":
             return self._craft_on_surface(obj_id, obj, materials, agent_ref)
+
+        if operation == "cook":
+            return self._cook_on_fire(obj_id, obj, materials, agent_ref)
 
         if operation == "deposit":
             from backend.world.first_pair_persistence import add_to_inventory
@@ -1907,10 +1952,26 @@ class FirstPairRuntime:
         (("stone", 2), ("wood", 1)): "stone_axe",
         (("fiber_plants", 3),): "fiber_rope",
         (("stone", 1), ("wood", 2)): "stone_hammer",
+        (("flint", 2), ("wood", 1)): "flint_knife",
+        (("fiber_plants", 1), ("flint", 1), ("wood", 2)): "flint_spear",
+        (("fiber_plants", 4), ("wood", 2)): "woven_basket",
+        (("clay", 3),): "clay_pot",
+        (("iron", 2), ("wood", 1)): "iron_axe",
+        (("fiber_plants", 1), ("iron", 1), ("wood", 2)): "iron_spear",
     }
 
     _SMELT_RECIPES = {
         "iron_ore": {"input": 3, "output": "iron", "output_amount": 1},
+    }
+
+    _COOK_RECIPES = {
+        (("edible_roots", 1), ("wild_berries", 2)): "cooked_meal",
+        (("wild_berries", 3),): "cooked_meal",
+        (("edible_roots", 2),): "cooked_meal",
+        (("fish", 1),): "cooked_meal",
+        (("meat", 1),): "cooked_meal",
+        (("wild_grain", 2),): "cooked_meal",
+        (("honeycomb", 1), ("wild_berries", 1)): "cooked_meal",
     }
 
     def _smelt_materials(self, obj_id: str, obj: dict, materials: dict) -> dict:
@@ -1969,6 +2030,30 @@ class FirstPairRuntime:
             add_to_inventory(self._store, agent_ref, kind, -amount)
         add_to_inventory(self._store, agent_ref, recipe, 1)
         return {"status": "success", "detail": f"Crafted {recipe}", "crafted": recipe}
+
+    def _cook_on_fire(self, obj_id: str, obj: dict, materials: dict,
+                      agent_ref: str) -> dict:
+        """Cook raw ingredients into cooked meals over an active fire."""
+        from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+
+        inventory = load_inventory(self._store).get(agent_ref, {})
+        material_set = tuple(sorted(materials.items()))
+
+        recipe = self._COOK_RECIPES.get(material_set)
+        if not recipe:
+            return {"status": "rejected",
+                    "reason": f"Unknown cooking recipe: {dict(materials)}. Fire cooks specific food combinations."}
+
+        for kind, amount in materials.items():
+            held = inventory.get(kind, 0)
+            if held < amount:
+                return {"status": "rejected",
+                        "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
+
+        for kind, amount in materials.items():
+            add_to_inventory(self._store, agent_ref, kind, -amount)
+        add_to_inventory(self._store, agent_ref, recipe, 1)
+        return {"status": "success", "detail": f"Cooked {recipe} over {obj_id}", "cooked": recipe}
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
