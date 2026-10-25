@@ -1446,7 +1446,7 @@ def build_system_prompt(context: AgentContext) -> str:
                         env_desc.append(f"Season is {season_name}. Winter nights drop warmth toward cold levels (20 or lower), draining vitality directly.")
 
                     if sheltered:
-                        env_desc.append("You are resting near shelter (a built hut, cabin, roof, wall, lean-to, or cave object), which slows warmth loss by more than half.")
+                        env_desc.append("You are resting near shelter (a built hut, cabin, roof, wall, or lean-to), which slows warmth loss by more than half.")
                     elif by_fire:
                         env_desc.append("A nearby fire radiates warmth, protecting you from the cold.")
                     else:
@@ -1455,10 +1455,59 @@ def build_system_prompt(context: AgentContext) -> str:
                     _lines.append(" ".join(env_desc))
                     _lines.append(
                         "Facts of the elements: "
-                        "(1) Fire: A lit campfire or hearth within three tiles restores warmth fast (+9 per heartbeat). "
-                        "(2) Shelter: A constructed object (lean-to, hut, cabin, roof, wall, or cave shelter) protects fires from rain and cuts warmth loss by more than half. "
+                        "(1) Fire: A lit campfire or hearth within three tiles restores warmth fast (+9 per heartbeat), unless snuffed by rain. "
+                        "(2) Shelter: A constructed shelter (lean-to, hut, cabin, roof, or wall) protects fires from rain and cuts warmth loss by more than half. "
                         "(3) Storage: Storing gathered provisions into containers (baskets, chests, caches, storage objects) on your tile creates shared reserves with your companion via use_object deposit and extract."
                     )
+
+            # Sky forecast warning for upcoming rain/storms
+            fc_next = _env.get("forecast_next")
+            fc_hb = _env.get("weather_changes_at_heartbeat")
+            if fc_next in ("rain", "storm", "blizzard") and fc_hb is not None:
+                _lines.append(
+                    f"Sky warning: Weather will turn to {fc_next} at heartbeat {fc_hb}. "
+                    "Open fires will be snuffed by rain unless built under a roof or inside a shelter. "
+                    "Resting in a shelter prevents storm exposure damage and cold drain."
+                )
+
+            # Wild bee colonies and honeycomb safety
+            wild_bees = _env.get("wild_bees")
+            if wild_bees:
+                b_state = wild_bees.get("colony_state", "active")
+                if b_state == "active":
+                    _lines.append(
+                        "Fact: A wild bee colony on this tile is actively buzzing around its honeycomb. "
+                        "Gathering without smoke will cause defensive stings (-2.0 vitality). "
+                        "Smoke from a nearby fire or cold weather calms the swarm for safe harvesting into your belongings. "
+                        "Later eating a gathered honeycomb with the eat action satisfies 32 hunger points."
+                    )
+                elif b_state == "calmed":
+                    _lines.append(
+                        "Fact: Wild bees on this tile are calmed by nearby campfire smoke, allowing safe honeycomb gathering into your belongings. "
+                        "Eating a gathered honeycomb with the eat action satisfies 32 hunger points."
+                    )
+                elif b_state == "dormant":
+                    _lines.append(
+                        "Fact: Wild bees on this tile are clustered dormant from cold/rain/night, allowing safe honeycomb gathering into your belongings. "
+                        "Eating a gathered honeycomb with the eat action satisfies 32 hunger points."
+                    )
+
+        # Wildlife & Predator awareness: alert on wolf presence and ground the absolute sanctuary of shelter
+        wildlife_obs = (context.observation or {}).get("wildlife") or {}
+        nearby_wildlife = wildlife_obs.get("nearby") or []
+        howling = wildlife_obs.get("howling", False)
+        wolves_near = [w for w in nearby_wildlife if w.get("kind") == "wolf"]
+        if wolves_near or howling:
+            if wolves_near:
+                min_dist = min(w.get("distance", 99) for w in wolves_near)
+                _lines.append(f"Predator Alert: A wolf is nearby ({min_dist} tiles away).")
+            else:
+                _lines.append("Predator Alert: Wolf howls echo in the dark.")
+            _lines.append(
+                "Fact: Predators physically refuse to enter constructed shelters (huts, lean-tos, cabins, roofs) "
+                "or approach within 3 tiles of a lit fire. Inside a constructed shelter or beside a lit fire, "
+                "you are completely safe from animal attacks."
+            )
 
         if _lines:
             body_section = (

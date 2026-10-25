@@ -100,7 +100,7 @@ def test_correct_agent_visibility(isolated_data):
     adam_id = ident.get("adam_agent_id")
     eve_id = ident.get("eve_agent_id")
 
-    # Add private messages
+    # Add private messages and operator inquiries
     test_msgs = copy.deepcopy(msgs)
     test_msgs.append({
         "message_id": "secret-adam-msg",
@@ -116,15 +116,45 @@ def test_correct_agent_visibility(isolated_data):
         "sender_agent_id": "operator",
         "message": "Top secret for Eve only"
     })
+    test_msgs.append({
+        "message_id": "operator-appeal-from-adam",
+        "heartbeat": 9998,
+        "recipient": "the operator",
+        "sender_agent_id": adam_id,
+        "message": "Adam asking operator a private question"
+    })
+    test_msgs.append({
+        "message_id": "operator-appeal-from-eve",
+        "heartbeat": 9998,
+        "recipient": "operator",
+        "sender_agent_id": eve_id,
+        "message": "Eve asking operator a private question"
+    })
 
-    eve_selected = select_bounded_public_messages(test_msgs, agent_ref="east_eve", max_total_messages=35)
-    adam_selected = select_bounded_public_messages(test_msgs, agent_ref="east_adam", max_total_messages=35)
+    eve_selected = select_bounded_public_messages(
+        test_msgs, agent_ref="east_eve", canonical_agent_ref=eve_id, max_total_messages=35
+    )
+    adam_selected = select_bounded_public_messages(
+        test_msgs, agent_ref="east_adam", canonical_agent_ref=adam_id, max_total_messages=35
+    )
 
     eve_ids = {m["message_id"] for m in eve_selected}
     adam_ids = {m["message_id"] for m in adam_selected}
 
+    # 1. Inbound private messages addressed to a specific agent
     assert "secret-adam-msg" not in eve_ids, "Private message for Adam leaked into Eve's context!"
     assert "secret-eve-msg" not in adam_ids, "Private message for Eve leaked into Adam's context!"
+
+    # 2. Outbound operator inquiries: visible only to authoring agent
+    assert "operator-appeal-from-adam" in adam_ids, "Adam's inquiry to operator missing from Adam's context!"
+    assert "operator-appeal-from-adam" not in eve_ids, "Adam's inquiry to operator leaked to Eve!"
+
+    assert "operator-appeal-from-eve" in eve_ids, "Eve's inquiry to operator missing from Eve's context!"
+    assert "operator-appeal-from-eve" not in adam_ids, "Eve's inquiry to operator leaked to Adam!"
+
+    # 3. Real historical operator inquiries in canon: no cross-agent leakage
+    assert "msg-fee573ae1fb7" not in eve_ids, "Historical Adam operator appeal (HB 830) leaked to Eve!"
+    assert "msg-bac436451ea9" not in adam_ids, "Historical Eve operator appeal (HB 937) leaked to Adam!"
 
 
 def test_stable_chronological_ordering(isolated_data):

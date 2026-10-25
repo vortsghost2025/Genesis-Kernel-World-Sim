@@ -79,7 +79,7 @@ class TestHeartbeatHook:
     def test_fire_warms_and_hunger_still_rises(self):
         rt = _runtime_stub()
         rt._world_state.public_objects = {
-            "o1": {"tile_id": "cont_a_gen_1_0", "object_type": "campfire"},
+            "o1": {"tile_id": "cont_a_gen_1_0", "object_type": "campfire", "materials": {"wood": 2}},
         }
         start = survival.initial_vitals()["warmth"]
         for hb in (200, 201, 202):
@@ -94,7 +94,7 @@ class TestFireAndShelterDetection:
     def test_fire_within_radius_detected(self):
         rt = _runtime_stub()
         rt._world_state.public_objects = {
-            "o1": {"tile_id": "cont_a_gen_3_0", "object_type": "campfire"},
+            "o1": {"tile_id": "cont_a_gen_3_0", "object_type": "campfire", "materials": {"wood": 2}},
         }
         assert rt._nearby_fire("cont_a_gen_0_0") is True
         assert rt._nearby_fire("cont_a_gen_9_9") is False

@@ -92,6 +92,7 @@ from backend.world.question_proposal import QuestionProposal
 from backend.world.world_event_sanitizer import sanitize_public_text
 from backend.world import survival
 from backend.world import wildlife
+from backend.world import insects
 from backend.world.world_pressure import (
     GATHER_YIELD,
     PHYSICS_VERSION,
@@ -674,6 +675,46 @@ class FirstPairRuntime:
             "sheltered": self._in_shelter(position) if position else False,
         }
 
+        # Check if honeycomb on current tile to report bee colony state
+        if position:
+            cur_biome = ""
+            for td in observation.get("visible_tile_details", []):
+                if td.get("tile_id") == position:
+                    cur_biome = td.get("biome") or td.get("terrain") or ""
+                    break
+            if not cur_biome and self._fog_active():
+                try:
+                    tm = load_true_map(self._get_data_root())
+                    for t in tm.get("tiles", []):
+                        if t.get("tile_id") == position:
+                            cur_biome = t.get("biome") or t.get("terrain") or ""
+                            break
+                except Exception:
+                    pass
+
+            has_honeycomb = any(r.get("kind") == "honeycomb" and r.get("amount", 0) > 0
+                                for r in self._current_tile_resources.get(position, []))
+            if has_honeycomb:
+                near_smoke = self._nearby_smoke(position, heartbeat_number)
+                b_state = insects.bee_colony_state(
+                    weather_name,
+                    observation["environment"]["temperature"],
+                    observation["environment"]["time_of_day"] == "night",
+                    near_smoke,
+                )
+                observation["environment"]["wild_bees"] = {
+                    "tile": position,
+                    "colony_state": b_state,
+                }
+            amb = insects.ambient_insect_atmosphere(
+                observation["environment"]["season"],
+                weather_name,
+                observation["environment"]["time_of_day"] == "night",
+                biome=cur_biome,
+            )
+            if amb:
+                observation["environment"]["ambient_sound"] = amb
+
         # Visible public messages (addressed to this agent or public "all", bounded for model context)
         visible_msgs = select_bounded_public_messages(
             self._world_state.public_messages or [],
@@ -1038,17 +1079,45 @@ class FirstPairRuntime:
         except (IndexError, ValueError):
             return None
 
+    @staticmethod
+    def _tile_continent(tile_id: str) -> str:
+        """Extract continent identity from a tile id (e.g. 'cont_a', 'cont_b')."""
+        tid = str(tile_id or "").strip()
+        if tid.startswith("cont_a"):
+            return "cont_a"
+        if tid.startswith("cont_b"):
+            return "cont_b"
+        if "west" in tid:
+            return "cont_b"
+        return "cont_a"
+
+    @property
+    def _pair_continent(self) -> str:
+        if "west" in str(self._pair_id).lower():
+            return "cont_b"
+        return "cont_a"
+
+    @staticmethod
+    def _is_functional_fire(record: dict) -> bool:
+        """A fire is functional only if it was physically constructed with materials."""
+        if not isinstance(record, dict):
+            return False
+        materials = record.get("materials")
+        if not isinstance(materials, dict) or not materials:
+            return False
+        return any(isinstance(v, (int, float)) and v > 0 for v in materials.values())
 
     @staticmethod
     def _entity_xy(entity_tile):
         """Entities carry coordinate tuples (or serialized lists), not
-        string tile ids - accept both."""
+        string tile ids — accept both."""
         if isinstance(entity_tile, (tuple, list)) and len(entity_tile) == 2:
             try:
                 return int(entity_tile[0]), int(entity_tile[1])
             except (TypeError, ValueError):
                 return None
         return FirstPairRuntime._tile_xy(entity_tile)
+
     def _nearby_fire(self, tile_id: str,
                      heartbeat_number: int | None = None) -> bool:
         """A warming fire within FIRE_RADIUS (Chebyshev).
@@ -1062,6 +1131,7 @@ class FirstPairRuntime:
         if pos is None:
             return False
         px, py = pos
+        continent = self._tile_continent(tile_id)
         weather = "clear"
         if heartbeat_number is not None:
             weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
@@ -1070,17 +1140,57 @@ class FirstPairRuntime:
         for record in self._world_state.public_objects.values():
             if not isinstance(record, dict):
                 continue
+            if not self._is_functional_fire(record):
+                continue
+            rec_tid = record.get("tile_id", "")
+            if self._tile_continent(rec_tid) != continent:
+                continue
             otype = str(record.get("object_type", "")).lower()
             if not any(k in otype for k in fire_kinds):
                 continue
-            other = self._tile_xy(record.get("tile_id", ""))
+            other = self._tile_xy(rec_tid)
             if other is None:
                 continue
             if max(abs(other[0] - px), abs(other[1] - py)) <= survival.FIRE_RADIUS:
                 if weather in ("rain", "storm"):
-                    if self._in_shelter(record.get("tile_id", "")):
+                    if self._in_shelter(rec_tid):
                         return True  # a roofed fire keeps burning
                     continue  # an open fire is snuffed by the rain
+                return True
+        return False
+
+    def _nearby_smoke(self, tile_id: str,
+                      heartbeat_number: int | None = None) -> bool:
+        """A lit fire/hearth/campfire within 1 tile (Chebyshev) provides smoke."""
+        pos = self._tile_xy(tile_id)
+        if pos is None:
+            return False
+        px, py = pos
+        continent = self._tile_continent(tile_id)
+        weather = "clear"
+        if heartbeat_number is not None:
+            weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+        fire_kinds = ("fire", "forge", "furnace", "brazier", "hearth",
+                      "campfire")
+        for record in self._world_state.public_objects.values():
+            if not isinstance(record, dict):
+                continue
+            if not self._is_functional_fire(record):
+                continue
+            rec_tid = record.get("tile_id", "")
+            if self._tile_continent(rec_tid) != continent:
+                continue
+            otype = str(record.get("object_type", "")).lower()
+            if not any(k in otype for k in fire_kinds):
+                continue
+            other = self._tile_xy(rec_tid)
+            if other is None:
+                continue
+            if max(abs(other[0] - px), abs(other[1] - py)) <= 1:
+                if weather in ("rain", "storm", "blizzard"):
+                    if self._in_shelter(rec_tid):
+                        return True
+                    continue
                 return True
         return False
 
@@ -1090,15 +1200,19 @@ class FirstPairRuntime:
         if pos is None:
             return False
         px, py = pos
+        continent = self._tile_continent(tile_id)
         shelter_kinds = ("shelter", "hut", "wall", "roof", "cabin", "tent",
                          "lean", "cave", "cavern", "overhang", "grotto", "burrow")
         for record in self._world_state.public_objects.values():
             if not isinstance(record, dict):
                 continue
+            rec_tid = record.get("tile_id", "")
+            if self._tile_continent(rec_tid) != continent:
+                continue
             otype = str(record.get("object_type", "")).lower()
             if not any(k in otype for k in shelter_kinds):
                 continue
-            other = self._tile_xy(record.get("tile_id", ""))
+            other = self._tile_xy(rec_tid)
             if other is None:
                 continue
             if max(abs(other[0] - px), abs(other[1] - py)) <= 1:
@@ -1123,17 +1237,28 @@ class FirstPairRuntime:
             xy = self._tile_xy(occupancy.get(ref, ""))
             if xy is not None:
                 agent_xys.append(xy)
+        weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+        pair_continent = self._pair_continent
         fire_xys = []
         sheltered_tiles = set()
+        fire_kinds = ("fire", "forge", "furnace", "brazier", "hearth", "campfire")
         for o in (self._world_state.public_objects or {}).values():
             if not isinstance(o, dict):
                 continue
+            tid = o.get("tile_id", "")
+            if self._tile_continent(tid) != pair_continent:
+                continue
             ot = str(o.get("object_type", "")).lower()
-            otxy = self._tile_xy(o.get("tile_id", ""))
+            otxy = self._tile_xy(tid)
             if otxy is None:
                 continue
-            if any(k in ot for k in ("fire", "forge", "furnace")):
-                fire_xys.append(otxy)
+            if any(k in ot for k in fire_kinds) and self._is_functional_fire(o):
+                # An open fire is snuffed in rain/storm/blizzard; only a sheltered fire keeps burning
+                if weather in ("rain", "storm", "blizzard"):
+                    if self._in_shelter(tid):
+                        fire_xys.append(otxy)
+                else:
+                    fire_xys.append(otxy)
             if any(k in ot for k in ("shelter", "roof", "wall", "hut",
                                      "cabin", "lean")):
                 sheltered_tiles.add(otxy)
@@ -1414,12 +1539,34 @@ class FirstPairRuntime:
         # so what is gathered survives restarts.
         add_to_inventory(self._store, agent_ref, resource_kind, take)
 
-        return {
+        outcome = {
             "status": "success",
             "resource_kind": resource_kind,
             "amount_gathered": take,
             "remaining_on_tile": resource.get("amount", 0),
         }
+
+        # Micro-ecology: wild bee colonies defend honeycomb unless calmed or dormant
+        if resource_kind == "honeycomb":
+            near_smoke = self._nearby_smoke(position, heartbeat_number)
+            forecast = survival.weather_forecast(self._pair_id, heartbeat_number)
+            weather_name = forecast["current"]
+            temp = survival.effective_temperature(heartbeat_number, weather_name)
+            is_night = survival.is_night(heartbeat_number)
+            colony_state = insects.bee_colony_state(weather_name, temp, is_night, near_smoke)
+            vitals = self._vitals_for(agent_ref)
+            cur_vit = vitals.get("vitality", 100.0)
+            dmg, bee_msg = insects.resolve_bee_gather(colony_state, cur_vit)
+            if dmg > 0:
+                new_vit = round(max(0.0, cur_vit - dmg), 2)
+                vitals["vitality"] = new_vit
+                if new_vit <= 0.0:
+                    vitals["downed"] = True
+            outcome["bee_colony_state"] = colony_state
+            outcome["sting_damage"] = dmg
+            outcome["detail"] = bee_msg
+
+        return outcome
 
     def _execute_revise_charter(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         """Persist one self-authored charter version (append-only).
@@ -1599,6 +1746,19 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Invalid object_id"}
         if object_id in self._world_state.public_objects:
             return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
+
+        # Physical functional structures cannot be created without construction materials.
+        lowered_type = str(object_type or "").lower()
+        functional_types = (
+            "campfire", "fire", "hearth", "forge", "furnace", "brazier",
+            "shelter", "cabin", "hut", "lean-to", "lean_to", "lean", "roof", "wall", "tent",
+        )
+        if any(ft in lowered_type for ft in functional_types):
+            return {
+                "status": "rejected",
+                "reason": f"Physical {object_type} cannot be created without construction materials. Use the 'build' action to construct physical structures with materials.",
+            }
+
         # Must place on current tile
         current_pos = self._world_state.tile_occupancy.get(
             agent_ref, self._habitat["starting_tile_ids"][agent_ref]

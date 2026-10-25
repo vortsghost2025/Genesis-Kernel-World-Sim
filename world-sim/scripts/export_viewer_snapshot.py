@@ -252,6 +252,11 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
                     events.append({"hb": hb, "kind": "eat",
                                    "who": name,
                                    "text": f"ate {action.get('resource_kind', 'something')}"})
+            elif at == "attack":
+                if outcome.get("status") != "rejected":
+                    events.append({"hb": hb, "kind": "hunt",
+                                   "who": name,
+                                   "text": f"hunted {action.get('target_id', 'wildlife')}"})
             elif at == "ask_human":
                 q = str(action.get("question", ""))[:90]
                 if q:
@@ -400,6 +405,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "current_positions": world_state.get("tile_occupancy", {}),
         "vitals": world_state.get("vitals", {}),
         "weather": weather_snapshot,
+        "wildlife": list(world_state.get("wildlife") or []),
         "chronicle": build_chronicle(heartbeats, name_by_hash),
         "public_objects": world_state.get("public_objects", {}),
         "public_messages": [
@@ -450,6 +456,7 @@ def extract_per_heartbeat(heartbeats: list[dict]) -> list[dict]:
                     "charter_text": action.get("charter_text"),
                     "object_id": action.get("object_id"),
                     "object_type": action.get("object_type"),
+                    "target_id": action.get("target_id"),
                     "description": action.get("description"),
                     "materials": action.get("materials"),
                     # execution outcome (world pressure era; absent in older

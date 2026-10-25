@@ -969,13 +969,24 @@ def select_bounded_public_messages(
     STRICT CAP ENFORCEMENT: Output length is guaranteed <= max_total_messages.
     Full canon on disk is never altered.
     """
-    visible = [
-        m for m in messages
-        if isinstance(m, dict) and (
-            m.get("recipient") in (agent_ref, "all", "public", "operator", "the operator")
-            or m.get("recipient") == canonical_agent_ref
-        )
-    ]
+    visible = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        recip = m.get("recipient")
+        if recip in (agent_ref, "all", "public") or (canonical_agent_ref and recip == canonical_agent_ref):
+            visible.append(m)
+        elif recip in _QUESTION_RECIPIENTS:
+            # Privacy rule: messages addressed to the operator/the operator are inquiries or appeals
+            # that belong solely to the authoring agent. They must NEVER be visible to the other agent.
+            sender_id = m.get("sender_agent_id") or m.get("sender") or m.get("author") or ""
+            is_author = (
+                sender_id == agent_ref
+                or (canonical_agent_ref and sender_id == canonical_agent_ref)
+                or (agent_ref and agent_ref in sender_id)
+            )
+            if is_author:
+                visible.append(m)
     if len(visible) <= max_total_messages:
         return sorted(visible, key=lambda m: (m.get("heartbeat", 0), m.get("message_id", "")))
 

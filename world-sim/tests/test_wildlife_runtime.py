@@ -71,7 +71,7 @@ class TestTick:
     def test_fire_radius_is_absolute_safety(self):
         rt = _runtime_stub()
         rt._world_state.public_objects = {
-            "f1": {"tile_id": "cont_a_gen_0_1", "object_type": "campfire"}}
+            "f1": {"tile_id": "cont_a_gen_0_1", "object_type": "campfire", "materials": {"wood": 2}}}
         rt._world_state.wildlife = [
             {"kind": "wolf", "id": "w1", "tile": (1, 0), "hp": 1}]
         rt._vitals_for("east_adam")["vitality"] = 100.0
