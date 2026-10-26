@@ -339,6 +339,7 @@ def test_predator_defense_armed_agent_repels_wolf(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(survival, "weather_at", lambda pid, hb: ("clear", 5000))
     monkeypatch.setattr(survival, "is_night", lambda hb: True)
+    monkeypatch.setattr(wildlife, "spawn_wolves", lambda entities, *args: entities)
 
     # CASE A: Unarmed agent takes bite damage
     rt.wildlife_tick(heartbeat_number=100)
@@ -387,3 +388,176 @@ def test_prompt_recognizes_cooked_meal_as_food():
     assert "you are carrying edible food in your belongings: cooked_meal (x1)" in prompt
     assert "You currently hold no food in your belongings" not in prompt
     assert "cooked_meal: 75" in prompt
+
+
+def test_modify_inventory_batch_atomicity(tmp_path: Path):
+    from backend.world.first_pair_persistence import modify_inventory_batch
+
+    rt = _setup_runtime(tmp_path)
+    agent = "east_adam"
+    add_to_inventory(rt._store, agent, "flint", 2)
+    add_to_inventory(rt._store, agent, "wood", 1)
+
+    # 1. Attempt batch where one item overdrafts -> raises ValueError, nothing mutated
+    with pytest.raises(ValueError, match="inventory:overdraft_wood"):
+        modify_inventory_batch(rt._store, agent, {"flint": -2, "wood": -5, "flint_knife": 1})
+
+    inv = load_inventory(rt._store).get(agent, {})
+    assert inv.get("flint") == 2
+    assert inv.get("wood") == 1
+    assert "flint_knife" not in inv
+
+    # 2. Valid batch succeeds atomically
+    modify_inventory_batch(rt._store, agent, {"flint": -2, "wood": -1, "flint_knife": 1})
+    inv_after = load_inventory(rt._store).get(agent, {})
+    assert inv_after.get("flint") == 0
+    assert inv_after.get("wood") == 0
+    assert inv_after.get("flint_knife") == 1
+
+
+def test_wildlife_observation_exposes_id_and_actionable_attack(tmp_path: Path):
+    rt = _setup_runtime(tmp_path)
+    agent = "east_adam"
+    rt._world_state.tile_occupancy[agent] = "cont_a_gen_0_0"
+    pxy = rt._tile_xy(rt._world_state.tile_occupancy[agent])
+    assert pxy == (0, 0)
+
+    # Spawn a deer on an adjacent tile (0, 1)
+    deer_tile = (0, 1)
+    rt._world_state.wildlife = [{
+        "kind": "deer",
+        "id": "deer-observable-99",
+        "tile": deer_tile,
+        "hp": 2,
+    }]
+
+    # 1. Observation exposes 'id' along with 'kind' and 'distance'
+    obs = rt._wildlife_visible(agent, heartbeat_number=10)
+    nearby = obs.get("nearby", [])
+    assert len(nearby) == 1
+    assert nearby[0]["kind"] == "deer"
+    assert nearby[0]["id"] == "deer-observable-99"
+    assert nearby[0]["distance"] == 1
+
+    # 2. Attack using exact target_id succeeds
+    action_by_id = {
+        "action_type": "attack",
+        "target_id": "deer-observable-99",
+    }
+    res1 = rt._execute_action(agent, action_by_id, 10)
+    assert res1["status"] == "success"
+    assert res1["target_id"] == "deer-observable-99"
+    assert res1["target_kind"] == "deer"
+
+    # 3. Fallback: attack using target_id="deer" succeeds when single adjacent candidate
+    rt._world_state.wildlife = [{
+        "kind": "deer",
+        "id": "deer-observable-100",
+        "tile": deer_tile,
+        "hp": 2,
+    }]
+    action_by_kind = {
+        "action_type": "attack",
+        "target_id": "deer",
+    }
+    res2 = rt._execute_action(agent, action_by_kind, 11)
+    assert res2["status"] == "success"
+    assert res2["target_id"] == "deer-observable-100"
+    assert res2["target_kind"] == "deer"
+
+    # 4. Ambiguity rejection: when multiple deer are within reach, reject kind fallback
+    rt._world_state.wildlife = [
+        {"kind": "deer", "id": "deer-one", "tile": (0, 1), "hp": 2},
+        {"kind": "deer", "id": "deer-two", "tile": (1, 0), "hp": 2},
+    ]
+    res3 = rt._execute_action(agent, action_by_kind, 12)
+    assert res3["status"] == "rejected"
+    assert "Multiple deers within reach; specify exact target_id" in res3["reason"]
+
+
+def test_tool_damage_bonus_ordering_and_wolf_hp():
+    assert "iron_axe" in wildlife.TOOL_DAMAGE_BONUS
+    assert wildlife.TOOL_DAMAGE_BONUS["iron_axe"] == 3.5
+    assert wildlife.TOOL_DAMAGE_BONUS["flint_knife"] == 2.2
+    assert wildlife.TOOL_DAMAGE_BONUS["flint"] == 2.0
+    assert wildlife.TOOL_DAMAGE_BONUS["flint_knife"] > wildlife.TOOL_DAMAGE_BONUS["flint"]
+    assert wildlife.WOLF_FLEE_HP == 2
+
+    # Unarmed strike: 1.0 damage -> wolf (HP=2) survives first hit, killed on second
+    wolf = {"kind": "wolf", "id": "wolf-hp-test", "tile": [0, 0], "hp": wildlife.WOLF_FLEE_HP}
+    wolf, dmg, killed, _ = wildlife.strike(wolf, {})
+    assert dmg == 1.0
+    assert wolf["hp"] == 1.0
+    assert not killed
+
+    wolf, dmg2, killed2, meat = wildlife.strike(wolf, {})
+    assert dmg2 == 1.0
+    assert wolf["hp"] == 0.0
+    assert killed2
+
+    # Tool strike (flint_knife, mult=2.2): 2.2 damage -> drives wolf off in 1 strike
+    wolf_fresh = {"kind": "wolf", "id": "wolf-hp-test-2", "tile": [0, 0], "hp": wildlife.WOLF_FLEE_HP}
+    wolf_fresh, dmg_tool, killed_tool, _ = wildlife.strike(wolf_fresh, {"flint_knife": 1})
+    assert dmg_tool == 2.2
+    assert wolf_fresh["hp"] == 0.0
+    assert killed_tool
+
+
+def test_cognition_outcome_propagation_and_reflection():
+    from backend.world.first_pair_cognition_model import ModelCognitionBackend, _recent_action_failure_line
+
+    backend = object.__new__(ModelCognitionBackend)
+    ctx = AgentContext(
+        agent_id="test-agent-id",
+        canonical_name="Adam",
+        canonical_ref="east_adam",
+        heartbeat_number=5,
+        position="tile-1",
+        observation={},
+        memory=[],
+        goals=[],
+        unanswered_questions=[],
+        world_public_objects={},
+        habitat_allowed_tiles=["tile-1"],
+        habitat_movement_allowed=False,
+        previous_action={"action_type": "use_object", "target_object_id": "table-1"},
+        timestamp_utc="2026-10-25T00:00:00Z",
+    )
+
+    # 1. Reflection includes success detail
+    success_outcome = {"status": "success", "detail": "Crafted flint_spear", "crafted": "flint_spear"}
+    ref_succ = backend.reflect_on_outcome(ctx, ctx.previous_action, success_outcome)
+    assert "Crafted flint_spear" in ref_succ
+
+    # 2. Reflection includes rejection reason
+    reject_outcome = {"status": "rejected", "reason": "Unknown recipe: {'stone': 1}"}
+    ref_rej = backend.reflect_on_outcome(ctx, ctx.previous_action, reject_outcome)
+    assert "Unknown recipe" in ref_rej
+
+    # 3. Prompt failure line renders exact action type and reason, not hardcoded 'gather'
+    ctx_with_failures = AgentContext(
+        agent_id="test-agent-id",
+        canonical_name="Adam",
+        canonical_ref="east_adam",
+        heartbeat_number=6,
+        position="tile-1",
+        observation={},
+        memory=[],
+        goals=[],
+        unanswered_questions=[],
+        world_public_objects={},
+        habitat_allowed_tiles=["tile-1"],
+        habitat_movement_allowed=False,
+        previous_action=None,
+        timestamp_utc="2026-10-25T00:00:00Z",
+        recent_action_failures=[{
+            "heartbeat": 5,
+            "action": "use_object",
+            "action_detail": "crafting-table-01",
+            "outcome": {"status": "rejected", "reason": "Unknown recipe: {'flint': 1}"},
+        }],
+    )
+    fail_line = _recent_action_failure_line(ctx_with_failures)
+    assert "gather:" not in fail_line
+    assert "use_object (crafting-table-01): rejected" in fail_line
+    assert "Unknown recipe" in fail_line

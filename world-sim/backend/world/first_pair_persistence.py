@@ -2145,6 +2145,45 @@ def add_to_inventory(
     return holdings
 
 
+def modify_inventory_batch(
+    store: FirstPairPersistenceStore, agent_ref: str, deltas: dict[str, int]
+) -> dict:
+    """Atomically apply multiple signed deltas to one agent's holdings.
+
+    Fail-closed: all deltas are validated before anything is written.
+    Non-string resource kinds, non-integer deltas (bools rejected), or any
+    resulting balance below zero raises ValueError and nothing is persisted.
+    Returns the updated full holdings on success.
+    """
+    if not isinstance(deltas, dict) or not deltas:
+        raise ValueError("inventory:empty_deltas")
+    for kind, delta in deltas.items():
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError("inventory:empty_resource_kind")
+        if not isinstance(delta, int) or isinstance(delta, bool):
+            raise ValueError("inventory:delta_not_an_integer")
+    holdings = load_inventory(store)
+    agent_holdings = dict(holdings.get(agent_ref, {}))
+    # Pre-flight all deltas to ensure no overdraft
+    for kind, delta in deltas.items():
+        new_amount = agent_holdings.get(kind, 0) + delta
+        if new_amount < 0:
+            raise ValueError(f"inventory:overdraft_{kind}")
+    # Apply all mutations
+    for kind, delta in deltas.items():
+        agent_holdings[kind] = agent_holdings.get(kind, 0) + delta
+    holdings[agent_ref] = agent_holdings
+    store._atomic_write(
+        store._path(_INVENTORY_FILE),
+        {
+            "type": "inventory_record",
+            "schema_version": _INVENTORY_SCHEMA_VERSION,
+            "data": holdings,
+        },
+    )
+    return holdings
+
+
 def maybe_record_relationship_event(
     store: FirstPairPersistenceStore,
     heartbeat_number: int,

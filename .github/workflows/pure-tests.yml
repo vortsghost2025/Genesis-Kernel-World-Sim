@@ -99,4 +99,10 @@ jobs:
             tests/test_phase10am_bounded_heartbeat_sequence.py \
             tests/test_phase10an_bounded_sequence_to_ledger.py \
             tests/test_phase10ao_ledger_replay_verifier.py \
+            tests/test_causal_crafting.py \
+            tests/test_scratch_retention.py \
+            tests/test_wildlife.py \
+            tests/test_wildlife_runtime.py \
+            tests/test_smelt_and_craft.py \
+            tests/test_insects_and_bees.py \
             -v

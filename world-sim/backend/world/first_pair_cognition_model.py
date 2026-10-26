@@ -1047,7 +1047,8 @@ def _recent_action_failure_line(context: AgentContext) -> str:
         status = oc.get("status", "?") if isinstance(oc, dict) else str(oc)
         reason = (oc.get("reason") or oc.get("detail") or
                   oc.get("reason_code") or "")
-        bits = f"heartbeat {hb}, gather: {status}"
+        detail_note = f" ({f.get('action_detail')})" if f.get("action_detail") and f.get("action_detail") != at else ""
+        bits = f"heartbeat {hb}, {at}{detail_note}: {status}"
         if reason:
             bits += f" ({str(reason)[:120]})"
         parts.append(bits)
@@ -1115,7 +1116,7 @@ Available actions:
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
-- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops meat in your hands; a wolf struck flees. Tools matter: spears, axes, and iron strike decisively, bare hands take longer. Wolves will not enter the light of a fire
+- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
 """
 
 # Free speech. One optional top-level field, documented in the contract and
@@ -1500,7 +1501,9 @@ def build_system_prompt(context: AgentContext) -> str:
         if wolves_near or howling:
             if wolves_near:
                 min_dist = min(w.get("distance", 99) for w in wolves_near)
-                _lines.append(f"Predator Alert: A wolf is nearby ({min_dist} tiles away).")
+                closest_w = min(wolves_near, key=lambda w: w.get("distance", 99))
+                _w_id_note = f" [id: {closest_w.get('id')}]" if closest_w.get("id") else ""
+                _lines.append(f"Predator Alert: A wolf is nearby ({min_dist} tiles away{_w_id_note}).")
             else:
                 _lines.append("Predator Alert: Wolf howls echo in the dark.")
             _lines.append(
@@ -2173,7 +2176,15 @@ class ModelCognitionBackend(CognitionBackend):
     ) -> str:
         if previous_action is None:
             return f"Outcome: {outcome.get('status', 'unknown')}"
-        return f"Previous action {previous_action.get('action_type')}: {outcome.get('status', 'unknown')}"
+        action_type = previous_action.get("action_type", "unknown")
+        status = outcome.get("status", "unknown")
+        detail = outcome.get("detail")
+        reason = outcome.get("reason")
+        if detail:
+            return f"Previous action {action_type} ({status}): {detail}"
+        elif reason:
+            return f"Previous action {action_type} ({status}): {reason}"
+        return f"Previous action {action_type}: {status}"
 
 
 def _extract_json(text: str) -> dict | None:

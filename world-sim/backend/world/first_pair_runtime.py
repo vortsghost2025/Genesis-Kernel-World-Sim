@@ -732,13 +732,12 @@ class FirstPairRuntime:
         # success. This line is the store speaking back, by name and heartbeat,
         # so memory can't invent failure wholesale.
         recent_failures = []
+        prev_act = None
         try:
             hist = load_heartbeat_history(self._store)
             for rec in reversed(hist):
-                if len(recent_failures) >= 2:
-                    break
                 n = rec.get("heartbeat_number")
-                if n is None or n > heartbeat_number:
+                if n is None or n >= heartbeat_number:
                     continue
                 acts = rec.get("action_taken") or {}
                 outcomes = rec.get("action_outcomes") or {}
@@ -746,14 +745,30 @@ class FirstPairRuntime:
                 out = outcomes.get(agent_ref)
                 if not isinstance(act, dict) or not isinstance(out, dict):
                     continue
+                if prev_act is None:
+                    prev_act = dict(act)
+                    prev_act["outcome"] = out
+                    prev_act["heartbeat"] = n
                 status = out.get("status", "")
-                if isinstance(status, str) and ("fail" in status or status == "no_action"):
-                    recent_failures.append({
-                        "heartbeat": n,
-                        "action": act.get("action_type", "?"),
-                        "action_detail": act.get("resource_kind", ""),
-                        "outcome": out,
-                    })
+                if isinstance(status, str) and ("fail" in status or status in ("no_action", "rejected")):
+                    if len(recent_failures) < 2:
+                        detail = (
+                            out.get("detail")
+                            or out.get("reason")
+                            or act.get("interaction_type")
+                            or act.get("target_object_id")
+                            or act.get("resource_kind")
+                            or act.get("target_id")
+                            or ""
+                        )
+                        recent_failures.append({
+                            "heartbeat": n,
+                            "action": act.get("action_type", "?"),
+                            "action_detail": str(detail),
+                            "outcome": out,
+                        })
+                if len(recent_failures) >= 2 and prev_act is not None:
+                    break
         except Exception:
             pass
 
@@ -1032,7 +1047,7 @@ class FirstPairRuntime:
             world_public_objects=self._world_state.public_objects,
             habitat_allowed_tiles=policy_allowed,
             habitat_movement_allowed=movement_allowed_flag,
-            previous_action=None,
+            previous_action=prev_act,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
             other_agent_id=view["other_agent_id"],
             other_agent_name=view["other_agent_name"],
@@ -1348,7 +1363,7 @@ class FirstPairRuntime:
                 continue
             dist = max(abs(exy[0] - pos[0]), abs(exy[1] - pos[1]))
             if dist <= 6:
-                visible.append({"kind": e.get("kind"), "distance": dist})
+                visible.append({"kind": e.get("kind"), "id": e.get("id"), "distance": dist})
             elif (e.get("kind") == "wolf" and dist <= 10
                   and survival.is_night(heartbeat_number)):
                 howling = True
@@ -1438,6 +1453,26 @@ class FirstPairRuntime:
         entity = next((e for e in entities
                        if e.get("id") == target_id), None)
         if entity is None:
+            # Fallback: allow target_id as kind ("wolf", "deer") if adjacent
+            pos = self._world_state.tile_occupancy.get(agent_ref)
+            pxy = self._tile_xy(pos)
+            if pxy is not None:
+                matches = []
+                for candidate in entities:
+                    if candidate.get("kind") == target_id:
+                        c_exy = self._entity_xy(candidate.get("tile"))
+                        if c_exy is not None and max(abs(pxy[0] - c_exy[0]), abs(pxy[1] - c_exy[1])) <= 1:
+                            matches.append(candidate)
+                if len(matches) == 1:
+                    entity = matches[0]
+                    target_id = entity.get("id", target_id)
+                elif len(matches) > 1:
+                    match_ids = ", ".join(e.get("id", "?") for e in matches)
+                    return {
+                        "status": "rejected",
+                        "reason": f"Multiple {target_id}s within reach; specify exact target_id ({match_ids})",
+                    }
+        if entity is None:
             return {"status": "rejected",
                     "reason": "No such animal here"}
         etile = entity.get("tile")
@@ -1452,8 +1487,25 @@ class FirstPairRuntime:
                     "reason": "The animal is not within reach"}
         inventory = load_inventory(self._store).get(agent_ref, {})
         entity, dmg, killed, meat = wildlife.strike(entity, inventory)
-        outcome = {"status": "success", "target_kind": entity.get("kind"),
-                   "damage": dmg, "killed": killed, "meat": meat}
+        kind = entity.get("kind", "animal")
+        if killed:
+            if kind == "wolf":
+                detail = f"Struck wolf for {dmg} damage; wolf fled the area and left {meat} meat"
+            else:
+                detail = f"Struck deer for {dmg} damage; deer killed and dropped {meat} meat"
+        else:
+            detail = f"Struck {kind} for {dmg} damage ({entity.get('hp')} HP remaining)"
+
+        outcome = {
+            "status": "success",
+            "target_id": target_id,
+            "target_kind": kind,
+            "damage": dmg,
+            "killed": killed,
+            "driven_off": (killed and kind == "wolf"),
+            "meat": meat,
+            "detail": detail,
+        }
         if killed:
             self._world_state.wildlife = [
                 e for e in entities if e.get("id") != target_id]
@@ -2009,7 +2061,7 @@ class FirstPairRuntime:
         """Combine materials into a tool. The crafting surface doesn't
         store anything — the materials are consumed from the agent's
         inventory and the tool goes into their inventory."""
-        from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+        from backend.world.first_pair_persistence import modify_inventory_batch, load_inventory
 
         inventory = load_inventory(self._store).get(agent_ref, {})
         material_set = tuple(sorted(materials.items()))
@@ -2026,15 +2078,15 @@ class FirstPairRuntime:
                 return {"status": "rejected",
                         "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
 
-        for kind, amount in materials.items():
-            add_to_inventory(self._store, agent_ref, kind, -amount)
-        add_to_inventory(self._store, agent_ref, recipe, 1)
+        deltas = {kind: -amount for kind, amount in materials.items()}
+        deltas[recipe] = deltas.get(recipe, 0) + 1
+        modify_inventory_batch(self._store, agent_ref, deltas)
         return {"status": "success", "detail": f"Crafted {recipe}", "crafted": recipe}
 
     def _cook_on_fire(self, obj_id: str, obj: dict, materials: dict,
                       agent_ref: str) -> dict:
         """Cook raw ingredients into cooked meals over an active fire."""
-        from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+        from backend.world.first_pair_persistence import modify_inventory_batch, load_inventory
 
         inventory = load_inventory(self._store).get(agent_ref, {})
         material_set = tuple(sorted(materials.items()))
@@ -2050,9 +2102,9 @@ class FirstPairRuntime:
                 return {"status": "rejected",
                         "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
 
-        for kind, amount in materials.items():
-            add_to_inventory(self._store, agent_ref, kind, -amount)
-        add_to_inventory(self._store, agent_ref, recipe, 1)
+        deltas = {kind: -amount for kind, amount in materials.items()}
+        deltas[recipe] = deltas.get(recipe, 0) + 1
+        modify_inventory_batch(self._store, agent_ref, deltas)
         return {"status": "success", "detail": f"Cooked {recipe} over {obj_id}", "cooked": recipe}
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:

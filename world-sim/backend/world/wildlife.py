@@ -43,16 +43,17 @@ DEER_DAY_SPAWN_CHANCE = 0.25
 
 # --- the numbers of a fight ---------------------------------------------------
 WOLF_BITE_DAMAGE = 8.0      # vitality per bite (full vitality: many bites)
-WOLF_FLEE_HP = 1            # one good hit drives a wolf off (they are wary)
+WOLF_FLEE_HP = 2            # unarmed takes 2 hits; crafted weapons drive off in 1 hit
 DEER_HP = 2                 # two hits without a tool; one with iron
 
 TOOL_DAMAGE_BONUS = {       # multiplier on hit damage by best held tool
-    "iron_tool": 4.0,
     "iron_spear": 4.0,
+    "iron_tool": 4.0,
+    "iron_axe": 3.5,
     "flint_spear": 3.0,
     "stone_axe": 2.5,
-    "flint_knife": 2.0,
-    "flint": 2.0,
+    "flint_knife": 2.2,     # knapped knife (2.2) is a true combat upgrade over raw flint (2.0)
+    "flint": 2.0,           # raw flint legacy baseline
 }
 UNARMED_DAMAGE = 1.0
 
