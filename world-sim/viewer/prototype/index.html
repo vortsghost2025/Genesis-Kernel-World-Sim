@@ -1,0 +1,3006 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#030509">
+<title>Genesis — 3D Civilization Observatory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #030509;
+  --bg-panel: rgba(8, 12, 20, 0.92);
+  --bg-card: rgba(14, 20, 32, 0.78);
+  --bg-glass: rgba(20, 28, 44, 0.65);
+
+  --border-line: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-glow: rgba(0, 210, 211, 0.35);
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+
+  --east-cyan: #00d2d3;
+  --west-amber: #feca57;
+  --crit-red: #ff4757;
+  --good-green: #2ed573;
+  --warm-orange: #ff9f43;
+
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Plus Jakarta Sans', -apple-system, sans-serif;
+  --font-ui: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; width: 100%; overflow: hidden; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-body); }
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  position: relative;
+}
+
+.status-badge-snapshot {
+  background: rgba(0, 210, 211, 0.15);
+  border: 1px solid rgba(0, 210, 211, 0.4);
+  color: #00d2d3;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-snapshot::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00d2d3;
+  box-shadow: 0 0 8px #00d2d3;
+}
+.status-badge-replay {
+  background: rgba(254, 202, 87, 0.15);
+  border: 1px solid rgba(254, 202, 87, 0.4);
+  color: #feca57;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-replay::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #feca57;
+  box-shadow: 0 0 8px #feca57;
+}
+
+/* Header Masthead */
+header {
+  height: 54px;
+  background: rgba(6, 9, 16, 0.94);
+  border-bottom: 1px solid var(--border-line);
+  backdrop-filter: blur(24px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 40;
+  flex-shrink: 0;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.28em;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0, 210, 211, 0.4);
+}
+.brand-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  border-left: 1px solid var(--border-line);
+  padding-left: 14px;
+  text-transform: uppercase;
+}
+
+.nav-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.nav-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.nav-pill.active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
+}
+.civ-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.civ-dot.east { background: var(--east-cyan); box-shadow: 0 0 8px var(--east-cyan); }
+.civ-dot.west { background: var(--west-amber); box-shadow: 0 0 8px var(--west-amber); }
+.civ-dot.orbit { background: #a29bfe; box-shadow: 0 0 8px #a29bfe; }
+
+.telemetry-cluster {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.weather-hud {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-live {
+  background: rgba(46, 213, 115, 0.15);
+  border: 1px solid rgba(46, 213, 115, 0.4);
+  color: #2ed573;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ed573;
+  box-shadow: 0 0 8px #2ed573;
+  animation: pulse-dot 1.8s infinite ease-in-out;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+/* Main Layout */
+#main {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+#map-panel {
+  flex: 1;
+  position: relative;
+  background: #142234;
+  overflow: hidden;
+}
+#webgl-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 3D Camera & Overlay Toolbar */
+.camera-toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  z-index: 30;
+  background: rgba(8, 12, 20, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-line);
+  padding: 4px;
+  border-radius: 10px;
+}
+.cam-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cam-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.cam-btn.active {
+  background: rgba(0, 210, 211, 0.2);
+  color: #00d2d3;
+  border: 1px solid rgba(0, 210, 211, 0.4);
+}
+
+/* Continent Scale Telemetry HUD */
+.continent-scale-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: rgba(8, 12, 20, 0.88);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  padding: 12px 18px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.civ-tag {
+  font-family: var(--font-display);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #fff;
+}
+.scale-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+.scale-progress-bg {
+  width: 140px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.scale-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Playback Control Deck */
+#playback-deck {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 12, 20, 0.92);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-line);
+  border-radius: 14px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  z-index: 35;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+}
+.ctrl-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.ctrl-btn.primary {
+  background: rgba(0, 210, 211, 0.2);
+  border-color: var(--east-cyan);
+  color: #00d2d3;
+}
+.ctrl-btn.live-pill.active {
+  background: rgba(46, 213, 115, 0.18);
+  border-color: #2ed573;
+  color: #2ed573;
+}
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+}
+#scrubber {
+  flex: 1;
+  accent-color: var(--east-cyan);
+  cursor: pointer;
+  height: 4px;
+}
+.time-readout {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.speed-cluster {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 3px;
+  border-radius: 8px;
+}
+.speed-opt {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+.speed-opt.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Sidebar Telemetry */
+#sidebar {
+  width: 380px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-line);
+  backdrop-filter: blur(28px);
+  display: flex;
+  flex-direction: column;
+  z-index: 38;
+}
+.sidebar-nav {
+  display: flex;
+  border-bottom: 1px solid var(--border-line);
+  padding: 8px 12px;
+  gap: 6px;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tab-btn:hover { color: var(--text-primary); }
+.tab-btn.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.tab-pane {
+  flex: 1;
+  overflow-y: auto;
+  display: none;
+  padding: 16px;
+}
+.tab-pane.active { display: block; }
+
+/* Biometric Agent Card */
+.agent-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.agent-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 4px; height: 100%;
+}
+.agent-card.east::before { background: var(--east-cyan); }
+.agent-card.west::before { background: var(--west-amber); }
+
+.agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.agent-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.agent-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  border: 1px solid var(--border-line);
+  object-fit: cover;
+  background: #0d131f;
+}
+.agent-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+}
+.agent-sub {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.vitals-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.vital-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vital-label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--text-secondary);
+}
+.vital-track {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.vital-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.action-dossier {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  margin-top: 8px;
+}
+.action-provenance {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.action-text {
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+/* Chronicle Timeline Stream */
+.chronicle-item {
+  border-left: 2px solid var(--border-line);
+  padding: 0 0 16px 14px;
+  position: relative;
+}
+.chronicle-item::before {
+  content: '';
+  position: absolute;
+  left: -5px; top: 3px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--east-cyan);
+  box-shadow: 0 0 8px var(--east-cyan);
+}
+.chronicle-hb {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  margin-bottom: 3px;
+}
+.chronicle-title {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #fff;
+  margin-bottom: 3px;
+}
+.chronicle-desc {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Floating World-Space Tag Overlay */
+.agent-floating-tag {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  z-index: 25;
+  transition: opacity 0.2s ease;
+}
+.tag-name {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(6, 11, 20, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.tag-action {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(12, 18, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Masthead -->
+  <header>
+    <div class="brand-group">
+      <span class="brand-title">GENESIS</span>
+      <span class="brand-tag">3D CONTINENT OBSERVATORY // HUMAN-SCALE WORLD</span>
+    </div>
+
+    <!-- Active Navigation Pills -->
+    <div class="nav-cluster">
+      <div class="nav-pill active" id="btn-east">
+        <span class="civ-dot east"></span>East Valley (Alpha)
+      </div>
+      <div class="nav-pill" id="btn-west">
+        <span class="civ-dot west"></span>West Dawn (Beta)
+      </div>
+      <div class="nav-pill" id="btn-orbit">
+        <span class="civ-dot orbit"></span>World Atlas (Orbit)
+      </div>
+      <a href="../classic_2d.html" class="nav-pill" id="btn-classic-2d" style="text-decoration:none; color:inherit;" title="Open Classic 2D Telemetry Viewer">🗺️ Classic 2D</a>
+    </div>
+
+    <!-- Telemetry -->
+    <div class="telemetry-cluster">
+      <div class="weather-hud" id="weather-hud">Spring (17°C) // Clear</div>
+      <div class="status-badge-snapshot" id="live-status-badge">SNAPSHOT</div>
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <div id="main">
+    <div id="map-panel">
+      <canvas id="webgl-canvas"></canvas>
+
+      <!-- Floating 3D Character Overlays -->
+      <div id="tag-adam" class="agent-floating-tag">
+        <div class="tag-name" id="tag-name-adam">ADAM</div>
+        <div class="tag-action" id="tag-act-adam">NO ACTION RECORDED</div>
+      </div>
+      <div id="tag-eve" class="agent-floating-tag">
+        <div class="tag-name" id="tag-name-eve">EVE</div>
+        <div class="tag-action" id="tag-act-eve">NO ACTION RECORDED</div>
+      </div>
+
+      <!-- 3D Camera Controls -->
+      <div class="camera-toolbar">
+        <button class="cam-btn" id="cam-human">👁️ Human-Eye View</button>
+        <button class="cam-btn active" id="cam-cinematic">🏞️ Elevated Landscape</button>
+        <button class="cam-btn" id="cam-focus-adam">🧍 Focus Adam</button>
+        <button class="cam-btn" id="cam-focus-eve">🧍 Focus Eve</button>
+        <button class="cam-btn" id="cam-topdown">🗺️ Top-Down</button>
+      </div>
+
+      <!-- Scale & Continent Telemetry HUD -->
+      <div class="continent-scale-hud" id="scale-hud">
+        <div class="civ-tag" id="hud-civ-title">EAST VALLEY // ALPHA CONTINENT</div>
+        <div class="scale-bar-wrap">
+          <div class="scale-progress-bg">
+            <div class="scale-progress-fill" id="hud-progress-fill" style="width: 4.1%; background: var(--east-cyan);"></div>
+          </div>
+          <span id="hud-progress-label">1,637 / 40,000 tiles (4.1%)</span>
+        </div>
+        <div style="font-size:0.64rem; color:var(--text-tertiary); margin-top:2px;" id="hud-zoom-label">HUMAN SCALE // CANONICAL GEOGRAPHY & SETTLEMENTS</div>
+        <div style="font-size:0.62rem; color:var(--east-cyan); margin-top:2px; font-family:var(--font-mono); letter-spacing:0.04em;" id="hud-compression-label">TIMELAPSE: ~3,600× EPOCH RATE (1 HB = 1 FULL ACTION CYCLE · REGION: 91×17 TILES)</div>
+      </div>
+
+      <!-- Playback Deck -->
+      <div id="playback-deck">
+        <button class="ctrl-btn primary" id="pb-play">▶ PLAY</button>
+        <button class="ctrl-btn" id="pb-prev" title="Step Back 1 Heartbeat">◀</button>
+        <button class="ctrl-btn" id="pb-next" title="Step Forward 1 Heartbeat">▶</button>
+        <button class="ctrl-btn live-pill active" id="pb-live">● LIVE</button>
+
+        <div class="slider-wrap">
+          <input type="range" id="scrubber" min="1" max="100" value="100" />
+          <span class="time-readout" id="pb-counter">0 / 0 HB</span>
+        </div>
+
+        <div class="speed-cluster" id="speed-cluster">
+          <div class="speed-opt" data-spd="1">1×</div>
+          <div class="speed-opt active" data-spd="2">2×</div>
+          <div class="speed-opt" data-spd="5">5×</div>
+          <div class="speed-opt" data-spd="10">10×</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar Telemetry -->
+    <aside id="sidebar">
+      <nav class="sidebar-nav">
+        <button class="tab-btn active" data-tab="tab-biometrics">Biometrics</button>
+        <button class="tab-btn" data-tab="tab-chronicle">Chronicle</button>
+        <button class="tab-btn" data-tab="tab-comms">Comms</button>
+      </nav>
+
+      <!-- Biometrics Panel -->
+      <div class="tab-pane active" id="tab-biometrics">
+        <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-tertiary); margin-bottom:12px; letter-spacing:0.08em;" id="side-civ-title">CIVILIZATION TELEMETRY: EAST VALLEY</div>
+        <div id="agents-cards-container"></div>
+      </div>
+
+      <!-- Chronicle Panel -->
+      <div class="tab-pane" id="tab-chronicle">
+        <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-tertiary); margin-bottom:12px; letter-spacing:0.08em;">LIVING HISTORICAL RECORD</div>
+        <div id="chronicle-stream"></div>
+      </div>
+
+      <!-- Comms Panel -->
+      <div class="tab-pane" id="tab-comms">
+        <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-tertiary); margin-bottom:12px; letter-spacing:0.08em;">CIVILIZATION DIALOGUE & INVENTORY</div>
+        <div id="comms-stream"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="../viewer_data.js"></script>
+<script src="./js/three.min.js"></script>
+<script src="./js/OrbitControls.js"></script>
+
+<script>
+(async function() {
+"use strict";
+
+const D = window.VIEWER_DATA || {};
+const TM = D.true_map || {};
+const PAIRS = D.pairs || {};
+
+// Fetch full 200x200 continuous continent terrain data
+let terrainDB = null;
+try {
+  const resp = await fetch("../continent_terrain.json");
+  if (resp.ok) terrainDB = await resp.json();
+} catch (e) {
+  console.warn("Could not load continent_terrain.json:", e);
+}
+
+// State
+let selectedPair = "east";
+let activeCamMode = "landscape";
+let playbackMode = "live";
+let isPlaying = false;
+let playSpeed = 2;
+let lastPlayTs = 0;
+let currentHb = 1;
+let minHb = 1;
+let maxHb = 1;
+
+// Heartbeats & index
+const timelineHbs = { east: [], west: [] };
+const hbIndex = { east: new Map(), west: new Map() };
+for (const [pn, pair] of Object.entries(PAIRS)) {
+  const hbs = (pair.heartbeats || []).map(h => Number(h.heartbeat)).sort((a,b) => a - b);
+  timelineHbs[pn] = hbs;
+  for (const h of (pair.heartbeats || [])) {
+    hbIndex[pn].set(Number(h.heartbeat), h);
+  }
+}
+
+function updateHbBounds() {
+  const pn = (selectedPair === "orbit") ? "east" : selectedPair;
+  const hbs = timelineHbs[pn] || [];
+  if (hbs.length > 0) {
+    minHb = hbs[0];
+    maxHb = hbs[hbs.length - 1];
+    if (playbackMode === "live") currentHb = maxHb;
+  }
+}
+updateHbBounds();
+
+// Tiles Lookup Database
+const tilesById = new Map();
+const tileByContinentCoord = new Map();
+const allTiles = (TM.tiles || []).concat(Object.values(D.shared_tiles || {}));
+for (const t of allTiles) {
+  if (!t || !t.tile_id) continue;
+  tilesById.set(t.tile_id, t);
+  const cid = t.continent_id || (t.tile_id.startsWith("cont_b") ? "cont_b" : "cont_a");
+  const c = t.coordinates;
+  if (c) tileByContinentCoord.set(`${cid}:${c.x},${c.y}`, t);
+}
+
+// -------------------------------------------------------------
+// THREE.JS 3D ENGINE INITIALIZATION
+// -------------------------------------------------------------
+const canvas = document.getElementById("webgl-canvas");
+const mapPanel = document.getElementById("map-panel");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6e95b8);
+scene.fog = new THREE.FogExp2(0x7ca0be, 0.0065);
+
+const camera = new THREE.PerspectiveCamera(42, mapPanel.clientWidth / mapPanel.clientHeight, 0.25, 1400);
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
+renderer.setSize(mapPanel.clientWidth, mapPanel.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.04;
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.minDistance = 1.5;
+controls.maxDistance = 550;
+
+// Sky Dome (Warm Horizon Gradient for Human-Eye & Landscape Views)
+function createSkyDome() {
+  const skyCanvas = document.createElement("canvas");
+  skyCanvas.width = 32;
+  skyCanvas.height = 512;
+  const ctx = skyCanvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.0, "#1c3554");
+  grad.addColorStop(0.32, "#3c6894");
+  grad.addColorStop(0.48, "#7da4c4");
+  grad.addColorStop(0.54, "#c8d8dc");
+  grad.addColorStop(0.60, "#4a6c58");
+  grad.addColorStop(1.0, "#182820");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 32, 512);
+  const skyTex = new THREE.CanvasTexture(skyCanvas);
+  const skyGeom = new THREE.SphereGeometry(680, 32, 24);
+  const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false });
+  const dome = new THREE.Mesh(skyGeom, skyMat);
+  scene.add(dome);
+  return dome;
+}
+const skyDome = createSkyDome();
+
+// Balanced Natural Daylight Lighting (Zero overblown clay highlights)
+const ambientLight = new THREE.AmbientLight(0xdce8f5, 0.58);
+scene.add(ambientLight);
+
+const hemiLight = new THREE.HemisphereLight(0xeaf4ff, 0x2d4228, 0.52);
+scene.add(hemiLight);
+
+const sunLight = new THREE.DirectionalLight(0xfff4df, 0.92);
+sunLight.position.set(75, 130, 65);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.near = 10;
+sunLight.shadow.camera.far = 380;
+sunLight.shadow.camera.left = -95;
+sunLight.shadow.camera.right = 95;
+sunLight.shadow.camera.top = 95;
+sunLight.shadow.camera.bottom = -95;
+sunLight.shadow.bias = -0.0005;
+scene.add(sunLight);
+
+// High-Frequency Organic Turf & Wildflower Detail Texture (Repeats 50x50 across each continent)
+function createGroundDetailTexture() {
+  const c = document.createElement("canvas");
+  c.width = 512;
+  c.height = 512;
+  const ctx = c.getContext("2d");
+
+  // Neutral white-grey base so multiplying with continent map preserves macro biome colors while adding crisp micro-turf
+  ctx.fillStyle = "rgb(228, 232, 224)";
+  ctx.fillRect(0, 0, 512, 512);
+
+  let seed = 421337;
+  function rand() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return (seed & 0xffffff) / 0x1000000;
+  }
+
+  // 1. Soft dappled clover / soil / moss patches
+  for (let i = 0; i < 900; i++) {
+    const x = rand() * 512;
+    const y = rand() * 512;
+    const r = 6 + rand() * 18;
+    const isDark = rand() > 0.45;
+    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
+    if (isDark) {
+      g.addColorStop(0, "rgba(155, 175, 145, 0.28)");
+      g.addColorStop(1, "rgba(155, 175, 145, 0)");
+    } else {
+      g.addColorStop(0, "rgba(245, 248, 230, 0.26)");
+      g.addColorStop(1, "rgba(245, 248, 230, 0)");
+    }
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 2. Crisp grass tufts & meadow blades
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 6500; i++) {
+    const x = rand() * 512;
+    const y = rand() * 512;
+    const h = 3 + rand() * 6;
+    const lean = (rand() - 0.5) * 3.5;
+    const shade = Math.floor(150 + rand() * 85);
+    ctx.strokeStyle = `rgba(${shade - 18}, ${shade + 12}, ${shade - 25}, 0.42)`;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + lean, y - h);
+    ctx.stroke();
+  }
+
+  // 3. Subtle pebbles & wildflower specs
+  for (let i = 0; i < 1200; i++) {
+    const x = rand() * 512;
+    const y = rand() * 512;
+    const sz = 1.0 + rand() * 1.8;
+    ctx.fillStyle = rand() > 0.3 ? "rgba(170, 168, 158, 0.38)" : "rgba(248, 238, 185, 0.42)";
+    ctx.fillRect(x, y, sz, sz);
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(55, 55);
+  tex.anisotropy = 8;
+  return tex;
+}
+const groundDetailTex = createGroundDetailTexture();
+const groundBumpTex = groundDetailTex;
+
+// Soft Radial Contact Shadow Texture for Grounding Characters, Trees, and Buildings
+function createContactShadowTexture() {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(64, 64, 6, 64, 64, 60);
+  g.addColorStop(0.0, "rgba(8, 14, 10, 0.72)");
+  g.addColorStop(0.45, "rgba(10, 18, 12, 0.42)");
+  g.addColorStop(0.80, "rgba(12, 22, 14, 0.12)");
+  g.addColorStop(1.0, "rgba(12, 22, 14, 0.0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const contactShadowTex = createContactShadowTexture();
+
+// Shared unit shadow plane geometry to prevent per-decal BufferGeometry allocations
+const sharedShadowPlaneGeom = new THREE.PlaneGeometry(1, 1);
+sharedShadowPlaneGeom.rotateX(-Math.PI / 2);
+sharedShadowPlaneGeom.userData = { isSharedGeometry: true };
+
+function createGroundShadowDecal(radiusX, radiusZ, opacity = 0.68) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: contactShadowTex,
+    transparent: true,
+    opacity: opacity,
+    depthWrite: false
+  });
+  const mesh = new THREE.Mesh(sharedShadowPlaneGeom, mat);
+  mesh.scale.set(radiusX * 2, 1, radiusZ * 2);
+  mesh.position.y = 0.03;
+  return mesh;
+}
+
+// Safely dispose instance-owned geometries and materials when replacing or clearing groups,
+// while preserving shared sprite textures, atlases, and shared unit geometries.
+function disposeObjectGroupResources(group) {
+  if (!group) return;
+  group.traverse(node => {
+    if (node === group) return;
+    if (node.geometry && !(node.geometry.userData && node.geometry.userData.isSharedGeometry)) {
+      if (typeof node.geometry.dispose === "function") {
+        node.geometry.dispose();
+      }
+    }
+    if (node.material) {
+      const mats = Array.isArray(node.material) ? node.material : [node.material];
+      for (const m of mats) {
+        if (m && !(m.userData && m.userData.isSharedMaterial) && typeof m.dispose === "function") {
+          // Do NOT dispose m.map / shared textures
+          m.dispose();
+        }
+      }
+    }
+    if (node.isLight && typeof node.dispose === "function") {
+      node.dispose();
+    }
+  });
+  while (group.children.length > 0) {
+    group.remove(group.children[0]);
+  }
+}
+
+// Continents 3D Terrain Groups
+const continentGroups = {
+  cont_a: new THREE.Group(),
+  cont_b: new THREE.Group()
+};
+scene.add(continentGroups.cont_a);
+scene.add(continentGroups.cont_b);
+
+// Build Continents Meshes
+const terrainMeshes = {};
+const heightLookup = { cont_a: new Float32Array(200 * 200), cont_b: new Float32Array(200 * 200) };
+const knownLookup = { cont_a: new Uint8Array(200 * 200), cont_b: new Uint8Array(200 * 200) };
+const knownCoordsByContinent = { cont_a: new Set(), cont_b: new Set() };
+
+function rebuildKnownSets() {
+  for (const [pn, cid] of [["east", "cont_a"], ["west", "cont_b"]]) {
+    const kset = knownCoordsByContinent[cid];
+    kset.clear();
+    const pair = PAIRS[pn] || {};
+    for (const km of Object.values(pair.known_maps || {})) {
+      for (const tid of Object.keys(km.known_tiles || {})) {
+        const t = tilesById.get(tid);
+        if (t && t.coordinates) {
+          kset.add(`${t.coordinates.x},${t.coordinates.y}`);
+        } else {
+          const m = /^cont_[ab]_gen_(-?\d+)_(-?\d+)$/.exec(tid);
+          if (m) kset.add(`${Number(m[1])},${Number(m[2])}`);
+        }
+      }
+    }
+  }
+}
+rebuildKnownSets();
+
+function isTileKnown(cid, x, z) {
+  const rx = Math.round(x);
+  const rz = Math.round(z);
+  return knownCoordsByContinent[cid] ? knownCoordsByContinent[cid].has(`${rx},${rz}`) : false;
+}
+
+function getCanonicalTerrain(cid, x, z) {
+  const rx = Math.round(x);
+  const rz = Math.round(z);
+  if (rx < -100 || rx > 99 || rz < -100 || rz > 99) return "ocean";
+  const tData = terrainDB ? terrainDB[cid] : null;
+  const idx = (rz + 100) * 200 + (rx + 100);
+  if (tData && tData.terr && tData.terr[idx]) {
+    return String(tData.terr[idx]);
+  }
+  const t = tileByContinentCoord.get(`${cid}:${rx},${rz}`);
+  return (t && t.terrain) ? String(t.terrain) : "ocean";
+}
+
+function isCanonicalOcean(cid, x, z) {
+  return getCanonicalTerrain(cid, x, z) === "ocean";
+}
+
+function getDynamicExploredBounds(cid) {
+  const kset = knownCoordsByContinent[cid];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  if (kset && kset.size > 0) {
+    for (const key of kset) {
+      const [xs, ys] = key.split(",");
+      const x = Number(xs), y = Number(ys);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const pn = (cid === "cont_a") ? "east" : "west";
+  const pair = PAIRS[pn] || {};
+  for (const tid of Object.values(pair.current_positions || {})) {
+    const t = tilesById.get(tid);
+    if (t && t.coordinates) {
+      minX = Math.min(minX, t.coordinates.x);
+      maxX = Math.max(maxX, t.coordinates.x);
+      minY = Math.min(minY, t.coordinates.y);
+      maxY = Math.max(maxY, t.coordinates.y);
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: -35, maxX: 35, minY: -35, maxY: 35 };
+  }
+  return {
+    minX: Math.max(-94, minX - 18),
+    maxX: Math.min(94, maxX + 18),
+    minY: Math.max(-94, minY - 18),
+    maxY: Math.min(94, maxY + 18)
+  };
+}
+
+// Bilinear interpolated height lookup so characters & props sit flush on sloped triangles
+function getTerrainHeight(cid, x, z) {
+  const arr = heightLookup[cid];
+  if (!arr) return 0;
+  const fx = Math.min(199, Math.max(0, x + 100));
+  const fz = Math.min(199, Math.max(0, z + 100));
+  const c0 = Math.floor(fx);
+  const r0 = Math.floor(fz);
+  const c1 = Math.min(199, c0 + 1);
+  const r1 = Math.min(199, r0 + 1);
+  const tx = fx - c0;
+  const tz = fz - r0;
+
+  const h00 = arr[r0 * 200 + c0] || 0;
+  const h10 = arr[r0 * 200 + c1] || 0;
+  const h01 = arr[r1 * 200 + c0] || 0;
+  const h11 = arr[r1 * 200 + c1] || 0;
+
+  const h0 = h00 * (1 - tx) + h10 * tx;
+  const h1 = h01 * (1 - tx) + h11 * tx;
+  return h0 * (1 - tz) + h1 * tz;
+}
+
+// Global Seamless Great Ocean Plane
+const globalOceanGeom = new THREE.PlaneGeometry(900, 700, 1, 1);
+globalOceanGeom.rotateX(-Math.PI / 2);
+const globalOceanMat = new THREE.MeshBasicMaterial({
+  color: 0x0f2d4a
+});
+const globalOcean = new THREE.Mesh(globalOceanGeom, globalOceanMat);
+globalOcean.position.set(0, 0.0, 0);
+scene.add(globalOcean);
+
+const textureLoader = new THREE.TextureLoader();
+
+function loadSpriteTexture(url) {
+  const tex = textureLoader.load(url);
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  return tex;
+}
+
+const continentTextures = {
+  cont_a: loadSpriteTexture("./assets/cont_a_tex.png"),
+  cont_b: loadSpriteTexture("./assets/cont_b_tex.png")
+};
+continentTextures.cont_a.anisotropy = 8;
+continentTextures.cont_b.anisotropy = 8;
+
+function buildContinentMesh(cid) {
+  const group = continentGroups[cid];
+  const tData = terrainDB ? terrainDB[cid] : null;
+
+  // 200 x 200 grid spanning [-100, 99]
+  const geom = new THREE.PlaneGeometry(200, 200, 199, 199);
+  geom.rotateX(-Math.PI / 2);
+
+  const pos = geom.attributes.position;
+
+  // 1. Raw Elevation & Terrain Mapping (Gentle Human-Scale Geography; Canonical Ocean Strictly Preserved)
+  const rawElev = new Float32Array(200 * 200);
+  const rawTerr = new Array(200 * 200);
+  for (let row = 0; row < 200; row++) {
+    for (let col = 0; col < 200; col++) {
+      const idx = row * 200 + col;
+      const x = col - 100;
+      const y = row - 100;
+
+      let elev = 0.0;
+      let terr = getCanonicalTerrain(cid, x, y);
+      if (tData && tData.elev) {
+        elev = tData.elev[idx] || 0.0;
+      } else {
+        const t = tileByContinentCoord.get(`${cid}:${x},${y}`);
+        if (t) elev = t.elevation || 0.0;
+      }
+
+      if (terr === "ocean") {
+        rawElev[idx] = -0.35;
+      } else {
+        const eClamped = Math.max(0.0, elev);
+        const gentleBase = 0.18 + eClamped * 1.15;
+        const mtnPeak = Math.pow(Math.max(0.0, eClamped - 0.52), 1.65) * 8.2;
+        rawElev[idx] = gentleBase + mtnPeak;
+      }
+      rawTerr[idx] = terr;
+    }
+  }
+
+  // 2. Two-Pass Gaussian Elevation Smoothing for Natural Rolling Hills (Canonical Ocean Remains Below 0.0; Land Remains >= 0.10)
+  let passA = new Float32Array(200 * 200);
+  for (let pass = 0; pass < 2; pass++) {
+    const src = (pass === 0) ? rawElev : passA;
+    const dst = (pass === 0) ? passA : heightLookup[cid];
+    for (let row = 0; row < 200; row++) {
+      for (let col = 0; col < 200; col++) {
+        const idx = row * 200 + col;
+        let sum = 0, weightSum = 0;
+        for (let dr = -2; dr <= 2; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            const nr = row + dr;
+            const nc = col + dc;
+            if (nr >= 0 && nr < 200 && nc >= 0 && nc < 200) {
+              const dist2 = dr * dr + dc * dc;
+              const w = (dist2 === 0) ? 6 : (dist2 === 1) ? 4 : (dist2 === 2) ? 2 : 1;
+              sum += src[nr * 200 + nc] * w;
+              weightSum += w;
+            }
+          }
+        }
+        let smoothed = sum / weightSum;
+        if (rawTerr[idx] === "ocean") {
+          smoothed = Math.min(-0.18, smoothed);
+        } else {
+          smoothed = Math.max(0.10, smoothed);
+        }
+        dst[idx] = smoothed;
+        if (pass === 1) {
+          pos.setY(idx, smoothed);
+        }
+      }
+    }
+  }
+
+  geom.computeVertexNormals();
+
+  // Populate vertex colors from the macro biome/elevation palette + Fog-of-War darkening for unexplored tiles
+  const vColors = new Float32Array(200 * 200 * 3);
+  const kset = knownCoordsByContinent[cid];
+
+  for (let row = 0; row < 200; row++) {
+    for (let col = 0; col < 200; col++) {
+      const idx = row * 200 + col;
+      const x = col - 100;
+      const y = row - 100;
+      const terr = rawTerr[idx];
+      const elev = (tData && tData.elev) ? (tData.elev[idx] || 0.0) : 0.25;
+      const b = String((tData && tData.biome && tData.biome[idx]) || "");
+      const w = String((tData && tData.water && tData.water[idx]) || "");
+
+      const c = new THREE.Color();
+      if (terr === "ocean") {
+        c.setHex(0x0f2d4a);
+      } else if (terr === "coast" || elev < 0.16) {
+        c.setHex(0xb8ad82);
+      } else if (elev > 0.84) {
+        c.setHex(0xdce2e8);
+      } else if (elev > 0.70 || terr === "mountain") {
+        c.setHex(0x7c847e);
+      } else if (terr === "forest" || b.includes("forest") || b.includes("woodland")) {
+        c.setHex(0x3a6b34);
+      } else if (terr === "hill" || b.includes("hill") || b.includes("highland")) {
+        c.setHex(0x588242);
+      } else {
+        c.setHex(0x4c7e3c);
+      }
+
+      if ((w === "river" || w === "stream" || w === "freshwater") && terr !== "ocean") {
+        c.lerp(new THREE.Color(0x2d688a), 0.45);
+      }
+
+      const isKnown = kset ? kset.has(`${x},${y}`) : false;
+      knownLookup[cid][idx] = isKnown ? 1 : 0;
+      if (!isKnown && terr !== "ocean" && kset && kset.size > 0) {
+        // Fog-of-war / unknown-terrain shading: darken and cool unexplored wilderness tiles
+        c.lerp(new THREE.Color(0x1f312b), 0.36);
+      }
+
+      vColors[idx * 3 + 0] = c.r;
+      vColors[idx * 3 + 1] = c.g;
+      vColors[idx * 3 + 2] = c.b;
+    }
+  }
+  geom.setAttribute("color", new THREE.BufferAttribute(vColors, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    map: groundDetailTex,
+    bumpMap: groundBumpTex,
+    bumpScale: 0.035,
+    vertexColors: true,
+    roughness: 0.90,
+    metalness: 0.02,
+    flatShading: false
+  });
+
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  group.add(mesh);
+  terrainMeshes[cid] = mesh;
+
+  // Populate static natural geography & vegetation (current-snapshot scenery + canonical cave landmarks)
+  populateContinentScenery(cid);
+}
+
+// -------------------------------------------------------------
+// ENVIRONMENTAL SCENERY & HISTORICAL PUBLIC OBJECT RECONSTRUCTION
+// -------------------------------------------------------------
+const sceneryGroups = { cont_a: new THREE.Group(), cont_b: new THREE.Group() };
+const objectGroups = { cont_a: new THREE.Group(), cont_b: new THREE.Group() };
+const propGroups = sceneryGroups; // Compatibility alias
+scene.add(sceneryGroups.cont_a);
+scene.add(sceneryGroups.cont_b);
+scene.add(objectGroups.cont_a);
+scene.add(objectGroups.cont_b);
+
+const propTextures = {
+  tree: loadSpriteTexture("./assets/tree_cluster.png"),
+  cave: loadSpriteTexture("./assets/cave_mouth.png"),
+  shelter: loadSpriteTexture("./assets/shelter_hut.png"),
+  campfire: loadSpriteTexture("./assets/campfire.png"),
+  boulder: loadSpriteTexture("./assets/boulder_rock.png"),
+  berry: loadSpriteTexture("./assets/berry_bush.png"),
+  storage: loadSpriteTexture("./assets/storage_cache.png"),
+  landmark: loadSpriteTexture("./assets/landmark.png"),
+  mountain: loadSpriteTexture("./assets/mountain_peak.png"),
+  waterfall: loadSpriteTexture("./assets/waterfall_rock.png")
+};
+
+function createGroundedProp(tex, width, height, x, z, h, shadowRx, shadowRz, sink = 0.05, tintHex = 0xffffff) {
+  const group = new THREE.Group();
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    color: tintHex,
+    transparent: true,
+    alphaTest: 0.35
+  });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(width, height, 1);
+  s.position.set(0, height * 0.5 - sink, 0);
+  group.add(s);
+
+  if (shadowRx > 0) {
+    group.add(createGroundShadowDecal(shadowRx, shadowRz, 0.62));
+  }
+  group.position.set(x, h, z);
+  return group;
+}
+
+function createTreeSprite(x, z, h, scale, tintHex = 0xffffff) {
+  const w = 3.1 * scale;
+  const ht = 3.3 * scale;
+  return createGroundedProp(propTextures.tree, w, ht, x, z, h, w * 0.38, w * 0.38, 0.14, tintHex);
+}
+
+function createBoulderSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 1.05 * scale;
+  return createGroundedProp(propTextures.boulder, sz, sz * 0.92, x, z, h, sz * 0.42, sz * 0.40, 0.08, tintHex);
+}
+
+function createBerrySprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.78 * scale;
+  return createGroundedProp(propTextures.berry, sz, sz * 0.88, x, z, h, sz * 0.42, sz * 0.42, 0.06, tintHex);
+}
+
+function createMountainPeakSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const w = 4.4 * scale;
+  const ht = 4.1 * scale;
+  return createGroundedProp(propTextures.mountain, w, ht, x, z, h, w * 0.44, w * 0.40, 0.25, tintHex);
+}
+
+function createWaterfallSprite(x, z, h, tintHex = 0xffffff) {
+  return createGroundedProp(propTextures.waterfall, 2.1, 2.15, x, z, h, 0.95, 0.95, 0.12, tintHex);
+}
+
+function createCaveSprite(x, z, h) {
+  const group = createGroundedProp(propTextures.cave, 3.6, 3.65, x, z, h, 1.55, 1.45, 0.16);
+  const light = new THREE.PointLight(0xff9922, 0.85, 7);
+  light.position.set(0, 1.0, 0.3);
+  group.add(light);
+  return group;
+}
+
+function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow = true) {
+  const w = 0.78 * scale;
+  const ht = 0.66 * scale;
+  const group = createGroundedProp(propTextures.campfire, w, ht, x, z, h, withShadow ? 0.42 * scale : 0, withShadow ? 0.42 * scale : 0, 0.05 * scale);
+  if (withLight) {
+    const light = new THREE.PointLight(0xff7b18, 0.55, 5.5);
+    light.position.set(0, 0.55, 0);
+    group.add(light);
+    group.userData.light = light;
+  }
+  return group;
+}
+
+function createShelterSprite(x, z, h, scale = 1.0, withShadow = true) {
+  const w = 2.55 * scale;
+  const ht = 2.35 * scale;
+  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 1.18 * scale : 0, withShadow ? 1.12 * scale : 0, 0.12 * scale);
+}
+
+function createStorageSprite(x, z, h, scale = 1.0, withShadow = true) {
+  const w = 0.92 * scale;
+  const ht = 0.86 * scale;
+  return createGroundedProp(propTextures.storage, w, ht, x, z, h, withShadow ? 0.46 * scale : 0, withShadow ? 0.44 * scale : 0, 0.05 * scale);
+}
+
+function createLandmarkSprite(x, z, h, scale = 1.0, withShadow = true) {
+  const w = 1.22 * scale;
+  const ht = 1.52 * scale;
+  return createGroundedProp(propTextures.landmark, w, ht, x, z, h, withShadow ? 0.52 * scale : 0, withShadow ? 0.48 * scale : 0, 0.08 * scale);
+}
+
+function classifyPublicObjectCategory(objectType) {
+  const otype = String(objectType || "").toLowerCase();
+  if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("lean-to") || otype.includes("lean_to") || otype.includes("thatch") || otype.includes("roof") || otype.includes("wall") || otype.includes("door") || otype.includes("floor") || otype.includes("fence") || otype.includes("tent")) {
+    return "shelter";
+  }
+  if (otype.includes("fire") || otype.includes("hearth") || otype.includes("forge") || otype.includes("furnace") || otype.includes("oven")) {
+    return "campfire";
+  }
+  if (otype.includes("storage") || otype.includes("container") || otype.includes("cache") || otype.includes("barrel") || otype.includes("box") || otype.includes("basket") || otype.includes("chest") || otype.includes("processor") || otype.includes("crafting") || otype.includes("tool") || otype.includes("well") || otype.includes("table") || otype.includes("chair") || otype.includes("bed") || otype.includes("furniture") || otype.includes("cart") || otype.includes("ladder")) {
+    return "storage";
+  }
+  return "landmark";
+}
+
+// Reconstruct complete historical object registry per civilization from recorded creation and destruction evidence
+const historicalObjectRegistry = { east: [], west: [] };
+
+function buildHistoricalObjectRegistry(pn) {
+  const pair = PAIRS[pn] || {};
+  const hbs = (pair.heartbeats || []).slice().sort((a, b) => Number(a.heartbeat) - Number(b.heartbeat));
+  const pobjs = pair.public_objects || {};
+  const pairMaxHb = timelineHbs[pn] && timelineHbs[pn].length > 0
+    ? timelineHbs[pn][timelineHbs[pn].length - 1]
+    : (Number(pair.exported_tick) || 1);
+
+  const hbCreatedMap = new Map();
+  const hbDestroyedMap = new Map();
+
+  for (const h of hbs) {
+    const hbNum = Number(h.heartbeat);
+    if (!Number.isFinite(hbNum)) continue;
+    for (const [agKey, act] of Object.entries(h.actions || {})) {
+      if (!act) continue;
+      const agentRef = agKey.includes("_") ? agKey : `${pn}_${agKey}`;
+      const atype = String(act.type || act.action || "").toLowerCase();
+      const out = String(act.outcome_status || "").toLowerCase();
+      if (out === "rejected" || out === "failed" || out === "blocked") continue;
+
+      const oid = act.object_id ? String(act.object_id) : null;
+      if (!oid) continue;
+
+      if (atype === "build" || atype === "create_public_object") {
+        if (!hbCreatedMap.has(oid)) {
+          hbCreatedMap.set(oid, {
+            object_id: oid,
+            object_type: act.object_type || "landmark",
+            tile_id: act.target_tile || getAgentRecordedPos(pn, agentRef, hbNum),
+            created_heartbeat: hbNum,
+            creator_agent_id: agentRef,
+            public_description: act.description || ""
+          });
+        }
+      } else if (
+        atype === "destroy_public_object" ||
+        atype === "dismantle" ||
+        atype === "extinguish" ||
+        (atype === "modify_owned_public_object" && /destroy|dismantle|extinguish/.test(String(act.status || act.reason || "").toLowerCase()))
+      ) {
+        hbDestroyedMap.set(oid, hbNum);
+      }
+    }
+  }
+
+  const registryMap = new Map();
+
+  // 1. Authoritative public_objects snapshot entries
+  for (const [keyId, obj] of Object.entries(pobjs)) {
+    if (!obj) continue;
+    const oid = String(obj.object_id || obj.id || keyId);
+    const hbAct = hbCreatedMap.get(oid);
+
+    let createdHb = null;
+    if (obj.created_heartbeat != null && Number.isFinite(Number(obj.created_heartbeat))) {
+      createdHb = Number(obj.created_heartbeat);
+    } else if (obj.created_at_heartbeat != null && Number.isFinite(Number(obj.created_at_heartbeat))) {
+      createdHb = Number(obj.created_at_heartbeat);
+    } else if (hbAct && Number.isFinite(hbAct.created_heartbeat)) {
+      createdHb = hbAct.created_heartbeat;
+    }
+
+    const chronologyKnown = (createdHb !== null && Number.isFinite(createdHb));
+    const status = String(obj.status || "active").toLowerCase();
+    const isDestroyedStatus = (status === "extinguished" || status === "destroyed" || status === "dismantled");
+
+    let destroyedHb = null;
+    if (obj.destroyed_heartbeat != null && Number.isFinite(Number(obj.destroyed_heartbeat))) {
+      destroyedHb = Number(obj.destroyed_heartbeat);
+    } else if (obj.removed_heartbeat != null && Number.isFinite(Number(obj.removed_heartbeat))) {
+      destroyedHb = Number(obj.removed_heartbeat);
+    } else if (obj.extinguished_heartbeat != null && Number.isFinite(Number(obj.extinguished_heartbeat))) {
+      destroyedHb = Number(obj.extinguished_heartbeat);
+    } else if (hbDestroyedMap.has(oid)) {
+      destroyedHb = hbDestroyedMap.get(oid);
+    } else if (isDestroyedStatus && obj.updated_at_heartbeat != null && Number.isFinite(Number(obj.updated_at_heartbeat))) {
+      destroyedHb = Number(obj.updated_at_heartbeat);
+    } else if (isDestroyedStatus) {
+      // Status is destroyed/extinguished but no exact destruction heartbeat is recorded: mark UNKNOWN
+      destroyedHb = "UNKNOWN";
+    }
+
+    const endDateUncertainty = (destroyedHb === "UNKNOWN");
+    let provenance = "verified-historical-object";
+    if (!chronologyKnown) {
+      provenance = "current-snapshot scenery";
+    } else if (endDateUncertainty) {
+      provenance = "historical-object-uncertain-end-date";
+    }
+
+    registryMap.set(oid, {
+      object_id: oid,
+      object_type: String(obj.object_type || (hbAct && hbAct.object_type) || "landmark"),
+      category: classifyPublicObjectCategory(obj.object_type || (hbAct && hbAct.object_type)),
+      tile_id: obj.tile_id || (hbAct && hbAct.tile_id),
+      created_heartbeat: createdHb,
+      destroyed_heartbeat: destroyedHb,
+      end_date_status: (destroyedHb === "UNKNOWN") ? "UNKNOWN" : (destroyedHb !== null ? "VERIFIED_DESTROYED" : "ACTIVE_IN_SNAPSHOT"),
+      chronologyKnown: chronologyKnown,
+      endDateKnown: !endDateUncertainty,
+      provenance: provenance,
+      inCurrentSnapshot: !isDestroyedStatus,
+      public_description: String(obj.public_description || obj.description || "")
+    });
+  }
+
+  // 2. Historical objects created in heartbeats that are absent from the current snapshot:
+  // Never guess or invent disappearance dates from later same-category builds or latest heartbeat.
+  // Use only recorded destruction evidence; when an object's end date cannot be proved, mark it "UNKNOWN".
+  for (const [oid, hbAct] of hbCreatedMap.entries()) {
+    if (registryMap.has(oid)) continue;
+    const cat = classifyPublicObjectCategory(hbAct.object_type);
+    const hasVerifiedDestruction = hbDestroyedMap.has(oid);
+    const destroyedHb = hasVerifiedDestruction ? hbDestroyedMap.get(oid) : "UNKNOWN";
+
+    registryMap.set(oid, {
+      object_id: oid,
+      object_type: String(hbAct.object_type || "landmark"),
+      category: cat,
+      tile_id: hbAct.tile_id,
+      created_heartbeat: hbAct.created_heartbeat,
+      destroyed_heartbeat: destroyedHb,
+      end_date_status: hasVerifiedDestruction ? "VERIFIED_DESTROYED" : "UNKNOWN",
+      chronologyKnown: true,
+      endDateKnown: hasVerifiedDestruction,
+      provenance: hasVerifiedDestruction
+        ? "verified-historical-object"
+        : "historical-object-uncertain-end-date",
+      inCurrentSnapshot: false,
+      public_description: String(hbAct.public_description || "")
+    });
+  }
+
+  historicalObjectRegistry[pn] = Array.from(registryMap.values());
+}
+
+buildHistoricalObjectRegistry("east");
+buildHistoricalObjectRegistry("west");
+
+function reconstructPublicObjectsAtHb(pn, hb) {
+  const reg = historicalObjectRegistry[pn] || [];
+  const pairMaxHb = (timelineHbs[pn] && timelineHbs[pn].length > 0)
+    ? timelineHbs[pn][timelineHbs[pn].length - 1]
+    : maxHb;
+  const isSnapshotHb = (hb >= pairMaxHb);
+
+  const active = [];
+  for (const rec of reg) {
+    const t = tilesById.get(rec.tile_id);
+    if (!t || !t.coordinates) continue;
+    const cid = (pn === "west") ? "cont_b" : "cont_a";
+    if (isCanonicalOcean(cid, t.coordinates.x, t.coordinates.y)) continue;
+
+    if (rec.chronologyKnown) {
+      if (hb < rec.created_heartbeat) continue; // Never show future buildings in early replay
+
+      if (rec.destroyed_heartbeat === "UNKNOWN") {
+        // Object's creation is verified at created_heartbeat, and absence at pairMaxHb is verified,
+        // but intermediate disappearance heartbeat is UNKNOWN (never guessed/invented).
+        // Only at the exact creation heartbeat is its presence authoritatively proven;
+        // at later heartbeats its end date is UNKNOWN so we do not present an inferred survival/removal window as canonical truth.
+        if (hb === rec.created_heartbeat && !isSnapshotHb) {
+          active.push({
+            ...rec,
+            destroyed_heartbeat: "UNKNOWN",
+            end_date_status: "UNKNOWN",
+            provenance: "historical-object-uncertain-end-date"
+          });
+        }
+        continue;
+      }
+
+      if (rec.destroyed_heartbeat !== null && Number.isFinite(rec.destroyed_heartbeat) && hb >= rec.destroyed_heartbeat) {
+        continue;
+      }
+      active.push(rec);
+    } else {
+      // Unknown creation chronology: identify as current-snapshot scenery and never inject into early historical replay
+      if (isSnapshotHb && rec.inCurrentSnapshot) {
+        active.push({
+          ...rec,
+          provenance: "current-snapshot scenery"
+        });
+      }
+    }
+  }
+  return active;
+}
+
+let lastRenderedObjectsState = { cont_a: "", cont_b: "" };
+
+function updatePublicObjectsAndClearings(pn, hb) {
+  const cid = (pn === "west") ? "cont_b" : "cont_a";
+  const activeObjects = reconstructPublicObjectsAtHb(pn, hb);
+
+  // Build signature from actual active object set (avoid rebuilding GPU objects if active object set is unchanged!)
+  const objSig = activeObjects
+    .map(o => `${o.object_id}@${o.tile_id}:${o.category}:${o.provenance}:${o.destroyed_heartbeat}`)
+    .sort()
+    .join("|");
+  const stateKey = `${pn}:${objSig}`;
+
+  if (lastRenderedObjectsState[cid] !== stateKey) {
+    lastRenderedObjectsState[cid] = stateKey;
+    const oGroup = objectGroups[cid];
+    disposeObjectGroupResources(oGroup);
+
+    // Group active objects by tile_id so multiple objects on the same tile are ALL preserved via visual clustering
+    const byTile = new Map();
+    for (const rec of activeObjects) {
+      if (!byTile.has(rec.tile_id)) byTile.set(rec.tile_id, []);
+      byTile.get(rec.tile_id).push(rec);
+    }
+
+    const categoryAnchors = {
+      shelter:  { dx: -0.40, dz: -0.44 },
+      campfire: { dx:  0.44, dz:  0.32 },
+      storage:  { dx: -0.46, dz:  0.32 },
+      landmark: { dx:  0.34, dz: -0.40 }
+    };
+
+    for (const [tid, tileObjs] of byTile.entries()) {
+      const t = tilesById.get(tid);
+      if (!t || !t.coordinates) continue;
+      const px = t.coordinates.x;
+      const pz = t.coordinates.y;
+
+      // Group by category within this tile
+      const byCat = { shelter: [], campfire: [], storage: [], landmark: [] };
+      for (const rec of tileObjs) {
+        const c = byCat[rec.category] ? rec.category : "landmark";
+        byCat[c].push(rec);
+      }
+
+      let tileHasLight = false;
+
+      for (const [cat, catList] of Object.entries(byCat)) {
+        if (catList.length === 0) continue;
+
+        // Sort so primary named structures lead the cluster while preserving every object
+        catList.sort((a, b) => {
+          const aIsTest = /test|epistemic|berry/i.test(a.object_id) ? 1 : 0;
+          const bIsTest = /test|epistemic|berry/i.test(b.object_id) ? 1 : 0;
+          if (aIsTest !== bIsTest) return aIsTest - bIsTest;
+          return (a.created_heartbeat || 0) - (b.created_heartbeat || 0);
+        });
+
+        const anchor = categoryAnchors[cat] || { dx: 0.3, dz: -0.3 };
+        const nCat = catList.length;
+
+        for (let i = 0; i < nCat; i++) {
+          const rec = catList[i];
+          let dx = anchor.dx;
+          let dz = anchor.dz;
+          let scale = 1.0;
+
+          if (i > 0) {
+            // Golden-angle satellite visual clustering around the category anchor within the tile
+            const angle = i * 2.3999632 + (cat.charCodeAt(0) * 0.4);
+            const r = Math.min(0.22, 0.11 + 0.025 * Math.sqrt(i));
+            dx = Math.max(-0.46, Math.min(0.46, anchor.dx + Math.cos(angle) * r));
+            dz = Math.max(-0.46, Math.min(0.46, anchor.dz + Math.sin(angle) * r));
+            scale = (nCat <= 3) ? 0.72 : Math.max(0.22, 0.58 / Math.sqrt(nCat));
+          } else if (tileObjs.length > 10 && /test|epistemic|berry/i.test(rec.object_id)) {
+            scale = 0.48;
+          }
+
+          const ox = px + dx;
+          const oz = pz + dz;
+          if (isCanonicalOcean(cid, ox, oz)) continue;
+          const oh = getTerrainHeight(cid, ox, oz);
+
+          const withShadow = (i < 2);
+          let propMesh = null;
+          if (cat === "shelter") {
+            propMesh = createShelterSprite(ox, oz, oh, scale, withShadow);
+          } else if (cat === "campfire") {
+            const addLight = !tileHasLight && (i === 0);
+            if (addLight) tileHasLight = true;
+            propMesh = createCampfireSprite(ox, oz, oh, scale, addLight, withShadow);
+          } else if (cat === "storage") {
+            propMesh = createStorageSprite(ox, oz, oh, scale, withShadow);
+          } else {
+            propMesh = createLandmarkSprite(ox, oz, oh, scale, withShadow);
+          }
+
+          propMesh.userData = {
+            ...propMesh.userData,
+            object_id: rec.object_id,
+            object_type: rec.object_type,
+            category: cat,
+            tile_id: rec.tile_id,
+            tileX: px,
+            tileY: pz,
+            created_heartbeat: rec.created_heartbeat,
+            destroyed_heartbeat: rec.destroyed_heartbeat,
+            end_date_status: rec.end_date_status,
+            chronologyKnown: rec.chronologyKnown,
+            endDateKnown: rec.endDateKnown,
+            provenance: rec.provenance,
+            inCurrentSnapshot: rec.inCurrentSnapshot,
+            clusterIndex: i,
+            clusterSize: nCat
+          };
+          oGroup.add(propMesh);
+        }
+      }
+    }
+  }
+
+  // Dynamic Vegetation Clearing: follow canonical agent positions & active objects at currentHb (zero hardcoded coords)
+  const adamTid = getAgentRecordedPos(pn, `${pn}_adam`, hb);
+  const eveTid = getAgentRecordedPos(pn, `${pn}_eve`, hb);
+  const tAdam = tilesById.get(adamTid);
+  const tEve = tilesById.get(eveTid);
+  const ax = (tAdam && tAdam.coordinates) ? tAdam.coordinates.x : null;
+  const az = (tAdam && tAdam.coordinates) ? tAdam.coordinates.y : null;
+  const ex = (tEve && tEve.coordinates) ? tEve.coordinates.x : null;
+  const ez = (tEve && tEve.coordinates) ? tEve.coordinates.y : null;
+
+  const activeObjCoords = [];
+  for (const rec of activeObjects) {
+    const t = tilesById.get(rec.tile_id);
+    if (t && t.coordinates) {
+      activeObjCoords.push([t.coordinates.x, t.coordinates.y]);
+    }
+  }
+
+  // Trees, boulders, and berry bushes are permanent natural scenery:
+  // they never disappear when an agent walks past them (agents walk through/around foliage).
+  // Natural scenery is only cleared if a permanent public settlement structure (shelter/campfire/storage)
+  // has been physically constructed on that specific spot.
+  const sGroup = sceneryGroups[cid];
+  for (const child of sGroup.children) {
+    const ud = child.userData || {};
+    if (ud.isCanonicalLandmark) {
+      child.visible = true;
+      continue;
+    }
+    const wx = ud.wx != null ? ud.wx : child.position.x;
+    const wz = ud.wz != null ? ud.wz : child.position.z;
+
+    let clearForObject = false;
+    for (let i = 0; i < activeObjCoords.length; i++) {
+      const [ox, oz] = activeObjCoords[i];
+      if (Math.hypot(wx - ox, wz - oz) <= 1.25) {
+        clearForObject = true;
+        break;
+      }
+    }
+
+    child.visible = !clearForObject;
+  }
+}
+
+function populateContinentScenery(cid) {
+  const sGroup = sceneryGroups[cid];
+  disposeObjectGroupResources(sGroup);
+
+  const tData = terrainDB ? terrainDB[cid] : null;
+  const bounds = getDynamicExploredBounds(cid);
+
+  // Populate Natural Geography & Vegetation across the 200x200 Continent
+  // Strictly skip canonical ocean tiles. Tag procedural flora as current-snapshot scenery.
+  for (let y = -94; y <= 94; y++) {
+    for (let x = -94; x <= 94; x++) {
+      const inExploredVicinity = (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY);
+      if (!inExploredVicinity && ((Math.abs(x) % 2 !== 0) || (Math.abs(y) % 2 !== 0))) continue;
+
+      if (isCanonicalOcean(cid, x, y)) continue;
+
+      const idx = (y + 100) * 200 + (x + 100);
+      const h = getTerrainHeight(cid, x, y);
+      if (h <= 0.08) continue;
+
+      let terr = getCanonicalTerrain(cid, x, y);
+      if (terr === "ocean") continue;
+
+      let b = "";
+      let elev = 0.25;
+      let res = "";
+      let water = "";
+      let lm = "";
+
+      if (tData) {
+        b = String((tData.biome && tData.biome[idx]) || "");
+        elev = (tData.elev && tData.elev[idx]) || 0.0;
+        res = String((tData.res && tData.res[idx]) || "");
+        water = String((tData.water && tData.water[idx]) || "");
+        lm = String((tData.landmarks && tData.landmarks[idx]) || "");
+      } else {
+        const t = tileByContinentCoord.get(`${cid}:${x},${y}`);
+        if (!t) continue;
+        b = String(t.biome || "");
+        elev = t.elevation || 0.0;
+      }
+
+      const isKnown = isTileKnown(cid, x, y);
+      const propTint = isKnown ? 0xffffff : 0x8ea69b;
+
+      // 1. Canonical Cave Landmarks (Strictly when defined in tile.landmark_ids — lm_deep_mouth at (31,36))
+      const tKnown = tileByContinentCoord.get(`${cid}:${x},${y}`);
+      const hasCave = (lm.includes("cave") || lm.includes("mouth")) ||
+        (tKnown && tKnown.landmark_ids && tKnown.landmark_ids.some(id => {
+          const s = String(id).toLowerCase();
+          return s.includes("cave") || s.includes("mouth") || s.includes("cavern");
+        }));
+      if (hasCave) {
+        const cave = createCaveSprite(x, y, h);
+        cave.userData = { wx: x, wz: y, tileX: x, tileY: y, kind: "cave", isCanonicalLandmark: true, isKnownTile: isKnown, provenance: "canonical-landmark" };
+        sGroup.add(cave);
+        continue;
+      }
+
+      const seed = (((x * 73856093) ^ (y * 19349663)) >>> 0) & 0xffff;
+      const jitterX = (((seed % 100) / 100 - 0.5) * 0.62);
+      const jitterZ = ((((seed >> 8) % 100) / 100 - 0.5) * 0.62);
+      const ox = x + jitterX;
+      const oz = y + jitterZ;
+
+      if (isCanonicalOcean(cid, ox, oz)) continue;
+      const oh = getTerrainHeight(cid, ox, oz);
+      if (oh <= 0.08) continue;
+
+      // 2. High Mountain Peaks
+      if ((terr === "mountain" || elev > 0.78) && (seed % 10 < (inExploredVicinity ? 4 : 3))) {
+        const sc = 0.85 + (seed % 35) / 100;
+        const mtn = createMountainPeakSprite(ox, oz, oh, sc, propTint);
+        mtn.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "mountain", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+        sGroup.add(mtn);
+        continue;
+      }
+
+      // 3. Natural Freshwater Springs / Cascades on hilly river tiles
+      if ((water === "river" || water === "stream") && elev > 0.38 && (seed % 12 === 0)) {
+        const wf = createWaterfallSprite(ox, oz, oh, propTint);
+        wf.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "waterfall", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+        sGroup.add(wf);
+        continue;
+      }
+
+      // 4. Forest Woodlands & Valley Trees
+      const isForest = (terr === "forest" || b.includes("forest") || b.includes("woodland"));
+      if (isForest && (seed % 10 < (inExploredVicinity ? 6 : 5))) {
+        const sc = 0.80 + (seed % 35) / 100;
+        const tr1 = createTreeSprite(ox, oz, oh, sc, propTint);
+        tr1.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+        sGroup.add(tr1);
+        if (inExploredVicinity && (seed % 10 < 2)) {
+          const ox2 = x - jitterX * 0.8;
+          const oz2 = y + jitterZ * 0.7;
+          if (!isCanonicalOcean(cid, ox2, oz2)) {
+            const oh2 = getTerrainHeight(cid, ox2, oz2);
+            if (oh2 > 0.08) {
+              const tr2 = createTreeSprite(ox2, oz2, oh2, sc * 0.85, propTint);
+              tr2.userData = { wx: ox2, wz: oz2, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+              sGroup.add(tr2);
+            }
+          }
+        }
+      } else if ((terr === "hill" || terr === "grassland") && inExploredVicinity && (seed % 26 === 0)) {
+        const sc = 0.75 + (seed % 25) / 100;
+        const tr = createTreeSprite(ox, oz, oh, sc, propTint);
+        tr.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+        sGroup.add(tr);
+      }
+
+      // 5. Wild Berry Bushes on canonical berry/forage tiles
+      if (inExploredVicinity && (res.includes("berries") || res.includes("apples") || res.includes("fiber")) && (seed % 10 < 5)) {
+        const bx = x + (((seed >> 4) % 100) / 100 - 0.5) * 0.65;
+        const bz = y + (((seed >> 11) % 100) / 100 - 0.5) * 0.65;
+        if (!isCanonicalOcean(cid, bx, bz)) {
+          const bh = getTerrainHeight(cid, bx, bz);
+          if (bh > 0.08) {
+            const br = createBerrySprite(bx, bz, bh, 0.9 + (seed % 20) / 100, propTint);
+            br.userData = { wx: bx, wz: bz, tileX: x, tileY: y, kind: "berry", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+            sGroup.add(br);
+          }
+        }
+      }
+
+      // 6. Mossy Granite Boulders on rocky hills & slopes
+      if (inExploredVicinity && (terr === "hill" || res.includes("stone") || res.includes("flint")) && (seed % 14 === 0)) {
+        const rx = x + (((seed >> 6) % 100) / 100 - 0.5) * 0.62;
+        const rz = y + (((seed >> 12) % 100) / 100 - 0.5) * 0.62;
+        if (!isCanonicalOcean(cid, rx, rz)) {
+          const rh = getTerrainHeight(cid, rx, rz);
+          if (rh > 0.08) {
+            const rk = createBoulderSprite(rx, rz, rh, 0.85 + (seed % 30) / 100, propTint);
+            rk.userData = { wx: rx, wz: rz, tileX: x, tileY: y, kind: "boulder", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
+            sGroup.add(rk);
+          }
+        }
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// HUMAN-SCALE CHARACTERS IN 3D (Grounded, True Aspect Ratio, Repaired Opacity)
+// -------------------------------------------------------------
+const textures = {
+  adam_standing: loadSpriteTexture("./assets/adam_standing.png"),
+  adam_collapsed: loadSpriteTexture("./assets/adam_collapsed.png"),
+  eve_standing: loadSpriteTexture("./assets/eve_standing.png"),
+  eve_collapsed: loadSpriteTexture("./assets/eve_collapsed.png")
+};
+
+function createCharacterFigure(name, factionColor) {
+  const group = new THREE.Group();
+
+  const isAdam = name.toUpperCase().includes("ADAM");
+  const tex = isAdam ? textures.adam_standing : textures.eve_standing;
+
+  // True image aspect ratios:
+  // Adam standing: 411x949 (aspect 0.433) -> height 1.44m, width 0.63m
+  // Eve standing:  643x967 (aspect 0.665) -> height 1.40m, width 0.93m
+  const charH = isAdam ? 1.44 : 1.40;
+  const charW = isAdam ? 0.63 : 0.93;
+
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    alphaTest: 0.35
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(charW, charH, 1);
+  // Boots sit near bottom of trimmed sprite; sink slightly (-0.03) so boots plant firmly into turf
+  sprite.position.y = charH * 0.5 - 0.03;
+  group.add(sprite);
+
+  // Soft Ground Contact Shadow directly under boots
+  const shadow = createGroundShadowDecal(0.38, 0.34, 0.78);
+  group.add(shadow);
+
+  // Subtle Ground Ring
+  const ringGeom = new THREE.RingGeometry(0.34, 0.41, 24);
+  ringGeom.rotateX(-Math.PI / 2);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: factionColor,
+    transparent: true,
+    opacity: 0.65,
+    side: THREE.DoubleSide
+  });
+  const ring = new THREE.Mesh(ringGeom, ringMat);
+  ring.position.y = 0.035;
+  group.add(ring);
+
+  group.userData = { sprite, ring, mat, charH, charW, tileId: null, prevTileId: null, hasMoved: false, isBlocked: false, strideBob: 0.0 };
+  scene.add(group);
+  return group;
+}
+
+const charFigures = {
+  adam: createCharacterFigure("ADAM", 0x00d2d3),
+  eve: createCharacterFigure("EVE", 0xfeca57)
+};
+
+// -------------------------------------------------------------
+// BUILD SCENE
+// -------------------------------------------------------------
+buildContinentMesh("cont_a");
+buildContinentMesh("cont_b");
+
+continentGroups.cont_a.position.set(0, 0, 0);
+continentGroups.cont_b.position.set(0, 0, 0);
+sceneryGroups.cont_a.position.set(0, 0, 0);
+sceneryGroups.cont_b.position.set(0, 0, 0);
+objectGroups.cont_a.position.set(0, 0, 0);
+objectGroups.cont_b.position.set(0, 0, 0);
+
+// Camera Framing Modes (100% Dynamic from Canonical Agent Coordinates at currentHb):
+// 1. "human"     -> Human-Eye Perspective (standing at eye level ~1.52m behind Adam looking toward Eve / settlement)
+// 2. "landscape" -> Elevated Landscape View (sweeping valley overlook dynamically framing both agents' positions)
+// 3. "orbit"     -> Full-Continent Orbit View (both 40,000-tile continents side-by-side across the Great Ocean)
+function applyCameraMode(mode, immediate = true) {
+  activeCamMode = mode;
+  document.querySelectorAll(".cam-btn").forEach(b => b.classList.remove("active"));
+
+  const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+  const cid = (pairName === "west") ? "cont_b" : "cont_a";
+
+  const adamTid = getAgentRecordedPos(pairName, `${pairName}_adam`, currentHb);
+  const eveTid = getAgentRecordedPos(pairName, `${pairName}_eve`, currentHb);
+  const tAdam = tilesById.get(adamTid);
+  const tEve = tilesById.get(eveTid);
+
+  const ax = (tAdam && tAdam.coordinates) ? tAdam.coordinates.x : 0;
+  const az = (tAdam && tAdam.coordinates) ? tAdam.coordinates.y : 0;
+  const ex = (tEve && tEve.coordinates) ? tEve.coordinates.x : ax;
+  const ez = (tEve && tEve.coordinates) ? tEve.coordinates.y : az;
+
+  if (mode === "orbit" || selectedPair === "orbit") {
+    scene.background.setHex(0x0f2d4a);
+    scene.fog.color.setHex(0x0f2d4a);
+    scene.fog.density = 0.0005;
+    skyDome.visible = false;
+    camera.fov = 44;
+    camera.updateProjectionMatrix();
+    smoothMoveCamera(new THREE.Vector3(0, 195, 235), new THREE.Vector3(0, 0, 0), immediate);
+    return;
+  }
+
+  skyDome.visible = true;
+  scene.background.setHex(0x7ca0be);
+  scene.fog.color.setHex(0x88aac4);
+
+  if (mode === "human") {
+    document.getElementById("cam-human").classList.add("active");
+    scene.fog.density = 0.0075;
+    camera.fov = 40;
+    camera.updateProjectionMatrix();
+
+    // Dynamic sightline vector from Adam toward Eve (or default valley sightline when co-located)
+    const dx = ex - ax;
+    const dz = ez - az;
+    const dist = Math.hypot(dx, dz);
+    const ux = (dist > 0.5) ? (dx / dist) : 0.948;
+    const uz = (dist > 0.5) ? (dz / dist) : 0.316;
+    const rx = -uz;
+    const rz = ux;
+
+    const camX = ax - ux * 3.75 - rx * 0.12;
+    const camZ = az - uz * 3.75 - rz * 0.12;
+    const groundH = getTerrainHeight(cid, camX, camZ);
+    const lookX = ax + ux * 3.65;
+    const lookZ = az + uz * 3.65;
+    const lookH = getTerrainHeight(cid, lookX, lookZ) + 0.72;
+    smoothMoveCamera(new THREE.Vector3(camX, groundH + 1.52, camZ), new THREE.Vector3(lookX, lookH, lookZ), immediate);
+  } else if (mode === "landscape") {
+    document.getElementById("cam-cinematic").classList.add("active");
+    scene.fog.density = 0.0055;
+    camera.fov = 40;
+    camera.updateProjectionMatrix();
+
+    const cx = (ax + ex) * 0.5;
+    const cz = (az + ez) * 0.5;
+    const span = Math.hypot(ex - ax, ez - az);
+    const pullZ = Math.max(17.5, Math.min(42.0, span * 0.92 + 5.0));
+    const elevOffset = Math.max(8.2, Math.min(22.0, span * 0.42 + 2.5));
+    const ch = getTerrainHeight(cid, cx, cz);
+    const camX = cx - 3.5;
+    const camZ = cz + pullZ;
+    const camGround = getTerrainHeight(cid, camX, camZ);
+    const eyeY = Math.max(ch + elevOffset, camGround + 6.5);
+    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx, ch + 0.6, cz - 1.5), immediate);
+  } else if (mode === "adam") {
+    document.getElementById("cam-focus-adam").classList.add("active");
+    scene.fog.density = 0.007;
+    camera.fov = 38;
+    camera.updateProjectionMatrix();
+    const ah = getTerrainHeight(cid, ax, az);
+    const camX = ax - 1.8;
+    const camZ = az + 3.4;
+    const gH = getTerrainHeight(cid, camX, camZ);
+    smoothMoveCamera(new THREE.Vector3(camX, Math.max(ah + 1.7, gH + 1.5), camZ), new THREE.Vector3(ax + 0.8, ah + 0.85, az - 0.4), immediate);
+  } else if (mode === "eve") {
+    document.getElementById("cam-focus-eve").classList.add("active");
+    scene.fog.density = 0.007;
+    camera.fov = 38;
+    camera.updateProjectionMatrix();
+    const eh = getTerrainHeight(cid, ex, ez);
+    const camX = ex - 1.8;
+    const camZ = ez + 3.4;
+    const gH = getTerrainHeight(cid, camX, camZ);
+    smoothMoveCamera(new THREE.Vector3(camX, Math.max(eh + 1.7, gH + 1.5), camZ), new THREE.Vector3(ex + 0.4, eh + 0.85, ez - 0.3), immediate);
+  } else if (mode === "topdown") {
+    document.getElementById("cam-topdown").classList.add("active");
+    scene.fog.density = 0.003;
+    camera.fov = 42;
+    camera.updateProjectionMatrix();
+    const cx = (ax + ex) * 0.5;
+    const cz = (az + ez) * 0.5;
+    const ch = getTerrainHeight(cid, cx, cz);
+    smoothMoveCamera(new THREE.Vector3(cx, ch + 52, cz + 4.0), new THREE.Vector3(cx, ch, cz), immediate);
+  }
+}
+
+// Focus Civilization
+function focusCiv(pairName) {
+  selectedPair = pairName;
+  updateHbBounds();
+
+  document.querySelectorAll(".nav-pill").forEach(p => p.classList.remove("active"));
+  if (pairName === "east") document.getElementById("btn-east").classList.add("active");
+  else if (pairName === "west") document.getElementById("btn-west").classList.add("active");
+  else if (pairName === "orbit") document.getElementById("btn-orbit").classList.add("active");
+
+  const cid = (pairName === "west") ? "cont_b" : "cont_a";
+
+  if (pairName === "orbit") {
+    // Show both continents side-by-side across the Great Ocean (centers 250 units apart, 50 units ocean gap)
+    continentGroups.cont_a.visible = true;
+    continentGroups.cont_b.visible = true;
+    sceneryGroups.cont_a.visible = true;
+    sceneryGroups.cont_b.visible = true;
+    objectGroups.cont_a.visible = true;
+    objectGroups.cont_b.visible = true;
+    continentGroups.cont_a.position.set(-125, 0, 0);
+    continentGroups.cont_b.position.set(125, 0, 0);
+    sceneryGroups.cont_a.position.set(-125, 0, 0);
+    sceneryGroups.cont_b.position.set(125, 0, 0);
+    objectGroups.cont_a.position.set(-125, 0, 0);
+    objectGroups.cont_b.position.set(125, 0, 0);
+
+    updatePublicObjectsAndClearings("east", (timelineHbs.east && timelineHbs.east.length) ? timelineHbs.east[timelineHbs.east.length - 1] : currentHb);
+    updatePublicObjectsAndClearings("west", (timelineHbs.west && timelineHbs.west.length) ? timelineHbs.west[timelineHbs.west.length - 1] : currentHb);
+
+    applyCameraMode("orbit", true);
+  } else {
+    continentGroups.cont_a.visible = (cid === "cont_a");
+    continentGroups.cont_b.visible = (cid === "cont_b");
+    sceneryGroups.cont_a.visible = (cid === "cont_a");
+    sceneryGroups.cont_b.visible = (cid === "cont_b");
+    objectGroups.cont_a.visible = (cid === "cont_a");
+    objectGroups.cont_b.visible = (cid === "cont_b");
+    continentGroups[cid].position.set(0, 0, 0);
+    sceneryGroups[cid].position.set(0, 0, 0);
+    objectGroups[cid].position.set(0, 0, 0);
+
+    updatePublicObjectsAndClearings(pairName, currentHb);
+    applyCameraMode(activeCamMode === "orbit" ? "landscape" : activeCamMode, true);
+  }
+
+  updateHUD();
+  renderSidebar();
+}
+
+// Camera Smoothing with Terrain Clearance
+let camTargetPos = camera.position.clone();
+let controlsTargetPos = controls.target.clone();
+
+function smoothMoveCamera(newPos, newTarget, immediate = false) {
+  if (selectedPair !== "orbit") {
+    const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
+    const groundH = getTerrainHeight(cid, newPos.x, newPos.z);
+    const minClearance = (activeCamMode === "human" || activeCamMode === "adam" || activeCamMode === "eve") ? 1.45 : 3.0;
+    if (newPos.y < groundH + minClearance) {
+      newPos.y = groundH + minClearance;
+    }
+  }
+  camTargetPos.copy(newPos);
+  controlsTargetPos.copy(newTarget);
+  if (immediate) {
+    camera.position.copy(newPos);
+    controls.target.copy(newTarget);
+    controls.update();
+  }
+}
+
+// -------------------------------------------------------------
+// TELEMETRY & PLAYBACK
+// -------------------------------------------------------------
+function getAgentRecordedPos(pn, ref, hb) {
+  const pair = PAIRS[pn] || {};
+  const timeline = pair.position_timeline || {};
+
+  // 1. Try exact heartbeat
+  const sHb = String(hb);
+  if (timeline[sHb] && timeline[sHb][ref]) {
+    return timeline[sHb][ref];
+  }
+
+  // 2. Search strictly backwards hb - 1 down to 1
+  for (let h = hb - 1; h >= 1; h--) {
+    const s = String(h);
+    if (timeline[s] && timeline[s][ref]) {
+      return timeline[s][ref];
+    }
+  }
+
+  // 3. Fallback strictly to canonical origin / start tile (NEVER future or modern current_positions!)
+  if (pn === "west") {
+    return ref.includes("eve") ? "west-start-eve" : "west-start-adam";
+  } else {
+    return "public-shared-center";
+  }
+}
+
+function getAgentActionAtHb(pn, ref, hb) {
+  const hbObj = (hbIndex[pn] || new Map()).get(Number(hb));
+  const rawShort = ref.replace(`${pn}_`, "");
+  const act = (hbObj && hbObj.actions) ? (hbObj.actions[ref] || hbObj.actions[rawShort]) : null;
+
+  if (!act) {
+    return {
+      type: "none",
+      outcome_status: null,
+      label: "NO ACTION RECORDED",
+      detail: "No action recorded for this heartbeat."
+    };
+  }
+
+  const actType = String(act.type || act.action || "").toLowerCase();
+  const outcome = act.outcome_status ? String(act.outcome_status).toLowerCase() : null;
+  const reason = act.reason || act.intent || act.detail || act.public_description || "";
+
+  let label = "NO ACTION RECORDED";
+  if (actType === "move") {
+    if (outcome === "blocked") label = "Move Blocked";
+    else if (outcome === "failed") label = "Move Failed";
+    else label = "Exploring Wilderness";
+  } else if (actType === "gather") {
+    const res = act.resource ? ` (${act.resource})` : "";
+    label = `Gathering Resources${res}`;
+  } else if (actType === "build" || actType === "create_public_object") {
+    const otype = act.object_type ? ` (${act.object_type})` : "";
+    label = `Constructing Object${otype}`;
+  } else if (actType === "modify_owned_public_object" || actType === "use_object") {
+    label = "Operating Public Object";
+  } else if (actType === "inspect_public_object") {
+    label = "Inspecting Object";
+  } else if (actType === "eat") {
+    label = "Nourishing";
+  } else if (actType === "leave_public_message" || actType === "ask_human") {
+    label = "Civilization Council";
+  } else if (actType === "request_capability") {
+    label = "Requesting Capability";
+  } else if (actType === "revise_charter") {
+    label = "Revising Charter";
+  } else if (actType) {
+    label = actType.replace(/_/g, " ").toUpperCase();
+  }
+
+  return {
+    type: actType,
+    outcome_status: outcome,
+    label: label,
+    detail: reason || label
+  };
+}
+
+function escapeHtml(val) {
+  return String(val == null ? "" : val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getExploredTileCount(pn) {
+  const pair = PAIRS[pn] || {};
+  const km = pair.known_maps || {};
+  const unionSet = new Set();
+  for (const m of Object.values(km)) {
+    for (const tid of Object.keys(m.known_tiles || {})) {
+      unionSet.add(tid);
+    }
+  }
+  return unionSet.size;
+}
+
+// Per-Civilization LIVE vs SNAPSHOT Detection (Never compare West ticks against East maxHb)
+function getPairMaxHb(p) {
+  if (!p) return 0;
+  const hbs = (p.heartbeats || []).map(h => Number(h.heartbeat)).filter(Number.isFinite);
+  const maxFromHbs = hbs.length > 0 ? Math.max(...hbs) : 0;
+  const expTick = Number(p.exported_tick);
+  return (Number.isFinite(expTick) && expTick > maxFromHbs) ? expTick : maxFromHbs;
+}
+
+const prevExportedHb = {
+  east: getPairMaxHb(PAIRS.east),
+  west: getPairMaxHb(PAIRS.west)
+};
+const isPairLive = {
+  east: false,
+  west: false
+};
+let isLiveStreaming = false;
+
+function evaluateLivePollUpdate(freshData) {
+  if (!freshData || !freshData.pairs) return { east: false, west: false };
+
+  for (const pn of ["east", "west"]) {
+    const p = freshData.pairs[pn];
+    if (!p) {
+      isPairLive[pn] = false;
+      continue;
+    }
+    const prevHb = prevExportedHb[pn];
+    const newHb = getPairMaxHb(p);
+
+    // Strictly compare each civilization's previous exported heartbeat against its new exported heartbeat
+    const advanced = (prevHb !== null && Number.isFinite(prevHb) && newHb > prevHb);
+    isPairLive[pn] = Boolean(advanced);
+    prevExportedHb[pn] = newHb;
+
+    PAIRS[pn] = p;
+    const hbs = (p.heartbeats || []).map(h => Number(h.heartbeat)).filter(Number.isFinite).sort((a, b) => a - b);
+    timelineHbs[pn] = hbs;
+    hbIndex[pn] = new Map();
+    for (const h of (p.heartbeats || [])) {
+      hbIndex[pn].set(Number(h.heartbeat), h);
+    }
+    buildHistoricalObjectRegistry(pn);
+  }
+
+  rebuildKnownSets();
+  updateHbBounds();
+
+  const activePn = (selectedPair === "orbit") ? null : selectedPair;
+  isLiveStreaming = activePn ? isPairLive[activePn] : (isPairLive.east || isPairLive.west);
+
+  if (playbackMode === "live") {
+    currentHb = maxHb;
+    if (selectedPair !== "orbit") {
+      updatePublicObjectsAndClearings(selectedPair, currentHb);
+      applyCameraMode(activeCamMode, false);
+    }
+  }
+  updateHUD();
+  renderSidebar();
+  return { ...isPairLive };
+}
+
+async function pollLatestData() {
+  try {
+    const res = await fetch(`../viewer_data.js?t=${Date.now()}`);
+    if (res.ok) {
+      const text = await res.text();
+      const idx = text.indexOf("window.VIEWER_DATA = ");
+      if (idx !== -1) {
+        const jsonStr = text.substring(idx + "window.VIEWER_DATA = ".length).replace(/;[\s\n]*$/, "");
+        const freshData = JSON.parse(jsonStr);
+        evaluateLivePollUpdate(freshData);
+      }
+    }
+  } catch (e) {
+    isPairLive.east = false;
+    isPairLive.west = false;
+    isLiveStreaming = false;
+    updateHUD();
+  }
+}
+setInterval(pollLatestData, 12000);
+
+function updateHUD() {
+  const scaleHud = document.getElementById("scale-hud");
+  if (!scaleHud) return;
+
+  const isEast = (selectedPair === "east");
+  const isOrbit = (selectedPair === "orbit");
+  const title = isOrbit ? "WORLD ATLAS // DUAL CONTINENT ORBIT" :
+                (isEast ? "EAST VALLEY // ALPHA CONTINENT" : "WEST DAWN // BETA CONTINENT");
+
+  document.getElementById("hud-civ-title").textContent = title;
+
+  const eastCount = getExploredTileCount("east");
+  const westCount = getExploredTileCount("west");
+  let count = isEast ? eastCount : westCount;
+  let maxTiles = 40000;
+  if (isOrbit) {
+    count = eastCount + westCount;
+    maxTiles = 80000;
+  }
+
+  const pct = ((count / maxTiles) * 100).toFixed(1);
+  const fill = document.getElementById("hud-progress-fill");
+  fill.style.width = `${pct}%`;
+  fill.style.background = isOrbit ? "#a29bfe" : (isEast ? "var(--east-cyan)" : "var(--west-amber)");
+  document.getElementById("hud-progress-label").textContent = `${count.toLocaleString()} / ${maxTiles.toLocaleString()} tiles (${pct}%)`;
+
+  const zoomLabel = document.getElementById("hud-zoom-label");
+  if (zoomLabel) {
+    if (playbackMode === "replay" && currentHb < maxHb) {
+      zoomLabel.textContent = `HISTORICAL REPLAY (HB ${currentHb}) // OBJECTS & POSITIONS CANONICAL · FLORA: CURRENT-SNAPSHOT SCENERY`;
+    } else {
+      zoomLabel.textContent = "HUMAN SCALE // CANONICAL GEOGRAPHY & SETTLEMENTS (FLORA: CURRENT-SNAPSHOT SCENERY)";
+    }
+  }
+
+  const compLabel = document.getElementById("hud-compression-label");
+  if (compLabel) {
+    if (isOrbit) {
+      compLabel.textContent = "GLOBAL ORBIT // DUAL 200×200 CONTINENTS (80,000 TILES TOTAL)";
+      compLabel.style.color = "#a29bfe";
+    } else {
+      const spd = playSpeed || 2;
+      const civColor = isEast ? "var(--east-cyan)" : "var(--west-amber)";
+      compLabel.style.color = civColor;
+      compLabel.textContent = `TIMELAPSE: ~${(spd * 1800).toLocaleString()}× EPOCH RATE (1 HB = 1 FULL ACTION CYCLE · REGION: 91×17 TILES)`;
+    }
+  }
+
+  const scrubber = document.getElementById("scrubber");
+  scrubber.min = minHb;
+  scrubber.max = maxHb;
+  scrubber.value = currentHb;
+  document.getElementById("pb-counter").textContent = `${currentHb} / ${maxHb} HB`;
+
+  const liveBadge = document.getElementById("live-status-badge");
+  const activePn = isOrbit ? null : selectedPair;
+  const pairProvenLive = activePn ? Boolean(isPairLive[activePn]) : Boolean(isPairLive.east || isPairLive.west);
+  isLiveStreaming = pairProvenLive;
+
+  if (playbackMode === "live" && currentHb >= maxHb) {
+    if (pairProvenLive) {
+      liveBadge.textContent = `STREAM LIVE (HB ${maxHb})`;
+      liveBadge.className = "status-badge-live";
+    } else {
+      liveBadge.textContent = `SNAPSHOT (HB ${maxHb})`;
+      liveBadge.className = "status-badge-snapshot";
+    }
+  } else {
+    liveBadge.textContent = `REPLAY HB ${currentHb}`;
+    liveBadge.className = "status-badge-replay";
+  }
+}
+
+function renderSidebar() {
+  const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+  const pair = PAIRS[pairName] || {};
+  const isEast = pairName === "east";
+
+  document.getElementById("side-civ-title").textContent = `CIVILIZATION TELEMETRY: ${isEast ? "EAST VALLEY" : "WEST DAWN"}`;
+
+  const container = document.getElementById("agents-cards-container");
+  container.innerHTML = "";
+
+  const agents = pair.agents || [`${pairName}_adam`, `${pairName}_eve`];
+  for (const ref of agents) {
+    const vitals = (pair.vitals || {})[ref] || { vitality: 100, hunger: 0, warmth: 80, downed: false };
+    const act = getAgentActionAtHb(pairName, ref, currentHb);
+    const isAdam = ref.toLowerCase().includes("adam");
+    const name = (ref.split("_")[1] || ref).toUpperCase();
+    const avatar = isAdam ? "../adam_portrait.jpg" : "../eve_portrait.jpg";
+    const tid = getAgentRecordedPos(pairName, ref, currentHb);
+
+    const safeName = escapeHtml(name);
+    const safeCivLabel = isEast ? "East Valley" : "West Dawn";
+    const safeTid = escapeHtml(String(tid || "").toUpperCase());
+    const safeActLabel = escapeHtml(act.label);
+    const safeActDetail = escapeHtml(act.detail);
+    const vitVal = Math.max(0, Math.min(100, Number(vitals.vitality) || 0));
+    const warmVal = Math.max(0, Math.min(100, Number(vitals.warmth) || 0));
+    const hungVal = Math.max(0, Math.min(100, Number(vitals.hunger) || 0));
+    const wetVal = Math.max(0, Math.min(100, Number(vitals.wetness) || 0));
+
+    const card = document.createElement("div");
+    card.className = `agent-card ${isEast ? "east" : "west"}`;
+    card.innerHTML = `
+      <div class="agent-head">
+        <div class="agent-info">
+          <img src="${escapeHtml(avatar)}" class="agent-avatar" alt="${safeName}" onerror="this.style.display='none'">
+          <div>
+            <div class="agent-title">${safeName}</div>
+            <div class="agent-sub">${safeCivLabel} // ${safeTid}</div>
+          </div>
+        </div>
+        <span style="font-family:var(--font-mono); font-size:0.62rem; color:${vitals.downed ? '#ff4757':'#2ed573'}; font-weight:700;">
+          ${vitals.downed ? 'DOWNED' : 'ACTIVE'}
+        </span>
+      </div>
+      <div class="vitals-grid">
+        <div class="vital-bar-wrap">
+          <div class="vital-label"><span>VITALITY</span><span>${Math.round(vitVal)} HP</span></div>
+          <div class="vital-track"><div class="vital-fill" style="width:${vitVal}%; background:${vitVal > 40 ? '#2ed573' : '#ff4757'};"></div></div>
+        </div>
+        <div class="vital-bar-wrap">
+          <div class="vital-label"><span>WARMTH</span><span>${Math.round(warmVal)}%</span></div>
+          <div class="vital-track"><div class="vital-fill" style="width:${warmVal}%; background:#ff9f43;"></div></div>
+        </div>
+        <div class="vital-bar-wrap">
+          <div class="vital-label"><span>HUNGER</span><span>${Math.round(hungVal)}%</span></div>
+          <div class="vital-track"><div class="vital-fill" style="width:${hungVal}%; background:#ffa502;"></div></div>
+        </div>
+        <div class="vital-bar-wrap">
+          <div class="vital-label"><span>WETNESS</span><span>${Math.round(wetVal)}%</span></div>
+          <div class="vital-track"><div class="vital-fill" style="width:${wetVal}%; background:#00d2d3;"></div></div>
+        </div>
+      </div>
+      <div class="action-dossier">
+        <div class="action-provenance">CANONICAL ACTION [HB ${escapeHtml(currentHb)}]</div>
+        <div class="action-text">${safeActLabel}</div>
+        ${act.detail && act.detail !== act.label ? `<div style="font-size:0.68rem; color:var(--text-tertiary); margin-top:4px;">${safeActDetail}</div>` : ""}
+      </div>
+    `;
+    container.appendChild(card);
+  }
+
+  // Chronicle (Strictly escaped)
+  const chronStream = document.getElementById("chronicle-stream");
+  chronStream.innerHTML = "";
+  const chron = (pair.chronicle || []).filter(c => (Number(c.hb ?? c.heartbeat ?? 0) <= currentHb));
+  for (const c of chron.slice(-12).reverse()) {
+    const item = document.createElement("div");
+    item.className = "chronicle-item";
+    const hbTag = escapeHtml(c.hb ?? c.heartbeat ?? currentHb);
+    const whoStr = c.who ? `${escapeHtml(String(c.who).toUpperCase())}: ` : "";
+    const titleStr = escapeHtml(c.text || c.summary || c.title || "Epoch Milestone");
+    const descStr = escapeHtml(c.detail || c.description || "");
+    item.innerHTML = `
+      <div class="chronicle-hb">HB ${hbTag} // EPOCH 1</div>
+      <div class="chronicle-title">${whoStr}${titleStr}</div>
+      ${descStr ? `<div class="chronicle-desc">${descStr}</div>` : ""}
+    `;
+    chronStream.appendChild(item);
+  }
+
+  // Comms & Inventory (Strictly escaped)
+  const commsStream = document.getElementById("comms-stream");
+  if (commsStream) {
+    commsStream.innerHTML = "";
+    const msgs = (pair.public_messages || []).filter(m => Number(m.heartbeat ?? m.created_heartbeat ?? 0) <= currentHb);
+    const asks = (pair.agent_asks || []).filter(a => Number(a.heartbeat ?? 0) <= currentHb);
+    for (const m of msgs.slice(-8).reverse()) {
+      const item = document.createElement("div");
+      item.className = "chronicle-item";
+      item.innerHTML = `
+        <div class="chronicle-hb">PUBLIC MESSAGE // HB ${escapeHtml(m.heartbeat ?? m.created_heartbeat ?? "")}</div>
+        <div class="chronicle-title">${escapeHtml(String(m.sender || m.sender_agent_id || "AGENT").toUpperCase())}</div>
+        <div class="chronicle-desc">${escapeHtml(m.message || m.text || "")}</div>
+      `;
+      commsStream.appendChild(item);
+    }
+    for (const a of asks.slice(-6).reverse()) {
+      const item = document.createElement("div");
+      item.className = "chronicle-item";
+      item.innerHTML = `
+        <div class="chronicle-hb">OPERATOR ASK // HB ${escapeHtml(a.heartbeat ?? "")} (${escapeHtml(a.status ?? "unheard")})</div>
+        <div class="chronicle-title">${escapeHtml(String(a.agent || "AGENT").toUpperCase())}: ${escapeHtml(a.question || "")}</div>
+        ${a.answer ? `<div class="chronicle-desc">Operator: ${escapeHtml(a.answer)}</div>` : ""}
+      `;
+      commsStream.appendChild(item);
+    }
+  }
+}
+
+function syncHeartbeatScene(immediateCam = false) {
+  const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+  if (selectedPair === "orbit") {
+    updatePublicObjectsAndClearings("east", currentHb);
+    updatePublicObjectsAndClearings("west", currentHb);
+  } else {
+    updatePublicObjectsAndClearings(pairName, currentHb);
+    applyCameraMode(activeCamMode, immediateCam);
+  }
+  updateHUD();
+  renderSidebar();
+}
+
+document.getElementById("btn-east").onclick = () => focusCiv("east");
+document.getElementById("btn-west").onclick = () => focusCiv("west");
+document.getElementById("btn-orbit").onclick = () => focusCiv("orbit");
+
+document.getElementById("cam-human").onclick = () => applyCameraMode("human", false);
+document.getElementById("cam-cinematic").onclick = () => applyCameraMode("landscape", false);
+document.getElementById("cam-focus-adam").onclick = () => applyCameraMode("adam", false);
+document.getElementById("cam-focus-eve").onclick = () => applyCameraMode("eve", false);
+document.getElementById("cam-topdown").onclick = () => applyCameraMode("topdown", false);
+
+// Playback Controls
+const playBtn = document.getElementById("pb-play");
+playBtn.onclick = () => {
+  isPlaying = !isPlaying;
+  playBtn.textContent = isPlaying ? "⏸ PAUSE" : "▶ PLAY";
+  lastPlayTs = performance.now();
+};
+
+document.getElementById("pb-prev").onclick = () => {
+  isPlaying = false;
+  playbackMode = "replay";
+  currentHb = Math.max(minHb, currentHb - 1);
+  syncHeartbeatScene(false);
+};
+
+document.getElementById("pb-next").onclick = () => {
+  isPlaying = false;
+  currentHb = Math.min(maxHb, currentHb + 1);
+  if (currentHb === maxHb) playbackMode = "live";
+  syncHeartbeatScene(false);
+};
+
+document.getElementById("pb-live").onclick = () => {
+  playbackMode = "live";
+  isPlaying = false;
+  currentHb = maxHb;
+  playBtn.textContent = "▶ PLAY";
+  syncHeartbeatScene(false);
+};
+
+document.getElementById("scrubber").oninput = (e) => {
+  isPlaying = false;
+  currentHb = Number(e.target.value);
+  playbackMode = (currentHb === maxHb) ? "live" : "replay";
+  syncHeartbeatScene(false);
+};
+
+document.querySelectorAll(".speed-opt").forEach(opt => {
+  opt.onclick = () => {
+    document.querySelectorAll(".speed-opt").forEach(o => o.classList.remove("active"));
+    opt.classList.add("active");
+    playSpeed = Number(opt.dataset.spd);
+  };
+});
+
+// Sidebar Tabs
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+  };
+});
+
+// Resize
+window.onresize = () => {
+  camera.aspect = mapPanel.clientWidth / mapPanel.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(mapPanel.clientWidth, mapPanel.clientHeight);
+};
+
+// -------------------------------------------------------------
+// MAIN 3D RENDER & ANIMATION LOOP
+// -------------------------------------------------------------
+const tagAdam = document.getElementById("tag-adam");
+const tagEve = document.getElementById("tag-eve");
+
+function toScreenXY(position, camera, canvas) {
+  const v = position.clone().project(camera);
+  const hw = canvas.clientWidth / 2;
+  const hh = canvas.clientHeight / 2;
+  return {
+    x: (v.x * hw) + hw,
+    y: -(v.y * hh) + hh,
+    inFront: v.z < 1.0
+  };
+}
+
+let lastTick = performance.now();
+const frameDurationsMs = [];
+
+function updateAllAgentFigures(time) {
+  const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+  const cid = (pairName === "west") ? "cont_b" : "cont_a";
+
+  const stepDuration = 1000 / playSpeed;
+  const stepProgress = Math.min(1.0, Math.max(0.0, (time - lastPlayTs) / stepDuration));
+
+  function updateAgentFigure(agentShort, fig, tagEl, tagActId) {
+    const agentRef = `${pairName}_${agentShort}`;
+    const currTid = getAgentRecordedPos(pairName, agentRef, currentHb);
+    const prevHb = Math.max(minHb, currentHb - 1);
+    const prevTid = getAgentRecordedPos(pairName, agentRef, prevHb);
+
+    const tCurr = tilesById.get(currTid);
+    const tPrev = tilesById.get(prevTid);
+    const act = getAgentActionAtHb(pairName, agentRef, currentHb);
+
+    const isBlocked = (act.outcome_status === "blocked" || act.outcome_status === "failed" || act.outcome_status === "rejected");
+    const hasMoved = (prevTid !== currTid) && !isBlocked;
+
+    if (tCurr && tCurr.coordinates) {
+      const cx = tCurr.coordinates.x;
+      const cz = tCurr.coordinates.y;
+      let finalX = cx;
+      let finalZ = cz;
+      let strideBob = 0.0;
+
+      if (hasMoved && tPrev && tPrev.coordinates) {
+        const px = tPrev.coordinates.x;
+        const pz = tPrev.coordinates.y;
+        const alpha = isPlaying ? stepProgress : 1.0;
+        finalX = px + (cx - px) * alpha;
+        finalZ = pz + (cz - pz) * alpha;
+        if (alpha > 0.0 && alpha < 1.0) {
+          // Natural walking gait: subtle, gentle vertical cadence (0.024m) rather than high hopping
+          strideBob = Math.sin(alpha * Math.PI * 2) * 0.024;
+        }
+      }
+
+      // Small companion offset when both agents share the exact same tile
+      const otherRef = (agentShort === "adam") ? `${pairName}_eve` : `${pairName}_adam`;
+      const otherTid = getAgentRecordedPos(pairName, otherRef, currentHb);
+      if (currTid === otherTid && !hasMoved) {
+        if (agentShort === "adam") { finalX -= 0.32; finalZ += 0.18; }
+        else { finalX += 0.32; finalZ -= 0.18; }
+      }
+
+      const finalH = getTerrainHeight(cid, finalX, finalZ) + strideBob;
+      fig.position.set(finalX, finalH, finalZ);
+      fig.visible = (selectedPair !== "orbit");
+
+      fig.userData.tileId = currTid;
+      fig.userData.prevTileId = prevTid;
+      fig.userData.canonicalX = cx;
+      fig.userData.canonicalZ = cz;
+      fig.userData.hasMoved = hasMoved;
+      fig.userData.isBlocked = isBlocked;
+      fig.userData.strideBob = strideBob;
+      fig.userData.action = act;
+
+      // Screen Tag anchored cleanly above head
+      const charH = (fig.userData && fig.userData.charH) || 1.42;
+      const sPos = toScreenXY(new THREE.Vector3(finalX, finalH + charH + 0.18, finalZ), camera, canvas);
+      if (sPos.inFront && fig.visible) {
+        tagEl.style.display = "flex";
+        tagEl.style.left = `${sPos.x}px`;
+        tagEl.style.top = `${sPos.y}px`;
+        document.getElementById(tagActId).textContent = act.label;
+      } else {
+        tagEl.style.display = "none";
+      }
+    }
+  }
+
+  updateAgentFigure("adam", charFigures.adam, tagAdam, "tag-act-adam");
+  updateAgentFigure("eve", charFigures.eve, tagEve, "tag-act-eve");
+}
+
+function animate(time) {
+  requestAnimationFrame(animate);
+
+  const frameStart = performance.now();
+  const dt = (time - lastTick) / 1000;
+  lastTick = time;
+
+  // Camera interpolation
+  camera.position.lerp(camTargetPos, 0.12);
+  controls.target.lerp(controlsTargetPos, 0.12);
+  controls.update();
+
+  // Playback advancement
+  if (isPlaying) {
+    if (time - lastPlayTs > (1000 / playSpeed)) {
+      lastPlayTs = time;
+      currentHb++;
+      if (currentHb > maxHb) {
+        currentHb = maxHb;
+        isPlaying = false;
+        playBtn.textContent = "▶ PLAY";
+      }
+      syncHeartbeatScene(false);
+    }
+  }
+
+  updateAllAgentFigures(time);
+
+  // Subtle Campfire Flicker
+  const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+  const cid = (pairName === "west") ? "cont_b" : "cont_a";
+  const oGroup = objectGroups[cid];
+  oGroup.traverse(child => {
+    if (child.userData && child.userData.light) {
+      const flicker = Math.sin(time * 0.008 + child.position.x) * 0.08 + 0.55;
+      child.userData.light.intensity = flicker;
+    }
+  });
+
+  renderer.render(scene, camera);
+
+  const renderMs = performance.now() - frameStart;
+  frameDurationsMs.push(renderMs);
+  if (frameDurationsMs.length > 60) frameDurationsMs.shift();
+}
+
+// Runtime Inspection & Automated Browser Test API
+window.__GENESIS_PROTO__ = {
+  getState() {
+    return {
+      selectedPair,
+      activeCamMode,
+      playbackMode,
+      currentHb,
+      minHb,
+      maxHb,
+      isPlaying,
+      isLiveStreaming,
+      isPairLive: { ...isPairLive },
+      prevExportedHb: { ...prevExportedHb }
+    };
+  },
+  setHeartbeat(hb, mode = "replay", immediateCam = true) {
+    isPlaying = false;
+    playbackMode = mode;
+    currentHb = Math.min(maxHb, Math.max(minHb, Number(hb)));
+    syncHeartbeatScene(immediateCam);
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getState();
+  },
+  focusCiv(pairName) {
+    focusCiv(pairName);
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getState();
+  },
+  applyCameraMode(mode, immediate = true) {
+    applyCameraMode(mode, immediate);
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getCameraState();
+  },
+  evaluateLivePollUpdate(freshData) {
+    return evaluateLivePollUpdate(freshData);
+  },
+  getCameraState() {
+    return {
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+      camTargetPos: { x: camTargetPos.x, y: camTargetPos.y, z: camTargetPos.z },
+      controlsTargetPos: { x: controlsTargetPos.x, y: controlsTargetPos.y, z: controlsTargetPos.z },
+      fov: camera.fov
+    };
+  },
+  getAgentRuntimeState(agentShort) {
+    const fig = charFigures[agentShort];
+    if (!fig) return null;
+    const tagEl = (agentShort === "adam") ? tagAdam : tagEve;
+    const tagActEl = document.getElementById(agentShort === "adam" ? "tag-act-adam" : "tag-act-eve");
+    return {
+      visible: fig.visible,
+      position: { x: fig.position.x, y: fig.position.y, z: fig.position.z },
+      tileId: fig.userData.tileId,
+      prevTileId: fig.userData.prevTileId,
+      canonicalX: fig.userData.canonicalX,
+      canonicalZ: fig.userData.canonicalZ,
+      hasMoved: fig.userData.hasMoved,
+      isBlocked: fig.userData.isBlocked,
+      strideBob: fig.userData.strideBob,
+      action: fig.userData.action,
+      tagVisible: tagEl.style.display !== "none",
+      tagText: tagActEl ? tagActEl.textContent : ""
+    };
+  },
+  getActivePublicObjects(pn = null) {
+    const targetPn = pn || ((selectedPair === "orbit") ? "east" : selectedPair);
+    const cid = (targetPn === "west") ? "cont_b" : "cont_a";
+    const oGroup = objectGroups[cid];
+    return oGroup.children.map(ch => ({
+      object_id: ch.userData.object_id,
+      object_type: ch.userData.object_type,
+      category: ch.userData.category,
+      tile_id: ch.userData.tile_id,
+      tileX: ch.userData.tileX,
+      tileY: ch.userData.tileY,
+      created_heartbeat: ch.userData.created_heartbeat,
+      destroyed_heartbeat: ch.userData.destroyed_heartbeat,
+      end_date_status: ch.userData.end_date_status,
+      chronologyKnown: ch.userData.chronologyKnown,
+      endDateKnown: ch.userData.endDateKnown,
+      provenance: ch.userData.provenance,
+      inCurrentSnapshot: ch.userData.inCurrentSnapshot,
+      clusterIndex: ch.userData.clusterIndex,
+      clusterSize: ch.userData.clusterSize,
+      position: { x: ch.position.x, y: ch.position.y, z: ch.position.z },
+      visible: ch.visible
+    }));
+  },
+  getHistoricalObjectRegistry(pn = "east") {
+    return (historicalObjectRegistry[pn] || []).map(r => ({ ...r }));
+  },
+  reconstructPublicObjectsAtHb(pn, hb) {
+    return reconstructPublicObjectsAtHb(pn, hb);
+  },
+  injectUnknownChronologyObjectForTest(pn, objDef) {
+    const reg = historicalObjectRegistry[pn] || [];
+    reg.push({
+      object_id: objDef.object_id || "unknown-chron-test-obj",
+      object_type: objDef.object_type || "landmark",
+      category: classifyPublicObjectCategory(objDef.object_type || "landmark"),
+      tile_id: objDef.tile_id || "public-shared-center",
+      created_heartbeat: null,
+      destroyed_heartbeat: null,
+      end_date_status: "ACTIVE_IN_SNAPSHOT",
+      chronologyKnown: false,
+      endDateKnown: true,
+      provenance: "current-snapshot scenery",
+      inCurrentSnapshot: true,
+      public_description: objDef.public_description || "Unknown chronology scenery"
+    });
+    lastRenderedObjectsState.cont_a = "";
+    lastRenderedObjectsState.cont_b = "";
+  },
+  injectHistoricalObjectForTest(pn, objDef) {
+    const reg = historicalObjectRegistry[pn] || [];
+    const hasVerifiedDestruction = (objDef.destroyed_heartbeat !== undefined && objDef.destroyed_heartbeat !== null && objDef.destroyed_heartbeat !== "UNKNOWN" && Number.isFinite(Number(objDef.destroyed_heartbeat)));
+    const destroyedVal = hasVerifiedDestruction ? Number(objDef.destroyed_heartbeat) : (objDef.inCurrentSnapshot ? null : "UNKNOWN");
+    reg.push({
+      object_id: objDef.object_id || "test-hist-obj",
+      object_type: objDef.object_type || "campfire",
+      category: classifyPublicObjectCategory(objDef.object_type || "campfire"),
+      tile_id: objDef.tile_id || "public-shared-center",
+      created_heartbeat: Number(objDef.created_heartbeat || 100),
+      destroyed_heartbeat: destroyedVal,
+      end_date_status: hasVerifiedDestruction ? "VERIFIED_DESTROYED" : (objDef.inCurrentSnapshot ? "ACTIVE_IN_SNAPSHOT" : "UNKNOWN"),
+      chronologyKnown: true,
+      endDateKnown: hasVerifiedDestruction || Boolean(objDef.inCurrentSnapshot),
+      provenance: (hasVerifiedDestruction || Boolean(objDef.inCurrentSnapshot))
+        ? "verified-historical-object"
+        : "historical-object-uncertain-end-date",
+      inCurrentSnapshot: Boolean(objDef.inCurrentSnapshot),
+      public_description: objDef.public_description || "Test historical object"
+    });
+    lastRenderedObjectsState.cont_a = "";
+    lastRenderedObjectsState.cont_b = "";
+  },
+  removeTestObjectFromRegistry(pn, objectId) {
+    if (!historicalObjectRegistry[pn]) return;
+    historicalObjectRegistry[pn] = historicalObjectRegistry[pn].filter(o => o.object_id !== objectId);
+    lastRenderedObjectsState.cont_a = "";
+    lastRenderedObjectsState.cont_b = "";
+  },
+  getTileRuntimeInfo(cid, x, z) {
+    const rx = Math.round(x);
+    const rz = Math.round(z);
+    const idx = (rz + 100) * 200 + (rx + 100);
+    const mesh = terrainMeshes[cid];
+    const colorAttr = mesh ? mesh.geometry.getAttribute("color") : null;
+    const vColor = colorAttr ? {
+      r: colorAttr.getX(idx),
+      g: colorAttr.getY(idx),
+      b: colorAttr.getZ(idx)
+    } : null;
+    const sceneryProps = sceneryGroups[cid].children.filter(ch => ch.userData && ch.userData.tileX === rx && ch.userData.tileY === rz);
+    const pubObjs = objectGroups[cid].children.filter(ch => ch.userData && ch.userData.tileX === rx && ch.userData.tileY === rz);
+    return {
+      cid,
+      x: rx,
+      z: rz,
+      terrain: getCanonicalTerrain(cid, rx, rz),
+      isOcean: isCanonicalOcean(cid, rx, rz),
+      isKnown: isTileKnown(cid, rx, rz),
+      meshHeight: getTerrainHeight(cid, rx, rz),
+      vertexColor: vColor,
+      sceneryCount: sceneryProps.length,
+      visibleSceneryCount: sceneryProps.filter(p => p.visible).length,
+      publicObjectCount: pubObjs.length
+    };
+  },
+  getOceanViolationCount(cid) {
+    let violations = 0;
+    for (const ch of sceneryGroups[cid].children) {
+      if (isCanonicalOcean(cid, ch.position.x, ch.position.z)) violations++;
+    }
+    for (const ch of objectGroups[cid].children) {
+      if (isCanonicalOcean(cid, ch.position.x, ch.position.z)) violations++;
+    }
+    return violations;
+  },
+  getPerformanceMetrics() {
+    const t0 = performance.now();
+    for (let i = 0; i < 5; i++) {
+      renderer.render(scene, camera);
+    }
+    const avgRenderMs = (performance.now() - t0) / 5;
+    const mem = (performance && performance.memory) ? {
+      usedJSHeapSizeMB: Math.round((performance.memory.usedJSHeapSize / (1024 * 1024)) * 10) / 10,
+      totalJSHeapSizeMB: Math.round((performance.memory.totalJSHeapSize / (1024 * 1024)) * 10) / 10
+    } : null;
+    return {
+      avgRenderMs,
+      estimatedFps: Math.min(120, Math.round(1000 / Math.max(0.5, avgRenderMs))),
+      webglGeometries: renderer.info.memory.geometries,
+      webglTextures: renderer.info.memory.textures,
+      drawCalls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+      jsHeap: mem
+    };
+  },
+  escapeHtml,
+  renderSidebar,
+  PAIRS
+};
+
+// Initial View Setup via URL Query Params
+const urlParams = new URLSearchParams(window.location.search);
+const initCiv = urlParams.get("civ") || "east";
+const initHb = urlParams.get("hb");
+if (initHb !== null) {
+  playbackMode = "replay";
+  currentHb = Math.min(maxHb, Math.max(minHb, Number(initHb)));
+}
+
+const initCam = urlParams.get("cam");
+if (initCam === "human") activeCamMode = "human";
+else if (initCam === "landscape" || initCam === "cinematic") activeCamMode = "landscape";
+else if (initCam === "orbit") activeCamMode = "orbit";
+else if (initCam === "adam") activeCamMode = "adam";
+else if (initCam === "eve") activeCamMode = "eve";
+else if (initCam === "topdown") activeCamMode = "topdown";
+
+focusCiv(initCam === "orbit" ? "orbit" : initCiv);
+
+requestAnimationFrame(animate);
+
+})();
+</script>
+</body>
+</html>

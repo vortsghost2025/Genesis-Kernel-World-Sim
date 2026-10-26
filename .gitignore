@@ -25,3 +25,6 @@ dist/
 
 # Generated viewer data (too large for git)
 world-sim/viewer/viewer_data.js
+
+# Epistemic viewer test screenshots
+world-sim/viewer/prototype/*.png

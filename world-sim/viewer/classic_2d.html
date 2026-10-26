@@ -1,0 +1,2859 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#030509">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Genesis">
+<title>Genesis — Civilization Observatory</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #030509;
+  --bg-panel: rgba(8, 12, 20, 0.78);
+  --bg-card: rgba(14, 20, 32, 0.65);
+  --bg-glass: rgba(20, 28, 44, 0.55);
+
+  --border-line: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-glow: rgba(0, 210, 211, 0.35);
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+
+  --east-cyan: #00d2d3;
+  --west-amber: #feca57;
+  --crit-red: #ff4757;
+  --good-green: #2ed573;
+  --warm-orange: #ff9f43;
+
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Plus Jakarta Sans', -apple-system, sans-serif;
+  --font-ui: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; width: 100%; overflow: hidden; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-body); }
+
+/* Root App Shell */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Header Masthead */
+header {
+  height: 56px;
+  background: rgba(6, 9, 16, 0.88);
+  border-bottom: 1px solid var(--border-line);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 40;
+  flex-shrink: 0;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.28em;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0, 210, 211, 0.4);
+}
+.brand-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  border-left: 1px solid var(--border-line);
+  padding-left: 14px;
+  text-transform: uppercase;
+}
+
+.nav-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.nav-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.nav-pill.active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
+}
+.civ-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.civ-dot.east { background: var(--east-cyan); box-shadow: 0 0 8px var(--east-cyan); }
+.civ-dot.west { background: var(--west-amber); box-shadow: 0 0 8px var(--west-amber); }
+
+.telemetry-cluster {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.weather-hud {
+  display: flex;
+  gap: 12px;
+}
+.w-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+}
+.status-badge-live {
+  background: rgba(46, 213, 115, 0.15);
+  border: 1px solid rgba(46, 213, 115, 0.4);
+  color: var(--good-green);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good-green);
+  box-shadow: 0 0 8px var(--good-green);
+}
+.status-badge-replay {
+  background: rgba(254, 202, 87, 0.15);
+  border: 1px solid rgba(254, 202, 87, 0.4);
+  color: var(--west-amber);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-badge-replay::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--west-amber);
+  box-shadow: 0 0 8px var(--west-amber);
+}
+.hb-counter-masthead {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+
+/* Main Workspace */
+#main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
+/* Map Viewport */
+#map-panel {
+  flex: 1;
+  position: relative;
+  background: #061a2e;
+  overflow: hidden;
+}
+#map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  display: block;
+}
+#map-canvas.dragging { cursor: grabbing; }
+
+/* Floating Emergency Banner */
+#distress-hud {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(90deg, rgba(38, 10, 18, 0.95), rgba(56, 12, 24, 0.95));
+  border: 1px solid rgba(255, 71, 87, 0.75);
+  box-shadow: 0 8px 30px rgba(255, 71, 87, 0.4);
+  border-radius: 24px;
+  padding: 5px 16px;
+  backdrop-filter: blur(16px);
+  z-index: 50;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.distress-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--crit-red);
+  box-shadow: 0 0 10px var(--crit-red);
+  animation: pulse-red 1.2s infinite;
+}
+@keyframes pulse-red { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.4); } }
+.distress-text {
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #ffb8b8;
+}
+.distress-cta {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: #fff;
+  background: rgba(255, 71, 87, 0.35);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Camera Tracking & HUD Tags */
+.btn-track {
+  background: rgba(0, 210, 211, 0.12);
+  border: 1px solid rgba(0, 210, 211, 0.35);
+  color: #00d2d3;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn-track:hover {
+  background: rgba(0, 210, 211, 0.25);
+  color: #fff;
+  border-color: rgba(0, 210, 211, 0.6);
+}
+.btn-track.active {
+  background: rgba(254, 202, 87, 0.25);
+  border-color: rgba(254, 202, 87, 0.8);
+  color: #feca57;
+  box-shadow: 0 0 10px rgba(254, 202, 87, 0.4);
+}
+#track-indicator {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--gold-amber);
+  background: rgba(254, 202, 87, 0.15);
+  border: 1px solid rgba(254, 202, 87, 0.4);
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  letter-spacing: 0.04em;
+}
+
+/* Cinematic Director Mode & Letterbox */
+#cinema-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.cinema-bar {
+  background: #000;
+  width: 100%;
+  pointer-events: auto;
+}
+.cinema-bar.top {
+  height: 64px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+}
+.cinema-top-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.cinema-title {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #fff;
+}
+.cinema-hb {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--east-cyan);
+  background: rgba(0, 210, 211, 0.15);
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 210, 211, 0.4);
+}
+.cinema-bar.bottom {
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 36px;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.95);
+}
+#cinema-subtitle {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  max-width: 980px;
+  transition: opacity 0.3s ease;
+}
+
+/* Action Playback Bar (Clean, Minimal, Docked at Bottom of Map) */
+#playback-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 12, 20, 0.92);
+  border: 1px solid var(--border-line);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(0, 210, 211, 0.1);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  padding: 8px 18px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(94vw, 840px);
+}
+.ctrl-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.ctrl-btn.primary {
+  background: linear-gradient(135deg, rgba(0, 210, 211, 0.35), rgba(9, 132, 227, 0.35));
+  border-color: rgba(0, 210, 211, 0.6);
+  min-width: 68px;
+  color: #fff;
+}
+.ctrl-btn.live-pill {
+  background: rgba(255, 71, 87, 0.15);
+  border-color: rgba(255, 71, 87, 0.4);
+  color: #ff7675;
+}
+.ctrl-btn.live-pill.active {
+  background: rgba(255, 71, 87, 0.35);
+  border-color: #ff4757;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
+}
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 180px;
+}
+#scrubber {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  outline: none;
+  cursor: pointer;
+}
+#scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--east-cyan);
+  box-shadow: 0 0 8px var(--east-cyan);
+  cursor: pointer;
+}
+.time-readout {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Speed / Mode Selectors */
+.speed-cluster {
+  display: flex;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.speed-opt {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.speed-opt.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+/* Right Sidebar Telemetry Suite */
+#sidebar {
+  width: 440px;
+  background: rgba(8, 12, 20, 0.92);
+  border-left: 1px solid var(--border-line);
+  backdrop-filter: blur(24px);
+  display: flex;
+  flex-direction: column;
+  z-index: 30;
+  flex-shrink: 0;
+}
+.sidebar-nav {
+  display: flex;
+  border-bottom: 1px solid var(--border-line);
+  background: rgba(4, 7, 12, 0.6);
+  flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 14px 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.tab-btn:hover { color: #fff; }
+.tab-btn.active {
+  color: #fff;
+  border-bottom-color: var(--east-cyan);
+  background: rgba(0, 210, 211, 0.05);
+}
+.tab-badge {
+  background: rgba(255, 71, 87, 0.25);
+  color: #ff7675;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+}
+
+.tab-pane-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* Biometrics Agent Cards */
+.agent-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s ease;
+}
+.agent-card.adam { border-left: 3px solid var(--east-cyan); }
+.agent-card.eve { border-left: 3px solid var(--west-amber); }
+.agent-card.collapsed {
+  border-color: rgba(255, 71, 87, 0.55);
+  background: linear-gradient(180deg, rgba(30, 8, 14, 0.55), var(--bg-card));
+}
+.agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.agent-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.agent-portrait {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.agent-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-name {
+  font-family: var(--font-ui);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.agent-sub {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.agent-state-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+.agent-state-badge.collapsed {
+  background: rgba(255, 71, 87, 0.2);
+  color: var(--crit-red);
+  border: 1px solid rgba(255, 71, 87, 0.4);
+}
+.agent-state-badge.active {
+  background: rgba(46, 213, 115, 0.2);
+  color: var(--good-green);
+  border: 1px solid rgba(46, 213, 115, 0.4);
+}
+
+.sector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+.sector-cta {
+  color: var(--east-cyan);
+  cursor: pointer;
+  font-weight: 600;
+}
+.sector-cta:hover { text-decoration: underline; }
+
+/* Telemetry Grid */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+.metric-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metric-meta {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-tertiary);
+}
+.metric-bar-bg {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.metric-bar-fill.hunger { background: var(--east-cyan); }
+.metric-bar-fill.vital { background: var(--crit-red); }
+.metric-bar-fill.warmth { background: var(--warm-orange); }
+.metric-bar-fill.wetness { background: #3867d6; }
+
+/* Cognitive Dossier / Inner Voice */
+.agent-inner-voice {
+  background: rgba(0, 0, 0, 0.45);
+  border-left: 2px solid var(--border-glow);
+  border-radius: 6px;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  font-family: var(--font-body);
+  font-style: italic;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.agent-card.collapsed .agent-inner-voice {
+  border-left-color: var(--crit-red);
+  background: rgba(30, 8, 12, 0.6);
+  color: #fca5a5;
+}
+
+/* Pack Inventory */
+.inventory-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inv-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-secondary);
+}
+
+/* Chronicle & Comms Cards */
+.chronicle-card {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.76rem;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.chronicle-card:last-child { border-bottom: none; }
+.chronicle-hb {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.chronicle-who { font-weight: 700; color: #fff; }
+.chronicle-text { color: var(--text-secondary); }
+
+.transmission-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.tx-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+.tx-sender { color: var(--east-cyan); font-weight: 700; }
+.tx-body {
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #e2e8f0;
+}
+
+/* Zoom Level Hint */
+#zoom-tag {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(8, 12, 20, 0.85);
+  border: 1px solid var(--border-line);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+#zoom-tag span { color: var(--east-cyan); font-weight: 700; }
+
+/* Tooltip */
+#tooltip {
+  position: fixed;
+  display: none;
+  z-index: 100;
+  pointer-events: none;
+  background: rgba(8, 12, 20, 0.94);
+  border: 1px solid var(--border-line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Masthead -->
+  <header>
+    <div class="brand-group">
+      <div class="brand-title">GENESIS</div>
+      <div class="brand-tag">Observatory // Continent Bifurcation</div>
+      <div class="nav-cluster">
+        <div class="nav-pill active" id="btn-east"><span class="civ-dot east"></span>East Valley</div>
+        <div class="nav-pill" id="btn-west"><span class="civ-dot west"></span>West Dawn</div>
+        <div class="nav-pill" id="btn-fit">⛶ Orbit</div>
+        <div class="nav-pill" id="btn-cinema" title="Toggle Cinematic Movie Mode">🎬 Movie Mode</div>
+        <div class="nav-pill" id="btn-audio" title="Toggle Ambient Wind & Hearth Audio">🔈 Ambience</div>
+        <a href="./prototype/index.html" class="nav-pill" id="btn-observatory-3d" style="text-decoration:none; color:inherit;" title="Return to 3D Continuous World Observatory">🌐 3D Observatory</a>
+      </div>
+    </div>
+
+    <div class="telemetry-cluster">
+      <div class="weather-hud" id="weather-hud"></div>
+      <div class="w-chip" id="time-hud" style="color:var(--gold-amber);font-weight:700;">☀️ MIDDAY</div>
+      <div class="status-badge-live" id="live-status-badge">STREAM LIVE</div>
+      <div class="hb-counter-masthead" id="hb-masthead">HB 0</div>
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <div id="main">
+    <!-- Map Canvas Panel -->
+    <div id="map-panel">
+      <canvas id="map-canvas"></canvas>
+
+      <!-- Cinematic Letterbox & Subtitle Deck -->
+      <div id="cinema-overlay" style="display:none;">
+        <div class="cinema-bar top">
+          <div class="cinema-top-info">
+            <span class="cinema-title">GENESIS // CONTINENT ARCHIVES</span>
+            <span class="cinema-hb" id="cinema-hb-tag">HB 0</span>
+          </div>
+        </div>
+        <div class="cinema-bar bottom">
+          <div id="cinema-subtitle">“We wait for an answer from beyond the silence.”</div>
+        </div>
+      </div>
+
+      <div id="zoom-tag">ZOOM <span id="zoom-val">15.0×</span> · DRAG · SCROLL <span id="track-indicator">🎥 TRACKING AGENT</span></div>
+
+      <!-- Distress Banner -->
+      <div id="distress-hud">
+        <span class="distress-pulse"></span>
+        <span class="distress-text" id="distress-msg">CRITICAL TELEMETRY</span>
+        <span class="distress-cta">PULSE ↗</span>
+      </div>
+
+      <!-- Action Playback Bar -->
+      <div id="playback-bar">
+        <button class="ctrl-btn" id="pb-start" title="Dawn of Time (HB 1)">⏮</button>
+        <button class="ctrl-btn" id="pb-prev" title="Step Back 1 Heartbeat (Left Arrow)">◀</button>
+        <button class="ctrl-btn primary" id="pb-play" title="Play / Pause Replay (Spacebar)">▶ PLAY</button>
+        <button class="ctrl-btn" id="pb-next" title="Step Forward 1 Heartbeat (Right Arrow)">▶</button>
+        <button class="ctrl-btn live-pill active" id="pb-live" title="Return to Live Telemetry">🔴 LIVE</button>
+
+        <div class="slider-wrap">
+          <input type="range" id="scrubber" min="1" max="100" value="100" />
+          <span class="time-readout" id="pb-counter">0 / 0</span>
+        </div>
+
+        <div class="speed-cluster" id="speed-cluster">
+          <div class="speed-opt" data-spd="1">1×</div>
+          <div class="speed-opt active" data-spd="2">2×</div>
+          <div class="speed-opt" data-spd="5">5×</div>
+          <div class="speed-opt" data-spd="10">10×</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Telemetry Sidebar -->
+    <aside id="sidebar">
+      <nav class="sidebar-nav">
+        <button class="tab-btn active" data-tab="tab-agents">Biometrics</button>
+        <button class="tab-btn" data-tab="tab-chronicle">Chronicle</button>
+        <button class="tab-btn" data-tab="tab-comms">Comms <span id="tx-badge" class="tab-badge" style="display:none">0</span></button>
+      </nav>
+
+      <div class="tab-pane-container">
+        <!-- Biometrics Tab -->
+        <div class="tab-pane active" id="tab-agents">
+          <div id="agents-container"></div>
+        </div>
+
+        <!-- Chronicle Tab -->
+        <div class="tab-pane" id="tab-chronicle">
+          <div id="chronicle-container"></div>
+        </div>
+
+        <!-- Comms Tab -->
+        <div class="tab-pane" id="tab-comms">
+          <div id="comms-container"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- Load Data -->
+<script>document.write('<scr' + 'ipt src="viewer_data.js?v=' + Date.now() + '"></scr' + 'ipt>');</script>
+<script>
+(() => {
+"use strict";
+
+let D = window.VIEWER_DATA || {};
+let PAIRS = D.pairs || {};
+let TM = D.true_map || {};
+
+let selectedPair = "west";
+let playbackMode = "live";
+let currentHb = 0;
+let minHb = 1;
+let maxHb = 1;
+let isPlaying = false;
+let playSpeed = 2;
+let lastStepTime = 0;
+
+const tiles = new Map();
+const tileByCoord = new Map();
+let minX = 0, maxX = 0, minY = 0, maxY = 0, GW = 1, GH = 1, gcx = 0, gcy = 0;
+
+function populateTiles() {
+  tiles.clear();
+  tileByCoord.clear();
+  const allTiles = (TM.tiles || []).concat(Object.values(D.shared_tiles || {}));
+  const xs = [], ys = [];
+  for (const t of allTiles) {
+    if (!t || !t.tile_id) continue;
+    tiles.set(t.tile_id, t);
+    const c = t.coordinates;
+    if (c) {
+      tileByCoord.set(c.x + "," + c.y, t);
+      xs.push(c.x); ys.push(c.y);
+    }
+  }
+  if (xs.length) {
+    minX = Math.min(...xs); maxX = Math.max(...xs);
+    minY = Math.min(...ys); maxY = Math.max(...ys);
+    GW = maxX - minX + 1; GH = maxY - minY + 1;
+    gcx = minX + GW / 2; gcy = minY + GH / 2;
+  }
+}
+populateTiles();
+
+// Foot-Traffic Traversal Trail Cache (Simulation-truth: Strictly bounded by historical heartbeat)
+const pairTrails = { east: new Map(), west: new Map() };
+let lastComputedTrailHb = -1;
+function computeTrails(targetHb) {
+  const limitHb = targetHb != null ? targetHb : currentHb;
+  if (limitHb === lastComputedTrailHb) return;
+  lastComputedTrailHb = limitHb;
+
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    const tl = pair.position_timeline || {};
+    const trailMap = new Map();
+    const hbs = Object.keys(tl).map(Number).sort((a,b) => a - b);
+    const prevPos = {};
+
+    for (const hb of hbs) {
+      if (hb > limitHb) break; // NEVER leak future journeys into historical replay frames
+      const pos = tl[hb] || {};
+      for (const [ref, tid] of Object.entries(pos)) {
+        if (prevPos[ref] && prevPos[ref] !== tid) {
+          const edgeKey = [prevPos[ref], tid].sort().join("---");
+          trailMap.set(edgeKey, (trailMap.get(edgeKey) || 0) + 1);
+        }
+        prevPos[ref] = tid;
+      }
+    }
+    pairTrails[pn] = trailMap;
+  }
+}
+computeTrails();
+
+// Draw authentic worn dirt paths on terrain
+function drawWornTrails(g, pn, origin, s) {
+  const trailMap = pairTrails[pn] || new Map();
+  if (!trailMap.size) return;
+
+  g.save();
+  for (const [edgeKey, count] of trailMap.entries()) {
+    if (count < 2) continue; // Only draw paths walked multiple times
+    const [t1Id, t2Id] = edgeKey.split("---");
+    const t1 = tiles.get(t1Id);
+    const t2 = tiles.get(t2Id);
+    if (!t1 || !t2 || !t1.coordinates || !t2.coordinates) continue;
+
+    const sx1 = (t1.coordinates.x + 0.5 - origin.x) * s;
+    const sy1 = (t1.coordinates.y + 0.5 - origin.y) * s;
+    const sx2 = (t2.coordinates.x + 0.5 - origin.x) * s;
+    const sy2 = (t2.coordinates.y + 0.5 - origin.y) * s;
+
+    // Trail weight and opacity based on foot traffic
+    const traffic = Math.min(1.0, count / 15);
+    const trailWidth = Math.max(1.5, (2.2 + traffic * 4.5) * (s / 16));
+
+    const midX = (sx1 + sx2) * 0.5 + Math.sin(t1.coordinates.x * 5 + t2.coordinates.y * 3) * s * 0.06;
+    const midY = (sy1 + sy2) * 0.5 + Math.cos(t1.coordinates.x * 3 + t2.coordinates.y * 5) * s * 0.06;
+
+    // Outer worn earth border
+    g.strokeStyle = `rgba(62, 46, 32, ${(0.3 + traffic * 0.45).toFixed(3)})`;
+    g.lineWidth = trailWidth;
+    g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(sx1, sy1);
+    g.quadraticCurveTo(midX, midY, sx2, sy2);
+    g.stroke();
+
+    // Inner packed soil core
+    g.strokeStyle = `rgba(138, 108, 76, ${(0.4 + traffic * 0.5).toFixed(3)})`;
+    g.lineWidth = trailWidth * 0.55;
+    g.beginPath();
+    g.moveTo(sx1, sy1);
+    g.quadraticCurveTo(midX, midY, sx2, sy2);
+    g.stroke();
+  }
+  g.restore();
+}
+
+// Day/Night, Seasons & Weather (Aligned with survival physics epistemic.4/5)
+const WEATHER_TYPES = ["clear", "overcast", "rain", "storm"];
+const WEATHER_TABLE = {
+  spring: [0.55, 0.20, 0.20, 0.05],
+  summer: [0.78, 0.12, 0.08, 0.02],
+  autumn: [0.50, 0.22, 0.21, 0.07],
+  winter: [0.52, 0.20, 0.18, 0.10],
+};
+function getSeason(hb) {
+  const seasons = ["spring", "summer", "autumn", "winter"];
+  const seasonLen = 72 * 12;
+  const idx = Math.floor(hb / seasonLen) % 4;
+  return seasons[idx];
+}
+function getWeatherAt(pair, hb) {
+  let seed = 0;
+  for (let i = 0; i < pair.length; i++) seed = (seed * 131 + pair.charCodeAt(i)) >>> 0;
+  const windowIndex = Math.floor(hb / 36);
+  let x = ((seed * 2654435761) >>> 0 + (windowIndex * 40503) >>> 0) >>> 0;
+  x ^= x >>> 13;
+  x = Math.imul(x, 1274126177) >>> 0;
+  const roll = (((x ^ (x >>> 16)) >>> 0)) / 0x100000000;
+  const probs = WEATHER_TABLE[getSeason(hb)] || [0.6, 0.2, 0.15, 0.05];
+  let acc = 0, wtype = "clear";
+  for (let i = 0; i < WEATHER_TYPES.length; i++) {
+    acc += probs[i];
+    if (roll < acc) { wtype = WEATHER_TYPES[i]; break; }
+  }
+  return wtype;
+}
+
+function getAtmosphericLighting(hb) {
+  // Aligned with 72-hb day cycle from survival.py (sunrise 0.25, sunset 0.75)
+  const phase = (hb % 72) / 72;
+  let timeName = "Midday ☀️";
+  let sunColor = "rgba(255, 255, 230, 0)";
+  let ambientDarkness = 0;
+  let isNight = false;
+
+  if (phase < 0.25) {
+    timeName = "Night 🌙";
+    sunColor = "rgba(20, 35, 75, 0.35)";
+    ambientDarkness = 0.58;
+    isNight = true;
+  } else if (phase < 0.35) {
+    const pDawn = (phase - 0.25) / 0.10;
+    timeName = "Dawn 🌄";
+    sunColor = `rgba(255, 180, 120, ${(0.14 * (1 - pDawn)).toFixed(3)})`;
+    ambientDarkness = 0.58 * (1 - pDawn);
+  } else if (phase < 0.65) {
+    timeName = "Day ☀️";
+    sunColor = "rgba(255, 255, 240, 0.04)";
+    ambientDarkness = 0;
+  } else if (phase < 0.75) {
+    const pDusk = (phase - 0.65) / 0.10;
+    timeName = "Dusk 🌅";
+    sunColor = `rgba(255, 120, 60, ${(0.22 * Math.sin(pDusk * Math.PI)).toFixed(3)})`;
+    ambientDarkness = pDusk * 0.58;
+  } else {
+    timeName = "Night 🌙";
+    sunColor = "rgba(20, 35, 75, 0.35)";
+    ambientDarkness = 0.58;
+    isNight = true;
+  }
+  return { phase, timeName, sunColor, ambientDarkness, isNight, season: getSeason(hb) };
+}
+
+// Procedural Living Audio Ambience (Web Audio API)
+let audioCtx = null;
+let isAudioActive = false;
+let windGain = null, droneGain = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AudioContext();
+
+    // 1. Procedural Wind
+    const bufSize = audioCtx.sampleRate * 2;
+    const noiseBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+    const out = noiseBuf.getChannelData(0);
+    let lastOut = 0.0;
+    for (let i = 0; i < bufSize; i++) {
+      const white = Math.random() * 2 - 1;
+      out[i] = (lastOut + (0.02 * white)) / 1.02;
+      lastOut = out[i];
+      out[i] *= 3.5;
+    }
+    const noiseNode = audioCtx.createBufferSource();
+    noiseNode.buffer = noiseBuf;
+    noiseNode.loop = true;
+
+    const windFilter = audioCtx.createBiquadFilter();
+    windFilter.type = "lowpass";
+    windFilter.frequency.value = 340;
+
+    windGain = audioCtx.createGain();
+    windGain.gain.value = 0.06;
+
+    noiseNode.connect(windFilter);
+    windFilter.connect(windGain);
+    windGain.connect(audioCtx.destination);
+    noiseNode.start();
+
+    // 2. Procedural Ethereal Contemplative Drone
+    const freqs = [130.81, 155.56, 196.00];
+    droneGain = audioCtx.createGain();
+    droneGain.gain.value = 0.035;
+
+    freqs.forEach(f => {
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = f;
+      osc.connect(droneGain);
+      osc.start();
+    });
+    droneGain.connect(audioCtx.destination);
+  } catch(e) {
+    console.warn("Web Audio not supported:", e);
+  }
+}
+
+function toggleAudio() {
+  if (!audioCtx) initAudio();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  isAudioActive = !isAudioActive;
+  if (windGain && audioCtx) windGain.gain.setTargetAtTime(isAudioActive ? 0.06 : 0, audioCtx.currentTime, 0.3);
+  if (droneGain && audioCtx) droneGain.gain.setTargetAtTime(isAudioActive ? 0.035 : 0, audioCtx.currentTime, 0.3);
+  const btn = document.getElementById("btn-audio");
+  if (btn) {
+    if (isAudioActive) {
+      btn.classList.add("active");
+      btn.textContent = "🔊 Ambience ON";
+    } else {
+      btn.classList.remove("active");
+      btn.textContent = "🔈 Ambience OFF";
+    }
+  }
+}
+window.toggleAudio = toggleAudio;
+
+// Cinematic Director Mode
+let isCinematic = false;
+function toggleCinematic() {
+  isCinematic = !isCinematic;
+  const overlay = document.getElementById("cinema-overlay");
+  const sidebar = document.getElementById("sidebar");
+  const pbBar = document.getElementById("playback-bar");
+  const btn = document.getElementById("btn-cinema");
+
+  if (isCinematic) {
+    overlay.style.display = "flex";
+    sidebar.style.display = "none";
+    pbBar.style.bottom = "92px";
+    if (btn) btn.classList.add("active");
+    // Center camera on active civilization agents immediately
+    const pair = PAIRS[selectedPair] || {};
+    const tl = pair.position_timeline || {};
+    const pos = (playbackMode === "live" || !tl[currentHb]) ? (pair.current_positions || {}) : tl[currentHb];
+    let ax = 0, ay = 0, n = 0;
+    for (const tid of Object.values(pos)) {
+      const t = tiles.get(tid);
+      if (t && t.coordinates) { ax += t.coordinates.x; ay += t.coordinates.y; n++; }
+    }
+    if (n) { view.cx = ax / n + 0.5; view.cy = ay / n + 0.5; view.scale = 29.5; }
+    if (!isPlaying) togglePlay();
+  } else {
+    overlay.style.display = "none";
+    sidebar.style.display = "flex";
+    pbBar.style.bottom = "16px";
+    if (btn) btn.classList.remove("active");
+  }
+  resize();
+}
+window.toggleCinematic = toggleCinematic;
+
+// Biome Colors (Rich Earthy Fantasy Cartography)
+const BIOME_COLORS = {
+  deep_ravine:      [14, 13, 22],
+  deep_lake:        [10, 36, 62],
+  warm_coast:       [72, 60, 44],
+  temperate_valley: [26, 56, 38],
+  temperate_hills:  [42, 62, 40],
+  highland:         [70, 78, 92],
+  temperate_forest: [22, 48, 32],
+  dense_woodland:   [16, 40, 26],
+  dark_thicket:     [12, 30, 22],
+  coastal_forest:   [24, 52, 38],
+  coastal_cliffs:   [82, 90, 104],
+  open_sea:         [6, 24, 44],
+};
+const PAIR_RGB = { east: [0, 210, 211], west: [254, 202, 87] };
+
+function baseColor(t) {
+  const e = t.elevation == null ? 0.5 : t.elevation;
+  if (t.water) {
+    const b = t.water.drinkable ? [16, 68, 108] : [10, 36, 62];
+    const k = 0.75 + e * 0.45;
+    return [b[0] * k, b[1] * k, b[2] * k];
+  }
+  let b = BIOME_COLORS[t.biome] || [34, 42, 54];
+  const k = 0.75 + e * 0.55;
+  let r = b[0] * k, g = b[1] * k, bl = b[2] * k;
+  if (e > 0.82) {
+    const m = (e - 0.82) / 0.18;
+    r = r + (220 - r) * m; g = g + (230 - g) * m; bl = bl + (240 - bl) * m;
+  }
+  return [r, g, bl];
+}
+
+// Sprites & Portraits Preloading
+const sprites = {
+  adam_standing: new Image(),
+  eve_standing: new Image(),
+  adam_collapsed: new Image(),
+  eve_collapsed: new Image(),
+  campfire: new Image(),
+  landmark: new Image(),
+  tree_cluster: new Image(),
+  boulder_rock: new Image(),
+  berry_bush: new Image(),
+  shelter_hut: new Image(),
+  storage_cache: new Image()
+};
+for (const [key, img] of Object.entries(sprites)) {
+  img._ok = false;
+  img.onload = () => { img._ok = true; drawFrame(performance.now()); };
+  img.src = `${key}.png`;
+}
+const portraits = {
+  adam: new Image(),
+  eve: new Image()
+};
+for (const [key, img] of Object.entries(portraits)) {
+  img._ok = false;
+  img.onload = () => { img._ok = true; drawFrame(performance.now()); };
+  img.src = `${key}_portrait.jpg`;
+}
+const baseImg = new Image();
+baseImg._ok = false;
+baseImg.onload = () => { baseImg._ok = true; drawFrame(performance.now()); };
+baseImg.src = "world_base.png";
+
+// Canvas & Viewport
+const canvas = document.getElementById("map-canvas");
+const ctx = canvas.getContext("2d");
+const panel = document.getElementById("map-panel");
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+let view = { scale: 15, cx: 0, cy: 0 };
+let cssW = 1, cssH = 1;
+
+function resize() {
+  cssW = panel.clientWidth || 100;
+  cssH = panel.clientHeight || 100;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+}
+resize();
+window.addEventListener("resize", () => { resize(); drawFrame(performance.now()); });
+
+function screenToWorld(sx, sy) {
+  return {
+    x: view.cx + (sx - cssW / 2) / view.scale,
+    y: view.cy + (sy - cssH / 2) / view.scale,
+  };
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Smooth Camera Glide
+let animReq = null;
+function animateTo(targetCx, targetCy, targetScale, durationMs = 600) {
+  if (animReq) cancelAnimationFrame(animReq);
+  const startCx = view.cx, startCy = view.cy, startScale = view.scale;
+  const startTime = performance.now();
+  function step(now) {
+    const elapsed = now - startTime;
+    const p = Math.min(1, elapsed / durationMs);
+    const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    view.cx = startCx + (targetCx - startCx) * ease;
+    view.cy = startCy + (targetCy - startCy) * ease;
+    view.scale = startScale + (targetScale - startScale) * ease;
+    drawFrame(now);
+    if (p < 1) animReq = requestAnimationFrame(step);
+    else animReq = null;
+  }
+  animReq = requestAnimationFrame(step);
+}
+
+// Procedural Organic Landscape Layer (Continuous, Blended, Topographical)
+const layerCache = new Map();
+let layerPx = 0;
+
+// Fast 2D Value Noise & Fractal Brownian Motion (Deterministic & Blazing Fast)
+const PERM = new Uint8Array(512);
+for (let i = 0; i < 256; i++) PERM[i] = PERM[i + 256] = Math.floor(((i * 16807 + 1337) % 2147483647) % 256);
+
+function grad2(h, x, y) {
+  const h8 = h & 7;
+  const u = h8 < 4 ? x : y;
+  const v = h8 < 4 ? y : x;
+  return ((h8 & 1) ? -u : u) + ((h8 & 2) ? -2.0 * v : 2.0 * v);
+}
+
+function noise2d(x, y) {
+  const X = Math.floor(x) & 255;
+  const Y = Math.floor(y) & 255;
+  const xf = x - Math.floor(x);
+  const yf = y - Math.floor(y);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a0 = PERM[X] + Y;
+  const a1 = PERM[X + 1] + Y;
+  const g00 = grad2(PERM[a0], xf, yf);
+  const g10 = grad2(PERM[a1], xf - 1, yf);
+  const g01 = grad2(PERM[a0 + 1], xf, yf - 1);
+  const g11 = grad2(PERM[a1 + 1], xf - 1, yf - 1);
+  const x1 = g00 + u * (g10 - g00);
+  const x2 = g01 + u * (g11 - g01);
+  return x1 + v * (x2 - x1);
+}
+
+function fbm(x, y) {
+  return 0.5 * noise2d(x, y) + 0.25 * noise2d(x * 2.05, y * 2.05);
+}
+
+// Vibrant Fantasy Natural Biome Palettes
+const ORGANIC_BIOME_RGB = {
+  temperate_valley: [58, 128, 68],    // Lush vibrant green meadow
+  temperate_forest: [38, 92, 52],     // Deep emerald forest
+  dense_woodland:   [24, 68, 38],     // Ancient woodland
+  dark_thicket:     [18, 48, 30],     // Shadowed brambles
+  temperate_hills:  [92, 112, 96],    // Rolling green foothills / slate
+  highland:         [118, 128, 140],  // Weathered granite crags
+  coastal_cliffs:   [68, 74, 88],     // Basalt sea cliff
+  deep_ravine:      [36, 32, 46],     // Chasm shadow
+  warm_coast:       [224, 196, 142],  // Golden sunlit sand
+  deep_lake:        [28, 110, 154],   // Clear freshwater lake
+  open_sea:         [6, 22, 42],      // Deep abyssal ocean
+};
+
+function getLayer(px) {
+  if (layerCache.has(px)) return layerCache.get(px);
+
+  // Generate continuous organic terrain at high-fidelity scale (px ~ 12 gives ~1400x876)
+  const renderPx = 12;
+  const W = GW * renderPx, H = GH * renderPx;
+  const c2 = document.createElement("canvas");
+  c2.width = W; c2.height = H;
+  const g = c2.getContext("2d");
+
+  // Grid dimensions with 2-tile margin
+  const gridW = GW + 4;
+  const gridH = GH + 4;
+  const landGrid = new Uint8Array(gridW * gridH);
+  const waterGrid = new Uint8Array(gridW * gridH);
+  const elevGrid = new Float32Array(gridW * gridH);
+  const rGrid = new Uint8Array(gridW * gridH);
+  const gGrid = new Uint8Array(gridW * gridH);
+  const bGrid = new Uint8Array(gridW * gridH);
+  const blockGrid = new Uint8Array(gridW * gridH);
+
+  for (let gy = 0; gy < gridH; gy++) {
+    const wy = minY - 2 + gy;
+    for (let gx = 0; gx < gridW; gx++) {
+      const wx = minX - 2 + gx;
+      const t = tileByCoord.get(wx + "," + wy);
+      const idx = gy * gridW + gx;
+      if (t) {
+        const isWater = Boolean(t.water || t.biome === "deep_lake");
+        landGrid[idx] = isWater ? 0 : 1;
+        waterGrid[idx] = isWater ? 1 : 0;
+        elevGrid[idx] = t.elevation == null ? 0.5 : t.elevation;
+        blockGrid[idx] = t.blocks_travel ? 1 : 0;
+        const col = ORGANIC_BIOME_RGB[t.biome] || [58, 128, 68];
+        rGrid[idx] = col[0]; gGrid[idx] = col[1]; bGrid[idx] = col[2];
+      } else {
+        rGrid[idx] = 6; gGrid[idx] = 22; bGrid[idx] = 42;
+      }
+    }
+  }
+
+  const imgData = g.createImageData(W, H);
+  const d = imgData.data;
+  const invPx = 1.0 / renderPx;
+
+  for (let py = 0; py < H; py++) {
+    const wy = minY + py * invPx;
+    const rowOffset = py * W * 4;
+    for (let px_i = 0; px_i < W; px_i++) {
+      const wx = minX + px_i * invPx;
+
+      // Fractal domain warping for organic, meandering coastlines & biome boundaries
+      const n1 = noise2d(wx * 0.7, wy * 0.7);
+      const n2 = noise2d(wx * 0.7 + 23.4, wy * 0.7 + 41.2);
+      const swx = wx + n1 * 0.35;
+      const swy = wy + n2 * 0.35;
+
+      const gx = Math.floor(swx - minX + 2);
+      const gy = Math.floor(swy - minY + 2);
+      const pIdx = rowOffset + px_i * 4;
+
+      if (gx < 0 || gx >= gridW - 1 || gy < 0 || gy >= gridH - 1) {
+        d[pIdx] = 6; d[pIdx+1] = 22; d[pIdx+2] = 42; d[pIdx+3] = 255;
+        continue;
+      }
+
+      let fx = swx - Math.floor(swx);
+      let fy = swy - Math.floor(swy);
+      // Hermite smoothstep fade
+      fx = fx * fx * (3 - 2 * fx);
+      fy = fy * fy * (3 - 2 * fy);
+
+      const i00 = gy * gridW + gx;
+      const i10 = i00 + 1;
+      const i01 = i00 + gridW;
+      const i11 = i01 + 1;
+
+      const w00 = (1.0 - fx) * (1.0 - fy);
+      const w10 = fx * (1.0 - fy);
+      const w01 = (1.0 - fx) * fy;
+      const w11 = fx * fy;
+
+      const landW = landGrid[i00] * w00 + landGrid[i10] * w10 + landGrid[i01] * w01 + landGrid[i11] * w11;
+      const microGrain = noise2d(wx * 8.5, wy * 8.5) * 8.0;
+
+      if (landW < 0.22) {
+        // Deep Abyssal Ocean with subtle ocean depth currents
+        const oceanCurrent = (noise2d(wx * 0.35, wy * 0.35) + 1.0) * 0.5;
+        d[pIdx]   = Math.round(6 + oceanCurrent * 4);
+        d[pIdx+1] = Math.round(20 + oceanCurrent * 8);
+        d[pIdx+2] = Math.round(38 + oceanCurrent * 14);
+        d[pIdx+3] = 255;
+      } else if (landW < 0.42) {
+        // Coastal Shoals / Turquoise Lagoon
+        const k = (landW - 0.22) * 5.0; // / 0.20
+        d[pIdx]   = Math.round(10 + 18 * k);
+        d[pIdx+1] = Math.round(36 + 128 * k);
+        d[pIdx+2] = Math.round(68 + 116 * k);
+        d[pIdx+3] = 255;
+      } else if (landW < 0.48) {
+        // Surf Line / Wet Tide Sand
+        const k = (landW - 0.42) * 16.66;
+        d[pIdx]   = Math.round(28 + 150 * k + microGrain * 0.3);
+        d[pIdx+1] = Math.round(164 - 12 * k + microGrain * 0.3);
+        d[pIdx+2] = Math.round(184 - 72 * k + microGrain * 0.3);
+        d[pIdx+3] = 255;
+      } else if (landW < 0.54) {
+        // Warm Golden Sand Beach Ribbon
+        const k = (landW - 0.48) * 16.66;
+        d[pIdx]   = Math.round(178 + 46 * k + microGrain * 0.4);
+        d[pIdx+1] = Math.round(152 + 44 * k + microGrain * 0.4);
+        d[pIdx+2] = Math.round(112 + 30 * k + microGrain * 0.3);
+        d[pIdx+3] = 255;
+      } else {
+        // Inland Living Landscape
+        let r = rGrid[i00] * w00 + rGrid[i10] * w10 + rGrid[i01] * w01 + rGrid[i11] * w11;
+        let g = gGrid[i00] * w00 + gGrid[i10] * w10 + gGrid[i01] * w01 + gGrid[i11] * w11;
+        let b = bGrid[i00] * w00 + bGrid[i10] * w10 + bGrid[i01] * w01 + bGrid[i11] * w11;
+
+        // Sand-to-meadow organic feathering
+        if (landW < 0.62) {
+          const beachK = (landW - 0.54) * 12.5;
+          r = 224 * (1 - beachK) + r * beachK;
+          g = 196 * (1 - beachK) + g * beachK;
+          b = 142 * (1 - beachK) + b * beachK;
+        }
+
+        const elev = elevGrid[i00] * w00 + elevGrid[i10] * w10 + elevGrid[i01] * w01 + elevGrid[i11] * w11;
+        let shade = 0.85 + elev * 0.42;
+
+        // Continuous Northwest Sun Hillshading
+        const slopeX = ((elevGrid[i10] - elevGrid[i00]) * (1 - fy) + (elevGrid[i11] - elevGrid[i01]) * fy) * 3.8;
+        const slopeY = ((elevGrid[i01] - elevGrid[i00]) * (1 - fx) + (elevGrid[i11] - elevGrid[i10]) * fx) * 3.8;
+        const sunLight = -0.707 * slopeX - 0.707 * slopeY;
+
+        let wr = 0, wg = 0, wb = 0;
+        if (sunLight > 0) {
+          const sk = Math.min(0.38, sunLight * 0.65);
+          shade += sk;
+          wr = 30 * sk; wg = 24 * sk; wb = 8 * sk;
+        } else {
+          const shk = Math.min(0.42, -sunLight * 0.6);
+          shade -= shk;
+          wr = -22 * shk; wg = -18 * shk; wb = 12 * shk; // Cool atmospheric indigo
+        }
+
+        const floraVar = noise2d(wx * 3.2, wy * 3.2) * 12.0;
+        r = Math.min(255, Math.max(0, Math.round(r * shade + wr + floraVar + microGrain)));
+        g = Math.min(255, Math.max(0, Math.round(g * shade + wg + floraVar + microGrain)));
+        b = Math.min(255, Math.max(0, Math.round(b * shade + wb + floraVar * 0.5 + microGrain)));
+
+        // High Altitude Alpine Snowcaps & Frost
+        if (elev > 0.80) {
+          const m = (elev - 0.80) * 5.0;
+          r = Math.round(r + (235 - r) * m);
+          g = Math.round(g + (240 - g) * m);
+          b = Math.round(b + (250 - b) * m);
+        }
+
+        // Basalt Ridge Barrier Crags
+        const isBlock = blockGrid[i00] * w00 + blockGrid[i10] * w10 + blockGrid[i01] * w01 + blockGrid[i11] * w11;
+        if (isBlock > 0.35) {
+          const bk = Math.min(1.0, (isBlock - 0.35) * 2.0);
+          r = Math.round(r * (1 - bk) + 18 * bk);
+          g = Math.round(g * (1 - bk) + 14 * bk);
+          b = Math.round(b * (1 - bk) + 24 * bk);
+        }
+
+        d[pIdx]   = r;
+        d[pIdx+1] = g;
+        d[pIdx+2] = b;
+        d[pIdx+3] = 255;
+      }
+    }
+  }
+
+  g.putImageData(imgData, 0, 0);
+
+  layerCache.set(px, c2);
+  return c2;
+}
+
+function ensureLayer() {
+  if (!layerCache.has(12)) {
+    getLayer(12);
+  }
+  return layerCache.get(12);
+}
+
+// Scene State & Objects
+let objectsAll = [];
+let objectsByTile = new Map();
+let agentsAll = [];
+const hbIndex = { east: new Map(), west: new Map() };
+const timelineHbs = { east: [], west: [] };
+
+function buildIndex() {
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    hbIndex[pn] = new Map();
+    (pair.heartbeats || []).forEach(hb => {
+      if (hb && hb.heartbeat != null) hbIndex[pn].set(hb.heartbeat, hb);
+    });
+    timelineHbs[pn] = Object.keys(pair.position_timeline || {}).map(Number).sort((a,b) => a - b);
+  }
+  const hbs = timelineHbs[selectedPair] || [];
+  if (hbs.length) {
+    minHb = hbs[0];
+    maxHb = hbs[hbs.length - 1];
+    if (!currentHb || playbackMode === "live") currentHb = maxHb;
+  }
+}
+buildIndex();
+
+function recomputeScene() {
+  objectsAll = [];
+  objectsByTile = new Map();
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    for (const [oid, o] of Object.entries(pair.public_objects || {})) {
+      const rec = { ...o, _pair: pn, _oid: oid };
+      objectsAll.push(rec);
+      if (!objectsByTile.has(o.tile_id)) objectsByTile.set(o.tile_id, []);
+      objectsByTile.get(o.tile_id).push(rec);
+    }
+  }
+
+  // Active agents based on current playback heartbeat
+  agentsAll = [];
+  for (const [pn, pair] of Object.entries(PAIRS)) {
+    const tl = pair.position_timeline || {};
+    const pos = (playbackMode === "live" || !tl[currentHb]) ? (pair.current_positions || {}) : tl[currentHb];
+    for (const [ref, tid] of Object.entries(pos)) {
+      agentsAll.push({ ref, pair: pn, tileId: tid });
+    }
+  }
+
+  // Recompute trails up to current replay heartbeat
+  computeTrails(currentHb);
+
+  updateUI();
+}
+
+function objCategory(type) {
+  const s = String(type || "").toLowerCase();
+  if (s.includes("shelter") || s.includes("cabin") || s.includes("hut") || s.includes("tent") || s.includes("roof") || s.includes("wall") || s.includes("lean")) return "shelter";
+  if (s.includes("container") || s.includes("storage") || s.includes("chest") || s.includes("cache") || s.includes("pantry") || s.includes("processor")) return "storage";
+  if (s.includes("road")) return "road";
+  if (s.includes("tower") || s.includes("landmark") || s.includes("monument")) return "landmark";
+  if (s.includes("fire") || s.includes("hearth") || s.includes("campfire")) return "fire";
+  return "craft";
+}
+
+// Particle & Effect Systems
+const floatingTexts = [];
+function spawnFloatingText(text, sx, sy, col = "#2ed573", icon = "") {
+  floatingTexts.push({ text, icon, sx, sy, col, startTs: performance.now(), dur: 2200 });
+  if (floatingTexts.length > 30) floatingTexts.shift();
+}
+
+const worldParticles = [];
+function spawnParticle(x, y, vx, vy, col, size = 3, life = 800) {
+  worldParticles.push({ x, y, vx, vy, col, size, startTs: performance.now(), life });
+  if (worldParticles.length > 80) worldParticles.shift();
+}
+
+// Camera Tracking
+let trackedAgentRef = null;
+function toggleTrackAgent(ref) {
+  if (trackedAgentRef === ref) {
+    trackedAgentRef = null;
+  } else {
+    trackedAgentRef = ref;
+  }
+  const ind = document.getElementById("track-indicator");
+  if (ind) {
+    if (trackedAgentRef) {
+      ind.style.display = "inline-block";
+      ind.textContent = `🎥 TRACKING: ${trackedAgentRef.toUpperCase().replace(/.*_/, "")}`;
+    } else {
+      ind.style.display = "none";
+    }
+  }
+  renderBiometrics();
+}
+window.toggleTrackAgent = toggleTrackAgent;
+
+// Animated Agent Position Tracking (Smooth interpolation between heartbeats)
+const agentAnimState = new Map();
+
+function getAgentWorldPos(pairName, agentRef, hb, p = 1) {
+  const pair = PAIRS[pairName] || {};
+  const tl = pair.position_timeline || {};
+  const currTid = (tl[hb] || pair.current_positions || {})[agentRef];
+  const prevTid = (tl[Math.max(1, hb - 1)] || {})[agentRef] || currTid;
+
+  const tCurr = tiles.get(currTid);
+  const tPrev = tiles.get(prevTid);
+
+  const cCurr = tCurr && tCurr.coordinates ? tCurr.coordinates : { x: 0, y: 0 };
+  const cPrev = tPrev && tPrev.coordinates ? tPrev.coordinates : cCurr;
+
+  // Ease-in-out interpolation
+  const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+  const x = cPrev.x + (cCurr.x - cPrev.x) * ease;
+  const y = cPrev.y + (cCurr.y - cPrev.y) * ease;
+  const isMoving = (cCurr.x !== cPrev.x || cCurr.y !== cPrev.y) && p < 0.95;
+
+  return { x, y, cCurr, cPrev, isMoving, currTid };
+}
+
+// Activity & Speech Text Extractor from Real Heartbeat Action
+function getAgentRealAction(pairName, agentRef, hb) {
+  const hbObj = (hbIndex[pairName] || new Map()).get(hb);
+  const rawShort = agentRef.replace(`${pairName}_`, "");
+  const act = (hbObj && hbObj.actions) ? (hbObj.actions[agentRef] || hbObj.actions[rawShort]) : null;
+
+  if (!act) {
+    // Check unheard asks
+    const pair = PAIRS[pairName] || {};
+    for (const ask of (pair.agent_asks || [])) {
+      const askWho = String(ask.agent || "").toLowerCase();
+      if (askWho.includes(rawShort) && ask.status === "unheard") {
+        let q = String(ask.question || "");
+        if (q.length > 55) q = q.slice(0, 52) + "...";
+        return { type: "ask", label: `Asked: "${q}"`, fullReason: q, resource: null };
+      }
+    }
+    return { type: "idle", label: "Exploring sector", fullReason: "", resource: null };
+  }
+
+  const t = String(act.type || "idle").toLowerCase();
+  const res = act.resource ? act.resource.replace(/_/g, " ") : null;
+  const reason = String(act.reason || "");
+
+  let label = "Active";
+  if (t === "gather") label = `Gathering ${res || "Flora"}`;
+  else if (t === "eat") label = "Consuming Rations (+HP)";
+  else if (t === "move") label = `Traveling to Sector`;
+  else if (t === "build" || t === "create_public_object") label = "Constructing Structure";
+  else if (t === "modify_owned_public_object") label = "Inscribing Rune Modification";
+  else if (t === "ask_human" || t === "request_capability") label = `Querying: "${reason.slice(0, 45)}..."`;
+  else if (t === "inspect_public_object" || t === "use_object") label = "Examining Landmark";
+  else label = reason ? (reason.slice(0, 40) + "...") : "Exploring";
+
+  return { type: t, label, fullReason: reason, resource: res, target_tile: act.target_tile };
+}
+const getAgentActivity = (pn, ref) => getAgentRealAction(pn, ref, currentHb);
+
+// Character Figure Renderer (Smooth Movement + Tool Working + Overhead Telemetry)
+function drawCharacter(g, a, worldX, worldY, s, ts, idx = 0) {
+  const origin = screenToWorld(0, 0);
+  const sx = (worldX + 0.5 - origin.x) * s;
+  const sy = (worldY + 0.5 - origin.y) * s;
+
+  const isAdam = a.ref.toLowerCase().includes("adam");
+  const rawName = a.ref.split("_")[1] || a.ref;
+  const name = rawName.toUpperCase();
+  const pairData = PAIRS[a.pair] || {};
+  const vitals = (pairData.vitals || {})[a.ref] || { hunger: 0, warmth: 80, vitality: 100, downed: false };
+  const isDowned = Boolean(vitals.downed);
+  const act = getAgentRealAction(a.pair, a.ref, currentHb);
+  const factionCol = a.pair === "east" ? "#00d2d3" : "#feca57";
+
+  g.save();
+  const figScale = clamp(s / 16, 0.85, 1.35);
+
+  // Faction Ground Aura & Footstep Shadow
+  g.save();
+  g.translate(sx, sy + 18 * figScale);
+
+  // Soft Ground Shadow
+  g.fillStyle = "rgba(0, 5, 14, 0.52)";
+  g.beginPath();
+  g.ellipse(0, 0, isDowned ? 36 * figScale : 20 * figScale, isDowned ? 14 * figScale : 7 * figScale, 0, 0, Math.PI * 2);
+  g.fill();
+
+  // Faction Selection Ring
+  const ringPulse = 1 + Math.sin(ts / 400 + idx) * 0.08;
+  g.strokeStyle = isDowned ? "rgba(255, 71, 87, 0.8)" : (a.pair === "east" ? "rgba(0, 210, 211, 0.75)" : "rgba(254, 202, 87, 0.75)");
+  g.lineWidth = 1.8;
+  g.beginPath();
+  g.ellipse(0, 0, 24 * figScale * ringPulse, 8 * figScale * ringPulse, 0, 0, Math.PI * 2);
+  g.stroke();
+
+  // Concentric Distress Radar Waves for Downed Agents
+  if (isDowned) {
+    const wave = (ts % 2400) / 2400;
+    const waveR = 24 * figScale + wave * 45 * figScale;
+    g.strokeStyle = `rgba(255, 71, 87, ${(1 - wave) * 0.75})`;
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.ellipse(0, 0, waveR, waveR * 0.35, 0, 0, Math.PI * 2);
+    g.stroke();
+  }
+  g.restore();
+
+  let figureTopY = sy - 40;
+
+  if (isDowned) {
+    // Prone Sprite with subtle breathing heave
+    const breath = Math.sin(ts / 800) * 0.02;
+    const proneSprite = isAdam ? sprites.adam_collapsed : sprites.eve_collapsed;
+    if (proneSprite && proneSprite._ok) {
+      const spriteW = Math.max(90, s * 2.2) * (1 + breath);
+      const spriteH = spriteW * (proneSprite.height / proneSprite.width);
+      const drawX = sx - spriteW / 2;
+      const drawY = sy - spriteH * 0.52;
+      g.drawImage(proneSprite, drawX, drawY, spriteW, spriteH);
+      figureTopY = drawY;
+    }
+  } else {
+    // Upright / Active / Walking Sprite
+    const isGathering = act.type === "gather";
+    const isEating = act.type === "eat";
+    const isBuilding = act.type === "build" || act.type === "create_public_object";
+
+    // Walking cadence & tool working heave
+    let strideY = 0;
+    let workAngle = 0;
+    if (isGathering) {
+      workAngle = Math.sin(ts / 180) * 0.08;
+      strideY = Math.abs(Math.sin(ts / 180)) * 4;
+      if (Math.random() < 0.25) {
+        spawnParticle(worldX + 0.5 + (Math.random()-0.5)*0.3, worldY + 0.6, (Math.random()-0.5)*0.8, -0.4 - Math.random()*0.5, "#2ed573", 2.5, 600);
+      }
+    } else if (isBuilding) {
+      workAngle = Math.sin(ts / 120) * 0.12;
+      strideY = Math.abs(Math.sin(ts / 120)) * 3;
+      if (Math.random() < 0.35) {
+        spawnParticle(worldX + 0.5 + (Math.random()-0.5)*0.4, worldY + 0.5, (Math.random()-0.5)*1.2, -0.6 - Math.random()*0.8, "#feca57", 2, 500);
+      }
+    } else if (isEating) {
+      strideY = Math.sin(ts / 250) * 2;
+      if (Math.random() < 0.2) {
+        spawnParticle(worldX + 0.5 + (Math.random()-0.5)*0.2, worldY + 0.2, (Math.random()-0.5)*0.4, -0.5, "#00d2d3", 2.5, 700);
+      }
+    } else {
+      strideY = Math.sin(ts / 650) * 1.5;
+    }
+
+    const activeSprite = isAdam ? sprites.adam_standing : sprites.eve_standing;
+    if (activeSprite && activeSprite._ok) {
+      const figH = Math.max(85, s * 2.15);
+      const figW = figH * (activeSprite.width / activeSprite.height);
+
+      g.save();
+      g.translate(sx, sy + 18 * figScale);
+      g.rotate(workAngle);
+      g.drawImage(activeSprite, -figW / 2, -figH + strideY, figW, figH);
+      g.restore();
+
+      figureTopY = (sy + 18 * figScale) - figH + strideY;
+    }
+  }
+
+  // RPG Minimal Telemetry Overhead Bar & Name
+  const barW = 60 * figScale;
+  const barH = 5 * figScale;
+  const barX = sx - barW / 2;
+  const barY = figureTopY - 18;
+
+  // Name Label
+  g.font = "700 11px 'Plus Jakarta Sans', sans-serif";
+  g.textAlign = "center";
+  g.fillStyle = isDowned ? "#ff6b81" : "#ffffff";
+  g.fillText(name, sx, barY - 4);
+
+  // HP Bar Frame
+  g.fillStyle = "rgba(4, 8, 16, 0.85)";
+  g.fillRect(barX, barY, barW, barH);
+  g.strokeStyle = "rgba(255, 255, 255, 0.25)";
+  g.lineWidth = 1;
+  g.strokeRect(barX, barY, barW, barH);
+
+  // HP Fill
+  const hpFill = clamp(vitals.vitality / 12, 0, 1);
+  g.fillStyle = isDowned ? "#ff4757" : (hpFill > 0.4 ? "#2ed573" : "#ffa502");
+  g.fillRect(barX + 1, barY + 1, (barW - 2) * hpFill, barH - 2);
+
+  // Action / Comic Speech Bubble (Compact, elegant RPG speech pill)
+  let bubbleIcon = "🌿";
+  let bubbleText = act.label;
+  if (isDowned) {
+    bubbleIcon = "⚠️";
+    bubbleText = `COLLAPSED PRONE (${vitals.vitality.toFixed(1)}/12 HP)`;
+  } else if (act.type === "gather") {
+    bubbleIcon = /berry/.test(act.resource) ? "🫐" : (/wood/.test(act.resource) ? "🪵" : (/clay/.test(act.resource) ? "🏺" : "🪨"));
+    bubbleText = `Gathering ${act.resource || "Flora"}`;
+  } else if (act.type === "eat") {
+    bubbleIcon = "🫐";
+    bubbleText = "Nourished (+HP)";
+  } else if (act.type === "build" || act.type === "create_public_object") {
+    bubbleIcon = "🔨";
+    bubbleText = "Constructing Hearth";
+  } else if (act.type === "ask") {
+    bubbleIcon = "💬";
+    bubbleText = act.fullReason || act.label;
+  }
+
+  // Ensure speech bubble is compact and never sprawls across other agents
+  if (bubbleText.length > 32) bubbleText = bubbleText.slice(0, 29) + "...";
+
+  g.font = "700 10.5px 'Plus Jakarta Sans', sans-serif";
+  const tw = g.measureText(`${bubbleIcon} ${bubbleText}`).width;
+  const bW = Math.min(tw + 20, cssW - 20);
+  const bH = 22;
+  const bX = clamp(sx - bW / 2, 10, cssW - bW - 10);
+  const bY = barY - bH - 12 - (idx * (bH + 6));
+
+  // Speech Bubble Pointer
+  const tailX = clamp(sx, bX + 10, bX + bW - 10);
+  g.fillStyle = isDowned ? "rgba(42, 10, 18, 0.95)" : "rgba(8, 14, 24, 0.95)";
+  g.beginPath();
+  g.moveTo(tailX - 4, bY + bH);
+  g.lineTo(tailX, bY + bH + 5);
+  g.lineTo(tailX + 4, bY + bH);
+  g.closePath();
+  g.fill();
+
+  // Glass Badge Box
+  g.fillRect(bX, bY, bW, bH);
+  g.strokeStyle = isDowned ? "rgba(255, 71, 87, 0.85)" : (isAdam ? "rgba(0, 210, 211, 0.8)" : "rgba(254, 202, 87, 0.8)");
+  g.lineWidth = 1.2;
+  g.strokeRect(bX, bY, bW, bH);
+
+  g.fillStyle = isDowned ? "#ffb8b8" : "#ffffff";
+  g.textAlign = "left";
+  g.fillText(`${bubbleIcon} ${bubbleText}`, bX + 8, bY + 15);
+
+  g.restore();
+}
+
+// Master Canvas Drawing Loop
+function drawFrame(ts) {
+  if (panel.clientWidth !== cssW || panel.clientHeight !== cssH) resize();
+  const g = ctx;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Seamless Deep Abyssal Ocean Backdrop
+  g.fillStyle = "#061a2e";
+  g.fillRect(0, 0, cssW, cssH);
+
+  const terrain = ensureLayer();
+  const s = view.scale;
+  const origin = screenToWorld(0, 0);
+  const dx = (origin.x - minX) * s, dy = (origin.y - minY) * s;
+  const dw = GW * s, dh = GH * s;
+
+  // Unexplored Ghost Backdrop
+  if (baseImg._ok) {
+    g.save();
+    g.globalAlpha = 0.22;
+    g.drawImage(baseImg, -dx, -dy, dw, dh);
+    g.restore();
+  }
+
+  // Continuous Organic Living Terrain Layer (Silky Smooth GPU Scaling)
+  g.imageSmoothingEnabled = true;
+  g.drawImage(terrain, -dx, -dy, dw, dh);
+
+  // Living Water Shorelines: Directional Foam Crests Breathing on Sandy Beaches (Natural Shoreline Waves)
+  tiles.forEach(t => {
+    if (!t.water) return;
+    const c = t.coordinates; if (!c) return;
+    const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+    if (sx < -s*2 || sx > cssW + s*2 || sy < -s*2 || sy > cssH + s*2) return;
+
+    const nN = tileByCoord.get(c.x + "," + (c.y - 1));
+    const nS = tileByCoord.get(c.x + "," + (c.y + 1));
+    const nW = tileByCoord.get((c.x - 1) + "," + c.y);
+    const nE = tileByCoord.get((c.x + 1) + "," + c.y);
+
+    const landN = nN && !nN.water;
+    const landS = nS && !nS.water;
+    const landW = nW && !nW.water;
+    const landE = nE && !nE.water;
+
+    const wavePulse = Math.sin(ts / 1100 + c.x * 1.2 + c.y * 1.7) * 0.5 + 0.5;
+    g.save();
+
+    if (landN || landS || landW || landE) {
+      g.strokeStyle = `rgba(255, 255, 255, ${(0.14 + wavePulse * 0.28).toFixed(3)})`;
+      g.lineWidth = Math.max(1.0, s * 0.07);
+      g.beginPath();
+      if (landN) {
+        g.moveTo(sx - s * 0.42, sy - s * 0.15);
+        g.quadraticCurveTo(sx, sy - s * 0.30 - wavePulse * s * 0.08, sx + s * 0.42, sy - s * 0.15);
+      }
+      if (landS) {
+        g.moveTo(sx - s * 0.42, sy + s * 0.15);
+        g.quadraticCurveTo(sx, sy + s * 0.30 + wavePulse * s * 0.08, sx + s * 0.42, sy + s * 0.15);
+      }
+      if (landW) {
+        g.moveTo(sx - s * 0.15, sy - s * 0.42);
+        g.quadraticCurveTo(sx - s * 0.30 - wavePulse * s * 0.08, sy, sx - s * 0.15, sy + s * 0.42);
+      }
+      if (landE) {
+        g.moveTo(sx + s * 0.15, sy - s * 0.42);
+        g.quadraticCurveTo(sx + s * 0.30 + wavePulse * s * 0.08, sy, sx + s * 0.15, sy + s * 0.42);
+      }
+      g.stroke();
+    } else if (s >= 12 && (c.x + c.y) % 2 === 0) {
+      const drift = Math.sin(ts / 1500 + c.x * 0.6) * s * 0.12;
+      g.strokeStyle = `rgba(0, 242, 254, ${(0.03 + wavePulse * 0.06).toFixed(3)})`;
+      g.lineWidth = Math.max(0.7, s * 0.035);
+      g.beginPath();
+      g.moveTo(sx - s * 0.25 + drift, sy);
+      g.quadraticCurveTo(sx + drift, sy - s * 0.04, sx + s * 0.25 + drift, sy);
+      g.stroke();
+    }
+    g.restore();
+  });
+
+  // Worn Footstep Trails (Desire paths etched from 4,000 heartbeats)
+  drawWornTrails(g, selectedPair, origin, s);
+
+  // Drifting Cinematic Soft Cloud Shadows
+  const cloudTime = ts * 0.000045;
+  g.save();
+  for (let ci = 0; ci < 6; ci++) {
+    const cx0 = (((ci * 41.7 + cloudTime * 140) % (GW + 60)) - 30 - origin.x) * s;
+    const cy0 = (((ci * 29.3 + cloudTime * 85) % (GH + 60)) - 30 - origin.y) * s;
+    const cRadius = (8 + (ci % 4) * 3) * s;
+    const cGrad = g.createRadialGradient(cx0, cy0, cRadius * 0.15, cx0, cy0, cRadius);
+    cGrad.addColorStop(0, "rgba(4, 12, 28, 0.14)");
+    cGrad.addColorStop(0.65, "rgba(4, 12, 28, 0.07)");
+    cGrad.addColorStop(1, "rgba(4, 12, 28, 0)");
+    g.fillStyle = cGrad;
+    g.beginPath();
+    g.arc(cx0, cy0, cRadius, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+
+  const tl = screenToWorld(0, 0), br = screenToWorld(cssW, cssH);
+  const vx0 = Math.floor(tl.x - 2), vx1 = Math.ceil(br.x + 2);
+  const vy0 = Math.floor(tl.y - 2), vy1 = Math.ceil(br.y + 2);
+
+  // Environmental Scenery Props: Organic Forest Groves, Crags, Wild Sustenance Flora
+  if (s >= 8) {
+    tiles.forEach(t => {
+      const c = t.coordinates; if (!c) return;
+      if (c.x < vx0 || c.x > vx1 || c.y < vy0 || c.y > vy1) return;
+
+      const sx = (c.x + 0.5 - origin.x) * s;
+      const sy = (c.y + 0.5 - origin.y) * s;
+      const seed = ((c.x * 73856093) ^ (c.y * 19349663)) & 0xffff;
+      const b = String(t.biome || "").toLowerCase();
+
+      // Shoreline Flora: River Reeds & Water Lilies along water edges
+      if (t.water && s >= 12) {
+        const nearLand = [[0,-1],[0,1],[-1,0],[1,0]].some(([dx, dy]) => {
+          const n = tileByCoord.get((c.x + dx) + "," + (c.y + dy));
+          return n && !n.water;
+        });
+        if (nearLand && (seed % 100 < 45)) {
+          g.save();
+          g.fillStyle = "rgba(34, 139, 34, 0.72)";
+          g.beginPath();
+          g.ellipse(sx - s * 0.15, sy - s * 0.1, s * 0.14, s * 0.08, 0.2, 0, Math.PI * 1.85);
+          g.fill();
+          g.fillStyle = "rgba(255, 245, 248, 0.85)";
+          g.beginPath();
+          g.arc(sx - s * 0.15, sy - s * 0.1, s * 0.035, 0, Math.PI * 2);
+          g.fill();
+          g.restore();
+        }
+        return;
+      }
+
+      // Meadow Flora: Wildflower Flecks & Clover Tufts
+      if (b.includes("valley") && s >= 14 && (seed % 100 < 65)) {
+        g.save();
+        g.fillStyle = (seed % 2 === 0) ? "rgba(255, 235, 120, 0.65)" : "rgba(255, 255, 255, 0.65)";
+        for (let fi = 0; fi < 3; fi++) {
+          const fx = sx + (((seed * (fi + 1)) % 100) / 100 - 0.5) * s * 0.6;
+          const fy = sy + (((seed * (fi + 3)) % 100) / 100 - 0.5) * s * 0.6;
+          g.beginPath();
+          g.arc(fx, fy, Math.max(1, s * 0.025), 0, Math.PI * 2);
+          g.fill();
+        }
+        g.restore();
+      }
+
+      // Forest & Woodland Biomes: Lush Natural Tree Groves (2-3 trees with varied scale & drop shadows)
+      if ((b.includes("forest") || b.includes("woodland") || b.includes("thicket")) && (seed % 100 < 55)) {
+        if (sprites.tree_cluster && sprites.tree_cluster._ok) {
+          const treeBaseW = Math.max(34, s * 1.45);
+          const sway = Math.sin(ts / 850 + c.x * 1.5) * (1.1 * s / 16);
+
+          // Tree 1: Primary tree
+          const w1 = treeBaseW * (0.95 + (seed % 20) / 100);
+          const h1 = w1 * (sprites.tree_cluster.height / sprites.tree_cluster.width);
+          const x1 = sx - s * 0.12;
+          const y1 = sy + s * 0.10;
+          g.fillStyle = "rgba(0, 8, 16, 0.38)";
+          g.beginPath(); g.ellipse(x1, y1, w1 * 0.38, w1 * 0.16, 0, 0, Math.PI * 2); g.fill();
+          g.drawImage(sprites.tree_cluster, x1 - w1 / 2 + sway, y1 - h1 * 0.86, w1, h1);
+
+          // Tree 2: Secondary overlapping tree (creates rich grove depth)
+          if (b.includes("dense") || seed % 100 < 42) {
+            const w2 = treeBaseW * (0.80 + ((seed >> 4) % 25) / 100);
+            const h2 = w2 * (sprites.tree_cluster.height / sprites.tree_cluster.width);
+            const x2 = sx + s * 0.18;
+            const y2 = sy - s * 0.12;
+            g.fillStyle = "rgba(0, 8, 16, 0.32)";
+            g.beginPath(); g.ellipse(x2, y2, w2 * 0.35, w2 * 0.15, 0, 0, Math.PI * 2); g.fill();
+            g.drawImage(sprites.tree_cluster, x2 - w2 / 2 + sway * 0.85, y2 - h2 * 0.86, w2, h2);
+          }
+        }
+      }
+      // Rocky / Highland Biomes: Weathered Granite Boulders with Scree
+      else if ((b.includes("hill") || b.includes("highland") || b.includes("cliff")) && (seed % 100 < 35)) {
+        if (sprites.boulder_rock && sprites.boulder_rock._ok) {
+          const rockW = Math.max(26, s * 1.1) * (0.85 + (seed % 25) / 100);
+          const rockH = rockW * (sprites.boulder_rock.height / sprites.boulder_rock.width);
+
+          g.fillStyle = "rgba(0, 8, 16, 0.48)";
+          g.beginPath();
+          g.ellipse(sx, sy + s * 0.1, rockW * 0.45, rockW * 0.2, 0, 0, Math.PI * 2);
+          g.fill();
+
+          g.drawImage(sprites.boulder_rock, sx - rockW / 2, sy - rockH * 0.8, rockW, rockH);
+        }
+      }
+
+      // Sustenance Flora: Wild Berry Bushes with Ripe Berry Clumping
+      if (t.resources && t.resources.some(r => /berry|root|mushroom/.test(r)) && (seed % 100 < 45)) {
+        if (sprites.berry_bush && sprites.berry_bush._ok) {
+          const bushW = Math.max(24, s * 0.95);
+          const bushH = bushW * (sprites.berry_bush.height / sprites.berry_bush.width);
+
+          g.fillStyle = "rgba(0, 8, 16, 0.35)";
+          g.beginPath();
+          g.ellipse(sx + s * 0.18, sy + s * 0.1, bushW * 0.4, bushW * 0.16, 0, 0, Math.PI * 2);
+          g.fill();
+
+          g.drawImage(sprites.berry_bush, sx + s * 0.18 - bushW / 2, sy - bushH * 0.72, bushW, bushH);
+        }
+      }
+    });
+  }
+
+  // Structures, Shelters, Caches & Campfires
+  for (const o of objectsAll) {
+    const t = tiles.get(o.tile_id);
+    if (!t || !t.coordinates) continue;
+    const c = t.coordinates;
+    if (c.x < vx0 || c.x > vx1 || c.y < vy0 || c.y > vy1) continue;
+    const cat = objCategory(o.object_type);
+    const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+
+    if (cat === "fire") {
+      // Warm Campfire Light Halo
+      const fireGlow = g.createRadialGradient(sx, sy, 0, sx, sy, s * 1.9);
+      fireGlow.addColorStop(0, "rgba(255, 140, 20, 0.55)");
+      fireGlow.addColorStop(0.5, "rgba(255, 80, 10, 0.22)");
+      fireGlow.addColorStop(1, "rgba(255, 50, 0, 0)");
+      g.fillStyle = fireGlow;
+      g.beginPath(); g.arc(sx, sy, s * 1.9, 0, Math.PI * 2); g.fill();
+
+      // Rising Smoke Wisps
+      const smokeWisp = (ts % 2800) / 2800;
+      const smokeY = sy - s * 0.4 - smokeWisp * s * 1.4;
+      const smokeX = sx + Math.sin(ts / 350 + smokeWisp * 3) * (s * 0.2);
+      g.fillStyle = `rgba(180, 190, 205, ${(0.28 * (1 - smokeWisp)).toFixed(3)})`;
+      g.beginPath();
+      g.arc(smokeX, smokeY, s * (0.07 + smokeWisp * 0.20), 0, Math.PI * 2);
+      g.fill();
+
+      if (sprites.campfire && sprites.campfire._ok) {
+        const flamePulse = 1 + Math.sin(ts / 140) * 0.05;
+        const fireW = Math.max(28, s * 0.98) * flamePulse;
+        const fireH = fireW * (sprites.campfire.height / sprites.campfire.width);
+        g.drawImage(sprites.campfire, sx - fireW / 2, sy - fireH * 0.65, fireW, fireH);
+      }
+    } else if (cat === "landmark") {
+      if (sprites.landmark && sprites.landmark._ok) {
+        const lmH = Math.max(38, s * 1.35);
+        const lmW = lmH * (sprites.landmark.width / sprites.landmark.height);
+
+        g.fillStyle = "rgba(0, 8, 16, 0.55)";
+        g.beginPath();
+        g.ellipse(sx, sy + s * 0.15, lmW * 0.45, lmW * 0.22, 0, 0, Math.PI * 2);
+        g.fill();
+
+        g.drawImage(sprites.landmark, sx - lmW / 2, sy - lmH * 0.75, lmW, lmH);
+      }
+    } else if (cat === "shelter") {
+      // Warm Hearth Glow from Shelter
+      const shelterGlow = g.createRadialGradient(sx, sy, 0, sx, sy, s * 2.4);
+      shelterGlow.addColorStop(0, "rgba(255, 170, 50, 0.42)");
+      shelterGlow.addColorStop(0.5, "rgba(255, 120, 20, 0.16)");
+      shelterGlow.addColorStop(1, "rgba(255, 80, 0, 0)");
+      g.fillStyle = shelterGlow;
+      g.beginPath(); g.arc(sx, sy, s * 2.4, 0, Math.PI * 2); g.fill();
+
+      // Chimney Hearth Smoke Wisps
+      const smokeWisp = (ts % 3200) / 3200;
+      const smokeY = sy - s * 0.8 - smokeWisp * s * 1.6;
+      const smokeX = sx + s * 0.15 + Math.sin(ts / 400 + smokeWisp * 3) * (s * 0.25);
+      g.fillStyle = `rgba(200, 210, 225, ${(0.30 * (1 - smokeWisp)).toFixed(3)})`;
+      g.beginPath();
+      g.arc(smokeX, smokeY, s * (0.08 + smokeWisp * 0.22), 0, Math.PI * 2);
+      g.fill();
+
+      if (sprites.shelter_hut && sprites.shelter_hut._ok) {
+        const hutW = Math.max(42, s * 1.65);
+        const hutH = hutW * (sprites.shelter_hut.height / sprites.shelter_hut.width);
+
+        g.fillStyle = "rgba(0, 8, 16, 0.55)";
+        g.beginPath();
+        g.ellipse(sx, sy + s * 0.2, hutW * 0.48, hutW * 0.22, 0, 0, Math.PI * 2);
+        g.fill();
+
+        g.drawImage(sprites.shelter_hut, sx - hutW / 2, sy - hutH * 0.78, hutW, hutH);
+      }
+    } else if (cat === "storage") {
+      if (sprites.storage_cache && sprites.storage_cache._ok) {
+        const cacheW = Math.max(28, s * 1.1);
+        const cacheH = cacheW * (sprites.storage_cache.height / sprites.storage_cache.width);
+
+        g.fillStyle = "rgba(0, 8, 16, 0.46)";
+        g.beginPath();
+        g.ellipse(sx, sy + s * 0.12, cacheW * 0.42, cacheW * 0.18, 0, 0, Math.PI * 2);
+        g.fill();
+
+        g.drawImage(sprites.storage_cache, sx - cacheW / 2, sy - cacheH * 0.72, cacheW, cacheH);
+      }
+    }
+  }
+
+  // Camera Tracking Glide
+  if (trackedAgentRef) {
+    const pair = PAIRS[selectedPair] || {};
+    const tl = pair.position_timeline || {};
+    const pos = (playbackMode === "live" || !tl[currentHb]) ? (pair.current_positions || {}) : tl[currentHb];
+    const tid = pos[trackedAgentRef];
+    const t = tiles.get(tid);
+    if (t && t.coordinates) {
+      view.cx += (t.coordinates.x + 0.5 - view.cx) * 0.08;
+      view.cy += (t.coordinates.y + 0.5 - view.cy) * 0.08;
+    }
+  }
+
+  // Atmospheric Sun & Day/Night Wash (Transparent separation of canonical timestamp from illustrative sun)
+  const atmo = getAtmosphericLighting(currentHb);
+  const hbRecForTime = (hbIndex[selectedPair] || new Map()).get(currentHb);
+  const timeHud = document.getElementById("time-hud");
+  if (timeHud) {
+    if (hbRecForTime && hbRecForTime.timestamp) {
+      const utcTime = hbRecForTime.timestamp.length >= 19 ? hbRecForTime.timestamp.slice(11, 19) + " UTC" : hbRecForTime.timestamp;
+      timeHud.textContent = `${utcTime} // ${atmo.timeName} (ILLUSTRATIVE)`;
+    } else {
+      timeHud.textContent = `${atmo.timeName} (ILLUSTRATIVE)`;
+    }
+  }
+
+  if (atmo.ambientDarkness > 0) {
+    if (!window._atmoMask || window._atmoMask.width !== canvas.width || window._atmoMask.height !== canvas.height) {
+      window._atmoMask = document.createElement("canvas");
+      window._atmoMask.width = canvas.width;
+      window._atmoMask.height = canvas.height;
+    }
+    const mg = window._atmoMask.getContext("2d");
+    mg.setTransform(dpr, 0, 0, dpr, 0, 0);
+    mg.clearRect(0, 0, cssW, cssH);
+
+    mg.fillStyle = `rgba(4, 10, 24, ${atmo.ambientDarkness.toFixed(3)})`;
+    mg.fillRect(0, 0, cssW, cssH);
+
+    mg.globalCompositeOperation = "destination-out";
+
+    for (const o of objectsAll) {
+      const t = tiles.get(o.tile_id);
+      if (!t || !t.coordinates) continue;
+      const c = t.coordinates;
+      const sx = (c.x + 0.5 - origin.x) * s, sy = (c.y + 0.5 - origin.y) * s;
+      const cat = objCategory(o.object_type);
+      if (cat === "fire" || cat === "landmark" || cat === "shelter") {
+        const radSize = cat === "shelter" ? s * 2.8 : s * 3.2;
+        const fireRad = mg.createRadialGradient(sx, sy, 0, sx, sy, radSize);
+        fireRad.addColorStop(0, "rgba(0, 0, 0, 1)");
+        fireRad.addColorStop(0.5, "rgba(0, 0, 0, 0.8)");
+        fireRad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        mg.fillStyle = fireRad;
+        mg.beginPath();
+        mg.arc(sx, sy, radSize, 0, Math.PI * 2);
+        mg.fill();
+      }
+    }
+
+    for (const a of agentsAll) {
+      const anim = getAgentWorldPos(a.pair, a.ref, currentHb, 1);
+      const asx = (anim.x + 0.5 - origin.x) * s;
+      const asy = (anim.y + 0.5 - origin.y) * s;
+      const agentRad = mg.createRadialGradient(asx, asy, 0, asx, asy, s * 2.2);
+      agentRad.addColorStop(0, "rgba(0, 0, 0, 1)");
+      agentRad.addColorStop(0.6, "rgba(0, 0, 0, 0.6)");
+      agentRad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      mg.fillStyle = agentRad;
+      mg.beginPath();
+      mg.arc(asx, asy, s * 2.2, 0, Math.PI * 2);
+      mg.fill();
+    }
+
+    g.save();
+    g.drawImage(window._atmoMask, 0, 0, cssW, cssH);
+    g.restore();
+  }
+
+  // Dynamic Atmospheric Weather Overlay & Temperature HUD
+  const currentSky = getWeatherAt(selectedPair, currentHb);
+  const weatherHud = document.getElementById("weather-hud");
+  if (weatherHud) {
+    const skyIcons = { clear: "☀️ Clear", overcast: "☁️ Overcast", rain: "🌧️ Rain", storm: "⛈️ Storm" };
+    const seasonNames = { spring: "🌱 Spring", summer: "☀️ Summer", autumn: "🍂 Autumn", winter: "❄️ Winter" };
+    const seasonTemps = { spring: "17°C", summer: "27°C", autumn: "11°C", winter: "-3°C" };
+    const tempStr = seasonTemps[atmo.season] || "18°C";
+    let shelterNote = (currentSky === "rain" || currentSky === "storm") ? " · ⛺ Shelter Needed" : "";
+    weatherHud.textContent = `${seasonNames[atmo.season] || atmo.season.toUpperCase()} (${tempStr}) // ${skyIcons[currentSky] || currentSky.toUpperCase()}${shelterNote}`;
+  }
+
+  // Floating Ambient Breeze Particles (Golden pollen / dandelion seeds)
+  if (!atmo.isNight && (currentSky === "clear" || currentSky === "overcast")) {
+    g.save();
+    for (let pi = 0; pi < 18; pi++) {
+      const px0 = ((pi * 83.7 + ts * 0.035) % (cssW + 40)) - 20;
+      const py0 = ((pi * 51.3 + Math.sin(ts * 0.0012 + pi) * 20 + ts * 0.012) % (cssH + 40)) - 20;
+      const pAlpha = 0.22 + Math.sin(ts * 0.002 + pi) * 0.18;
+      g.fillStyle = `rgba(255, 245, 180, ${pAlpha.toFixed(3)})`;
+      g.beginPath();
+      g.arc(px0, py0, 1.2, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  if (currentSky === "rain" || currentSky === "storm") {
+    g.save();
+    g.strokeStyle = currentSky === "storm" ? "rgba(180, 215, 255, 0.40)" : "rgba(160, 200, 240, 0.24)";
+    g.lineWidth = currentSky === "storm" ? 1.4 : 0.9;
+    const dropCount = currentSky === "storm" ? 120 : 65;
+    const dropSpeed = currentSky === "storm" ? 2.4 : 1.5;
+    for (let i = 0; i < dropCount; i++) {
+      const rx = (Math.sin(i * 997 + ts * 0.001) * 0.5 + 0.5) * cssW;
+      const ry = ((i * 53 + ts * dropSpeed) % cssH);
+      g.beginPath();
+      g.moveTo(rx, ry);
+      g.lineTo(rx - 7, ry + 15);
+      g.stroke();
+    }
+    if (currentSky === "storm") {
+      g.fillStyle = "rgba(10, 22, 45, 0.10)";
+      g.fillRect(0, 0, cssW, cssH);
+    }
+    g.restore();
+  } else if (atmo.isNight) {
+    g.save();
+    for (let i = 0; i < 16; i++) {
+      const fx = (Math.sin(i * 137 + ts * 0.0005) * 0.5 + 0.5) * cssW;
+      const fy = (Math.cos(i * 269 + ts * 0.0007) * 0.5 + 0.5) * cssH;
+      const pulse = Math.sin(ts * 0.003 + i) * 0.5 + 0.5;
+      g.fillStyle = `rgba(254, 202, 87, ${(pulse * 0.42).toFixed(3)})`;
+      g.beginPath();
+      g.arc(fx, fy, 1.2 + pulse * 1.4, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // Cinematic Director Camera Glide & Subtitle Feed (Focuses on Active Civilization with Provenance & Proper Framing)
+  if (isCinematic) {
+    let avgX = 0, avgY = 0, charCount = 0;
+    let mainQuote = "";
+    const activeAgents = agentsAll.filter(a => a.pair === selectedPair);
+    for (const a of activeAgents) {
+      const anim = getAgentWorldPos(a.pair, a.ref, currentHb, 1);
+      avgX += anim.x + 0.5; avgY += anim.y + 0.5; charCount++;
+      const act = getAgentRealAction(a.pair, a.ref, currentHb);
+      if (!mainQuote) {
+        const who = a.ref.toUpperCase().replace(/.*_/, "");
+        if (act.fullReason) {
+          mainQuote = `${who} [ACTION RATIONALE]: "${act.fullReason}"`;
+        } else if (act.label && act.type !== "idle") {
+          mainQuote = `${who} [RECORDED ACTION]: ${act.label.toUpperCase()}`;
+        }
+      }
+    }
+    if (charCount > 0) {
+      view.cx += (avgX / charCount - view.cx) * 0.05;
+      view.cy += (avgY / charCount - view.cy) * 0.05;
+      // Scale 29.5 fills the 1440x900 widescreen viewport gracefully without ocean void
+      view.scale += (29.5 - view.scale) * 0.04;
+    }
+    const subEl = document.getElementById("cinema-subtitle");
+    if (subEl) {
+      subEl.textContent = mainQuote || "[NO DELIBERATION RECORDED FOR THIS HEARTBEAT]";
+    }
+    const hbTag = document.getElementById("cinema-hb-tag");
+    if (hbTag) {
+      const tsStr = hbRecForTime && hbRecForTime.timestamp ? (hbRecForTime.timestamp.length >= 19 ? hbRecForTime.timestamp.slice(11, 19) + " UTC" : hbRecForTime.timestamp) : "NO TIMESTAMP";
+      hbTag.textContent = `HB ${currentHb} // CANONICAL: ${tsStr} // SUN: ${atmo.timeName} (ILLUSTRATIVE)`;
+    }
+  }
+
+  // Living Characters with Movement Interpolation
+  const tileAgentCounts = new Map();
+  const tileAgentIndices = new Map();
+  for (const a of agentsAll) {
+    tileAgentCounts.set(a.tileId, (tileAgentCounts.get(a.tileId) || 0) + 1);
+  }
+
+  for (let i = 0; i < agentsAll.length; i++) {
+    const a = agentsAll[i];
+    const anim = getAgentWorldPos(a.pair, a.ref, currentHb, 1);
+    const count = tileAgentCounts.get(a.tileId) || 1;
+    const idx = tileAgentIndices.get(a.tileId) || 0;
+    tileAgentIndices.set(a.tileId, idx + 1);
+
+    const sep = count > 1 ? (idx - (count - 1) / 2) * Math.max(48, s * 0.9) : 0;
+    drawCharacter(g, a, anim.x + sep / s, anim.y, s, ts, idx);
+  }
+
+  // Dynamic World Particles (Harvest leaves, embers, dust)
+  for (let i = worldParticles.length - 1; i >= 0; i--) {
+    const p = worldParticles[i];
+    const age = ts - p.startTs;
+    if (age > p.life) { worldParticles.splice(i, 1); continue; }
+    const alpha = 1 - age / p.life;
+    const px = (p.x - origin.x) * s + p.vx * (age / 16);
+    const py = (p.y - origin.y) * s + p.vy * (age / 16);
+    g.fillStyle = p.col;
+    g.globalAlpha = alpha;
+    g.beginPath();
+    g.arc(px, py, p.size * (s / 16), 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+  }
+
+  // Floating Action / Loot Texts
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    const age = ts - ft.startTs;
+    if (age > ft.dur) { floatingTexts.splice(i, 1); continue; }
+    const prog = age / ft.dur;
+    const yOff = prog * 42;
+    g.save();
+    g.font = "700 12px 'Plus Jakarta Sans', sans-serif";
+    g.textAlign = "center";
+    g.fillStyle = ft.col;
+    g.globalAlpha = Math.sin(prog * Math.PI);
+    g.fillText(ft.text, ft.sx, ft.sy - yOff);
+    g.restore();
+  }
+
+  document.getElementById("zoom-val").textContent = `${view.scale.toFixed(1)}×`;
+}
+
+function loop(ts) {
+  if (isPlaying) {
+    if (!lastStepTime) lastStepTime = ts;
+    const interval = 1000 / playSpeed;
+    if (ts - lastStepTime >= interval) {
+      lastStepTime = ts;
+      if (currentHb < maxHb) {
+        currentHb++;
+        playbackMode = "replay";
+        recomputeScene();
+        triggerActionFX();
+      } else {
+        isPlaying = false;
+        updateUI();
+      }
+    }
+  }
+  drawFrame(ts);
+  requestAnimationFrame(loop);
+}
+
+// Action FX Trigger on Heartbeat Step (Simulation-truth: Strictly displays recorded actions; no unverified vitality deltas)
+function triggerActionFX() {
+  const hbRec = (hbIndex[selectedPair] || new Map()).get(currentHb);
+  if (!hbRec || !hbRec.actions) return;
+
+  const pair = PAIRS[selectedPair] || {};
+  const tl = pair.position_timeline || {};
+  const pos = tl[currentHb] || pair.current_positions || {};
+
+  for (const [ref, tid] of Object.entries(pos)) {
+    const t = tiles.get(tid);
+    if (!t || !t.coordinates) continue;
+    const act = hbRec.actions[ref] || hbRec.actions[ref.replace(`${selectedPair}_`, "")];
+    if (!act) continue;
+
+    const c = t.coordinates;
+    const origin = screenToWorld(0, 0);
+    const sx = (c.x + 0.5 - origin.x) * view.scale;
+    const sy = (c.y + 0.5 - origin.y) * view.scale - 35;
+
+    const type = String(act.type || "").toLowerCase();
+    if (type === "gather") {
+      const res = act.resource ? act.resource.replace(/_/g, " ") : "resource";
+      const icon = /berry/.test(res) ? "🫐" : (/wood/.test(res) ? "🪵" : (/clay/.test(res) ? "🏺" : "🪨"));
+      spawnFloatingText(`ACTION: GATHER (${icon} ${res.toUpperCase()})`, sx, sy, "#2ed573");
+    } else if (type === "eat") {
+      spawnFloatingText(`ACTION: CONSUME RATIONS`, sx, sy, "#00d2d3");
+    } else if (type === "build" || type === "create_public_object") {
+      spawnFloatingText(`ACTION: CONSTRUCT STRUCTURE`, sx, sy, "#feca57");
+    } else if (type === "move") {
+      spawnFloatingText(`ACTION: TRAVEL`, sx, sy, "#70a1ff");
+    }
+  }
+}
+
+// Cognitive Dossier Helper (Simulation-truth: Strictly displays recorded reasoning with explicit provenance; zero fabricated thoughts)
+function getAgentInnerVoice(pn, ref, v, act, inv) {
+  const rawShort = ref.replace(`${pn}_`, "").toLowerCase();
+  const pair = PAIRS[pn] || {};
+
+  // 1. Check for recorded operator asks/comms
+  for (const ask of (pair.agent_asks || [])) {
+    const askWho = String(ask.agent || "").toLowerCase();
+    if (askWho.includes(rawShort) && (ask.heartbeat === currentHb || (currentHb == null && ask.status === "unheard"))) {
+      const resp = ask.answer ? ` ➔ Operator Response: "${ask.answer}"` : " (Status: Unheard)";
+      return {
+        provenance: `CANONICAL ASKS LOG [HB ${ask.heartbeat}]`,
+        text: `"${ask.question}"${resp}`
+      };
+    }
+  }
+
+  // 2. Check for recorded action deliberation in heartbeat record
+  if (act && (act.fullReason || act.reason)) {
+    return {
+      provenance: `ACTION RATIONALE [HB ${currentHb}]`,
+      text: `"${act.fullReason || act.reason}"`
+    };
+  }
+
+  // 3. Transparent fallback: State honestly that no deliberation was recorded
+  return {
+    provenance: `LEDGER RECORD [HB ${currentHb}]`,
+    text: `No action rationale logged for this heartbeat (Action: ${act && act.type ? act.type.toUpperCase() : "IDLE"}).`
+  };
+}
+
+// Sidebar UI Renderers
+function updateUI() {
+  const hbs = timelineHbs[selectedPair] || [];
+  if (hbs.length) {
+    minHb = hbs[0];
+    maxHb = hbs[hbs.length - 1];
+  }
+
+  // Masthead & Scrubber
+  document.getElementById("hb-masthead").textContent = `HB ${currentHb || maxHb}`;
+  const slider = document.getElementById("scrubber");
+  if (slider) {
+    slider.min = minHb;
+    slider.max = maxHb;
+    slider.value = currentHb || maxHb;
+  }
+  document.getElementById("pb-counter").textContent = `${currentHb || maxHb} / ${maxHb} HB`;
+
+  const btnLive = document.getElementById("pb-live");
+  if (playbackMode === "live") btnLive.classList.add("active");
+  else btnLive.classList.remove("active");
+
+  const statusBadge = document.getElementById("live-status-badge");
+  if (statusBadge) {
+    if (playbackMode === "live" && currentHb >= maxHb) {
+      statusBadge.className = "status-badge-live";
+      statusBadge.textContent = "STREAM LIVE";
+    } else {
+      statusBadge.className = "status-badge-replay";
+      statusBadge.textContent = `HISTORICAL ARCHIVE (HB ${currentHb || minHb})`;
+    }
+  }
+
+  const btnPlay = document.getElementById("pb-play");
+  btnPlay.textContent = isPlaying ? "⏸ PAUSE" : "▶ PLAY";
+
+  renderBiometrics();
+  renderChronicle();
+  renderComms();
+}
+
+function renderBiometrics() {
+  const el = document.getElementById("agents-container");
+  const pair = PAIRS[selectedPair] || {};
+  const inventories = pair.inventories || {};
+  const vitalsAll = pair.vitals || {};
+  const tl = pair.position_timeline || {};
+  const pos = (playbackMode === "live" || !tl[currentHb]) ? (pair.current_positions || {}) : tl[currentHb];
+
+  let html = "";
+  if (playbackMode === "replay" && currentHb < maxHb) {
+    html += `<div style="background:rgba(254,202,87,0.12);border:1px solid rgba(254,202,87,0.45);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.68rem;color:#feca57;line-height:1.45;">
+      <strong>⚠️ HISTORICAL REPLAY (HB ${currentHb}):</strong> Vitals and pack contents below reflect the latest snapshot (HB ${maxHb}); per-heartbeat historical vitals are unrecorded in this export. Position and actions are canonical.
+    </div>`;
+  } else {
+    html += `<div style="background:rgba(46,213,115,0.12);border:1px solid rgba(46,213,115,0.45);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:0.68rem;color:#2ed573;line-height:1.45;">
+      <strong>🟢 LIVE TELEMETRY (HB ${maxHb}):</strong> Real-time simulation vitals, position, and inventory verified against canonical persistence.
+    </div>`;
+  }
+  for (const [ref, tileId] of Object.entries(pos)) {
+    const isAdam = ref.toLowerCase().includes("adam");
+    const name = isAdam ? "ADAM" : "EVE";
+    const v = vitalsAll[ref] || { hunger: 0, warmth: 80, vitality: 100, downed: false };
+    const inv = inventories[ref] || {};
+    const act = getAgentRealAction(selectedPair, ref, currentHb);
+    const voiceObj = getAgentInnerVoice(selectedPair, ref, v, act, inv);
+    const portraitSrc = isAdam ? "adam_portrait.jpg" : "eve_portrait.jpg";
+    const st = v.downed ? "COLLAPSED" : "ACTIVE";
+
+    const pills = Object.entries(inv).filter(([, c]) => c > 0).map(([k, c]) => `<span class="inv-pill">${k.replace(/_/g," ")} ×${c}</span>`);
+
+    html += `<div class="agent-card ${isAdam ? 'adam' : 'eve'} ${v.downed ? 'collapsed' : ''}">
+      <div class="agent-head">
+        <div class="agent-profile">
+          <img class="agent-portrait" src="${portraitSrc}" alt="${name}">
+          <div class="agent-titles">
+            <span class="agent-name">${name}</span>
+            <span class="agent-sub">${selectedPair === "east" ? "East Valley" : "West Dawn"}</span>
+          </div>
+        </div>
+        <span class="agent-state-badge ${v.downed ? 'collapsed' : 'active'}">${st}</span>
+      </div>
+
+      <div class="sector-row">
+        <span>SECTOR: ${esc(tileId)}</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn-track ${trackedAgentRef === ref ? 'active' : ''}" onclick="toggleTrackAgent('${ref}')">
+            ${trackedAgentRef === ref ? '🎥 TRACKING' : '🎥 TRACK'}
+          </button>
+          <span class="sector-cta" onclick="focusTile('${esc(tileId)}')">PULSE ↗</span>
+        </div>
+      </div>
+
+      <div class="telemetry-grid">
+        <div class="metric-row">
+          <div class="metric-meta"><span>HUNGER</span><span>${v.hunger.toFixed(0)}%</span></div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill hunger" style="width:${clamp(v.hunger, 0, 100)}%"></div></div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-meta"><span>VITAL</span><span>${v.vitality.toFixed(1)} HP</span></div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill vital" style="width:${clamp(v.vitality / 12 * 100, 0, 100)}%"></div></div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-meta"><span>WARMTH</span><span>${v.warmth.toFixed(0)}°C</span></div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill warmth" style="width:${clamp(v.warmth, 0, 100)}%"></div></div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-meta"><span>WETNESS</span><span>${(v.wetness || 0).toFixed(0)}%</span></div>
+          <div class="metric-bar-bg"><div class="metric-bar-fill wetness" style="width:${clamp(v.wetness || 0, 0, 100)}%"></div></div>
+        </div>
+      </div>
+
+      <div class="agent-inner-voice">
+        <div style="font-size:0.62rem;color:var(--text-tertiary);font-weight:700;letter-spacing:0.05em;margin-bottom:3px;">
+          ${esc(voiceObj.provenance)}
+        </div>
+        <span>${esc(voiceObj.text)}</span>
+      </div>
+
+      <div class="inventory-tray">
+        ${pills.join("") || '<span style="font-size:0.68rem;color:var(--text-tertiary);">Pack is empty</span>'}
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderChronicle() {
+  const el = document.getElementById("chronicle-container");
+  const pair = PAIRS[selectedPair] || {};
+  const events = (pair.chronicle || []).slice(-30).reverse();
+  el.innerHTML = events.map(e => `
+    <div class="chronicle-card">
+      <span class="chronicle-hb">HB${e.hb}</span>
+      <span class="chronicle-text"><strong class="chronicle-who">${(e.who||"").toUpperCase()}</strong> ${esc(e.text)}</span>
+    </div>
+  `).join("") || '<div style="color:var(--text-tertiary);text-align:center;padding:20px;">Chronicle is silent.</div>';
+}
+
+function renderComms() {
+  const el = document.getElementById("comms-container");
+  const pair = PAIRS[selectedPair] || {};
+  const asks = (pair.agent_asks || []).slice(-20).reverse();
+  el.innerHTML = asks.map(a => `
+    <div class="transmission-card">
+      <div class="tx-head">
+        <span class="tx-sender">${(a.agent||"?").toUpperCase()}</span>
+        <span style="color:var(--text-tertiary)">HB${a.heartbeat}</span>
+      </div>
+      <div class="tx-body">"${esc(a.question)}"</div>
+      ${a.answer ? `<div style="margin-top:6px;color:#feca57;font-size:0.7rem;"><strong>DIRECTIVE:</strong> ${esc(a.answer)}</div>` : ''}
+    </div>
+  `).join("") || '<div style="color:var(--text-tertiary);text-align:center;padding:20px;">No comms recorded.</div>';
+}
+
+function esc(s) {
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function focusTile(tid) {
+  const t = tiles.get(tid);
+  if (t && t.coordinates) animateTo(t.coordinates.x + 0.5, t.coordinates.y + 0.5, 18);
+}
+window.focusTile = focusTile;
+
+// Playback Transport Controls
+function togglePlay() {
+  isPlaying = !isPlaying;
+  if (isPlaying && currentHb >= maxHb) currentHb = minHb;
+  updateUI();
+}
+function step(delta) {
+  isPlaying = false;
+  playbackMode = "replay";
+  currentHb = clamp(currentHb + delta, minHb, maxHb);
+  recomputeScene();
+  triggerActionFX();
+  drawFrame(performance.now());
+}
+function seek(hb) {
+  isPlaying = false;
+  playbackMode = "replay";
+  currentHb = clamp(hb, minHb, maxHb);
+  recomputeScene();
+  triggerActionFX();
+  drawFrame(performance.now());
+}
+function goLive() {
+  isPlaying = false;
+  playbackMode = "live";
+  currentHb = maxHb;
+  recomputeScene();
+  drawFrame(performance.now());
+}
+
+document.getElementById("pb-play").onclick = togglePlay;
+document.getElementById("pb-start").onclick = () => seek(minHb);
+document.getElementById("pb-prev").onclick = () => step(-1);
+document.getElementById("pb-next").onclick = () => step(1);
+document.getElementById("pb-live").onclick = goLive;
+document.getElementById("scrubber").oninput = (e) => seek(Number(e.target.value));
+
+document.querySelectorAll("#speed-cluster .speed-opt").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll("#speed-cluster .speed-opt").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    playSpeed = Number(btn.dataset.spd || 2);
+  };
+});
+
+// Keyboard Shortcuts
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+  else if (e.code === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (e.code === "ArrowRight") { e.preventDefault(); step(1); }
+});
+
+// Navigation Bar
+document.getElementById("btn-east").onclick = () => {
+  selectedPair = "east";
+  document.getElementById("btn-east").classList.add("active");
+  document.getElementById("btn-west").classList.remove("active");
+  focusPair("east");
+};
+document.getElementById("btn-west").onclick = () => {
+  selectedPair = "west";
+  document.getElementById("btn-west").classList.add("active");
+  document.getElementById("btn-east").classList.remove("active");
+  focusPair("west");
+};
+document.getElementById("btn-fit").onclick = () => {
+  animateTo(gcx, gcy, clamp(Math.min(cssW / (GW * 1.15), cssH / (GH * 1.15)), 1.2, 24));
+};
+document.getElementById("btn-cinema").onclick = toggleCinematic;
+document.getElementById("btn-audio").onclick = toggleAudio;
+
+function focusPair(pn) {
+  const pair = PAIRS[pn];
+  if (!pair) return;
+  const hbs = timelineHbs[pn] || [];
+  if (hbs.length) {
+    minHb = hbs[0]; maxHb = hbs[hbs.length - 1];
+    if (playbackMode === "live") currentHb = maxHb;
+    else currentHb = clamp(currentHb, minHb, maxHb);
+  }
+  const pos = pair.current_positions || {};
+  let ax = 0, ay = 0, n = 0;
+  for (const tid of Object.values(pos)) {
+    const t = tiles.get(tid);
+    if (t && t.coordinates) { ax += t.coordinates.x; ay += t.coordinates.y; n++; }
+  }
+  if (n) animateTo(ax / n, ay / n, 28);
+  recomputeScene();
+}
+
+// Tabs
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    const target = document.getElementById(btn.dataset.tab);
+    if (target) target.classList.add("active");
+  };
+});
+
+// Canvas Drag & Zoom
+let dragging = false, lastMouse = { x: 0, y: 0 };
+canvas.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  dragging = true;
+  lastMouse = { x: e.clientX, y: e.clientY };
+  canvas.classList.add("dragging");
+});
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastMouse.x, dy = e.clientY - lastMouse.y;
+  lastMouse = { x: e.clientX, y: e.clientY };
+  view.cx -= dx / view.scale;
+  view.cy -= dy / view.scale;
+  drawFrame(performance.now());
+});
+window.addEventListener("mouseup", () => {
+  dragging = false;
+  canvas.classList.remove("dragging");
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const worldBefore = screenToWorld(sx, sy);
+  const factor = Math.exp(-e.deltaY * 0.0018);
+  view.scale = clamp(view.scale * factor, 1.2, 38);
+  const worldAfter = screenToWorld(sx, sy);
+  view.cx += worldBefore.x - worldAfter.x;
+  view.cy += worldBefore.y - worldAfter.y;
+  drawFrame(performance.now());
+}, { passive: false });
+
+// Mobile Touch Navigation & Pinch-to-Zoom
+let touchDragging = false, lastTouch = { x: 0, y: 0 }, lastPinchDist = 0;
+canvas.addEventListener("touchstart", e => {
+  if (e.touches.length === 1) {
+    touchDragging = true;
+    lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  } else if (e.touches.length === 2) {
+    touchDragging = false;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastPinchDist = Math.hypot(dx, dy);
+  }
+}, { passive: true });
+
+canvas.addEventListener("touchmove", e => {
+  if (e.touches.length === 1 && touchDragging) {
+    const dx = e.touches[0].clientX - lastTouch.x;
+    const dy = e.touches[0].clientY - lastTouch.y;
+    lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    view.cx -= dx / view.scale;
+    view.cy -= dy / view.scale;
+    drawFrame(performance.now());
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    if (lastPinchDist > 0 && dist > 0) {
+      const factor = dist / lastPinchDist;
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      const r = canvas.getBoundingClientRect();
+      const sx = midX - r.left, sy = midY - r.top;
+      const worldBefore = screenToWorld(sx, sy);
+      view.scale = clamp(view.scale * factor, 1.2, 38);
+      const worldAfter = screenToWorld(sx, sy);
+      view.cx += worldBefore.x - worldAfter.x;
+      view.cy += worldBefore.y - worldAfter.y;
+      drawFrame(performance.now());
+    }
+    lastPinchDist = dist;
+  }
+}, { passive: true });
+
+canvas.addEventListener("touchend", e => {
+  if (e.touches.length === 0) {
+    touchDragging = false;
+    lastPinchDist = 0;
+  } else if (e.touches.length === 1) {
+    touchDragging = true;
+    lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    lastPinchDist = 0;
+  }
+}, { passive: true });
+
+// Start App
+focusPair("west");
+ensureLayer();
+recomputeScene();
+drawFrame(0);
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
