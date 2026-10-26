@@ -163,6 +163,10 @@ def prune_scratch_evidence(
             ev_path.unlink(missing_ok=True)
             deleted_count += 1
             recovered_bytes += size
+            st_path = ev_path.parent / f"lockstep_{pair}_hb{hb}_status.json"
+            if st_path.is_file():
+                recovered_bytes += st_path.stat().st_size
+                st_path.unlink(missing_ok=True)
         except OSError as exc:
             if log_fn:
                 log_fn(f"[retention] warning: failed to unlink {ev_path.name}: {exc}")

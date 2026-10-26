@@ -53,13 +53,15 @@ def test_prune_keeps_newest_50_evidence_files(tmp_path: Path):
     assert stats.kept_count == 50
     assert stats.recovered_bytes > 0
 
-    # Oldest 25 evidence files (HB 100 to 124) must be pruned
+    # Oldest 25 evidence files (HB 100 to 124) must be pruned alongside status files
     for hb in range(100, 125):
         assert not (scratch_dir / f"lockstep_east_hb{hb}_evidence.json").exists()
+        assert not (scratch_dir / f"lockstep_east_hb{hb}_status.json").exists()
 
-    # Newest 50 evidence files (HB 125 to 174) must be preserved
+    # Newest 50 evidence files (HB 125 to 174) must be preserved alongside status files
     for hb in range(125, 175):
         assert (scratch_dir / f"lockstep_east_hb{hb}_evidence.json").exists()
+        assert (scratch_dir / f"lockstep_east_hb{hb}_status.json").exists()
 
 
 def test_prune_never_deletes_in_flight_heartbeat(tmp_path: Path):
