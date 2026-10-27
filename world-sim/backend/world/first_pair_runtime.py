@@ -69,6 +69,7 @@ from backend.world.first_pair_persistence import (
     load_operator_messages,
     load_physics_seen,
     load_questions,
+    modify_inventory_batch,
     save_agent_question_proposals,
     load_relationship_events,
     load_runtime_policy,
@@ -1575,6 +1576,170 @@ class FirstPairRuntime:
             "hunger_now": vitals["hunger"],
         }
 
+    def _execute_offer_food(self, agent_ref: str, action: dict,
+                            heartbeat_number: int) -> dict:
+        target_id = action.get("target_id", "")
+        resource_kind = action.get("resource_kind", "")
+        if not target_id or not resource_kind:
+            return {"status": "rejected", "reason": "Missing target or resource kind"}
+
+        if resource_kind not in fauna.ANIMAL_FOOD_TRUST:
+            return {"status": "rejected",
+                    "reason": f"Animals do not eat {resource_kind}"}
+
+        target = None
+        for entity in getattr(self._world_state, "fauna", []):
+            if entity.get("id") == target_id:
+                target = entity
+                break
+        if target is None:
+            return {"status": "rejected", "reason": "No such animal here"}
+
+        if target.get("kind") not in fauna.TAMEABLE_KINDS:
+            return {"status": "rejected", "reason": "This animal is not tamable"}
+
+        if target.get("tamed"):
+            return {"status": "rejected",
+                    "reason": "This animal is already tamed"}
+
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        pxy = self._tile_xy(position or "")
+        tile = target.get("tile")
+        if not isinstance(tile, list):
+            return {"status": "rejected", "reason": "Animal has no valid location"}
+        exy = (int(tile[0]), int(tile[1]))
+        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+            return {"status": "rejected", "reason": "The animal is not within reach"}
+
+        inventory = self._get_agent_inventory(agent_ref)
+        held = inventory.get(resource_kind, 0)
+        if held < 1:
+            return {"status": "rejected",
+                    "reason": f"You hold no {resource_kind}"}
+
+        kind = target.get("kind")
+        trust_before = int(target.get("trust", 0))
+        trust_after = fauna.trust_after(kind, resource_kind, trust_before)
+        tamed_after = trust_after >= (
+            fauna.COW_TRUST_THRESHOLD if kind == "cow" else fauna.HORSE_TRUST_THRESHOLD
+        )
+        event_id = fauna_interactions.new_event_id(
+            "offer_food", heartbeat_number, agent_ref, target_id
+        )
+
+        intent = {
+            "action": "offer_food",
+            "agent_ref": agent_ref,
+            "target_id": target_id,
+            "resource_kind": resource_kind,
+            "trust_before": trust_before,
+            "trust_after": trust_after,
+            "tamed_before": bool(target.get("tamed", False)),
+            "tamed_after": tamed_after,
+            "anchor_tile_after": list(pxy) if tamed_after else None,
+            "inventory_before": {resource_kind: held},
+            "inventory_after": {resource_kind: held - 1},
+        }
+
+        fauna_interactions.begin_animal_interaction(self._store, event_id, intent)
+        modify_inventory_batch(self._store, agent_ref, {resource_kind: -1})
+        fauna_interactions.mark_inventory_applied(self._store, event_id)
+
+        target["trust"] = trust_after
+        if tamed_after:
+            target["tamed"] = True
+            target["anchor_tile"] = list(pxy)
+
+        self._world_state.fauna = [
+            target if entity.get("id") == target_id else entity
+            for entity in getattr(self._world_state, "fauna", [])
+        ]
+        save_world_state(self._store, self._world_state)
+        fauna_interactions.mark_fauna_applied(self._store, event_id)
+
+        return {
+            "status": "success",
+            "target_id": target_id,
+            "target_kind": kind,
+            "resource_kind": resource_kind,
+            "trust": trust_after,
+            "tamed": tamed_after,
+            "detail": (
+                f"{kind.capitalize()} accepts the {resource_kind}."
+                if not tamed_after
+                else f"{kind.capitalize()} is tamed after accepting the {resource_kind}."
+            ),
+        }
+
+    def _execute_milk_animal(self, agent_ref: str, action: dict,
+                              heartbeat_number: int) -> dict:
+        target_id = action.get("target_id", "")
+        if not target_id:
+            return {"status": "rejected", "reason": "Missing target_id"}
+
+        target = None
+        for entity in getattr(self._world_state, "fauna", []):
+            if entity.get("id") == target_id:
+                target = entity
+                break
+        if target is None:
+            return {"status": "rejected", "reason": "No such animal here"}
+
+        if target.get("kind") != "cow":
+            return {"status": "rejected", "reason": "Only cows can be milked"}
+
+        if not target.get("tamed"):
+            return {"status": "rejected", "reason": "This cow is not tamed"}
+
+        if not target.get("milk_ready"):
+            return {"status": "rejected", "reason": "Milk is not ready"}
+
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        pxy = self._tile_xy(position or "")
+        tile = target.get("tile")
+        if not isinstance(tile, list):
+            return {"status": "rejected", "reason": "Cow has no valid location"}
+        exy = (int(tile[0]), int(tile[1]))
+        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+            return {"status": "rejected", "reason": "The cow is not within reach"}
+
+        inventory = self._get_agent_inventory(agent_ref)
+        event_id = fauna_interactions.new_event_id(
+            "milk_animal", heartbeat_number, agent_ref, target_id
+        )
+        intent = {
+            "action": "milk_animal",
+            "agent_ref": agent_ref,
+            "target_id": target_id,
+            "milk_ready_before": True,
+            "milk_ready_after": False,
+            "milk_ready_at_hb_after": heartbeat_number,
+            "inventory_before": {"milk": inventory.get("milk", 0)},
+            "inventory_after": {"milk": inventory.get("milk", 0) + 1},
+        }
+
+        fauna_interactions.begin_animal_interaction(self._store, event_id, intent)
+        modify_inventory_batch(self._store, agent_ref, {"milk": 1})
+        fauna_interactions.mark_inventory_applied(self._store, event_id)
+
+        target["milk_ready"] = False
+        target["milk_ready_at_hb"] = heartbeat_number
+
+        self._world_state.fauna = [
+            target if entity.get("id") == target_id else entity
+            for entity in getattr(self._world_state, "fauna", [])
+        ]
+        save_world_state(self._store, self._world_state)
+        fauna_interactions.mark_fauna_applied(self._store, event_id)
+
+        return {
+            "status": "success",
+            "target_id": target_id,
+            "target_kind": "cow",
+            "milk": 1,
+            "detail": "Milked the ready cow.",
+        }
+
     def _execute_attack(self, agent_ref: str, action: dict) -> dict:
         """Strike an adjacent animal. Tools decide: iron kills a deer
         outright; bare hands take two strikes. A killed deer drops meat
@@ -1675,6 +1840,10 @@ class FirstPairRuntime:
 
         if action_type == "eat":
             return self._eat_satisfaction(agent_ref, action.get("resource_kind"))
+        if action_type == "offer_food":
+            return self._execute_offer_food(agent_ref, action, heartbeat_number)
+        if action_type == "milk_animal":
+            return self._execute_milk_animal(agent_ref, action, heartbeat_number)
         if action_type == "attack":
             return self._execute_attack(agent_ref, action)
         if action_type == "move":

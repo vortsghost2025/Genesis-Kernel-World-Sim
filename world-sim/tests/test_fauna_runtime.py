@@ -123,3 +123,96 @@ def test_fauna_tick_skips_snake_bites_when_inactive(tmp_path: Path, monkeypatch)
 
     runtime.fauna_tick(heartbeat_number=100)
     assert runtime._world_state.vitals[agent]["vitality"] == 100.0
+
+
+def _action_runtime(tmp_path: Path):
+    runtime = _runtime(tmp_path)
+    agent = "east_adam"
+    runtime._world_state.tile_occupancy[agent] = "cont_a_gen_0_0"
+    runtime._world_state.fauna = [{
+        "kind": "cow",
+        "id": "cow-1",
+        "tile": [0, 1],
+        "hp": 4,
+        "trust": 0,
+        "tamed": False,
+        "milk_ready": False,
+        "milk_ready_at_hb": 0,
+        "anchor_tile": None,
+    }]
+    return runtime
+
+
+def test_offer_food_tames_cow_after_trusted_offerings(tmp_path: Path):
+    from backend.world.first_pair_persistence import add_to_inventory
+    runtime = _action_runtime(tmp_path)
+
+    for kind, trust in (
+        ("wild_berries", 15),
+        ("edible_roots", 18),
+        ("wild_apples", 20),
+        ("fiber_plants", 7),
+    ):
+        add_to_inventory(runtime._store, "east_adam", kind, 1)
+        outcome = runtime._execute_action("east_adam", {
+            "action_type": "offer_food",
+            "target_id": "cow-1",
+            "resource_kind": kind,
+            "reason": "offer food",
+        }, 100)
+        assert outcome["status"] == "success"
+        assert outcome["target_id"] == "cow-1"
+
+    assert runtime._world_state.fauna[0]["tamed"] is True
+    assert runtime._world_state.fauna[0]["trust"] == 60
+    assert runtime._world_state.fauna[0]["anchor_tile"] is not None
+
+
+def test_offer_food_rejects_non_diet_before_mutation(tmp_path: Path):
+    from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+    runtime = _action_runtime(tmp_path)
+    add_to_inventory(runtime._store, "east_adam", "stone", 1)
+
+    outcome = runtime._execute_action("east_adam", {
+        "action_type": "offer_food",
+        "target_id": "cow-1",
+        "resource_kind": "stone",
+        "reason": "offer food",
+    }, 100)
+
+    assert outcome["status"] == "rejected"
+    assert "Animals do not eat stone" in outcome["reason"]
+    assert load_inventory(runtime._store)["east_adam"]["stone"] == 1
+    assert runtime._world_state.fauna[0]["trust"] == 0
+
+
+def test_milk_animal_only_for_ready_tamed_cow(tmp_path: Path):
+    from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+    runtime = _action_runtime(tmp_path)
+    runtime._world_state.fauna[0].update({
+        "trust": 60,
+        "tamed": True,
+        "milk_ready": False,
+        "milk_ready_at_hb": 100,
+        "anchor_tile": [0, 1],
+    })
+
+    rejected = runtime._execute_action("east_adam", {
+        "action_type": "milk_animal",
+        "target_id": "cow-1",
+        "reason": "milk",
+    }, 120)
+    assert rejected["status"] == "rejected"
+    assert "not ready" in rejected["reason"].lower()
+
+    runtime._world_state.fauna[0]["milk_ready"] = True
+    add_to_inventory(runtime._store, "east_adam", "wild_berries", 10)
+    success = runtime._execute_action("east_adam", {
+        "action_type": "milk_animal",
+        "target_id": "cow-1",
+        "reason": "milk",
+    }, 121)
+    assert success["status"] == "success"
+    assert load_inventory(runtime._store)["east_adam"]["milk"] == 1
+    assert runtime._world_state.fauna[0]["milk_ready"] is False
+    assert runtime._world_state.fauna[0]["milk_ready_at_hb"] == 121
