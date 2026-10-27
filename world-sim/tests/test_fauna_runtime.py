@@ -5,9 +5,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 WORLD_SIM = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORLD_SIM))
 
+from backend.world import fauna
 from backend.world.first_pair_persistence import (
     FirstPairPersistenceStore,
     WorldStateRecord,
@@ -85,6 +88,38 @@ def test_fauna_tick_advances_snake_bite(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(survival, "weather_at", lambda pid, hb: ("clear", 5000))
     monkeypatch.setattr(survival, "is_night", lambda hb: False)
     monkeypatch.setattr(survival, "effective_temperature", lambda hb, w: 62.0)
+    monkeypatch.setattr(
+        fauna,
+        "snake_bite_events",
+        lambda **kwargs: [("east_adam", "snake-1", fauna.SNAKE_BITE_DAMAGE)],
+    )
 
     runtime.fauna_tick(heartbeat_number=100)
     assert runtime._world_state.vitals[agent]["vitality"] == 95.0
+
+
+def test_fauna_tick_skips_snake_bites_when_inactive(tmp_path: Path, monkeypatch):
+    from backend.world import survival
+
+    runtime = _runtime(tmp_path)
+    agent = "east_adam"
+    runtime._world_state.tile_occupancy[agent] = "cont_a_gen_0_0"
+    runtime._world_state.vitals[agent] = {
+        "hunger": 0.0, "warmth": 100.0, "vitality": 100.0,
+        "wetness": 0.0, "downed": False,
+    }
+    runtime._world_state.fauna = [
+        {"kind": "snake", "id": "snake-1", "tile": [1, 0], "hp": 2},
+    ]
+
+    monkeypatch.setattr(survival, "weather_at", lambda pid, hb: ("rain", 5000))
+    monkeypatch.setattr(survival, "is_night", lambda hb: False)
+    monkeypatch.setattr(survival, "effective_temperature", lambda hb, w: 62.0)
+    monkeypatch.setattr(
+        fauna,
+        "snake_bite_events",
+        lambda **kwargs: pytest.fail("snake bites must be gated by snake_active"),
+    )
+
+    runtime.fauna_tick(heartbeat_number=100)
+    assert runtime._world_state.vitals[agent]["vitality"] == 100.0
