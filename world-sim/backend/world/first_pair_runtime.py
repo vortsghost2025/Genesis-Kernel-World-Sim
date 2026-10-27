@@ -93,6 +93,8 @@ from backend.world.world_event_sanitizer import sanitize_public_text
 from backend.world import survival
 from backend.world import wildlife
 from backend.world import insects
+from backend.world import fauna
+from backend.world import fauna_interactions
 from backend.world.world_pressure import (
     GATHER_YIELD,
     PHYSICS_VERSION,
@@ -251,6 +253,8 @@ class FirstPairRuntime:
 
         self._runtime_policy = load_runtime_policy(self._store)
         self._capability_grant = load_capability_grant(self._store)
+
+        fauna_interactions.recover_fauna_interactions(self._store, self._world_state)
 
         is_fresh = (
             world_state.tick == 0
@@ -666,6 +670,7 @@ class FirstPairRuntime:
             weather_name = "blizzard"
         observation["wildlife"] = self._wildlife_visible(
             agent_ref, heartbeat_number)
+        observation["fauna"] = self._fauna_visible(agent_ref)
         observation["environment"] = {
             "time_of_day": "night" if survival.is_night(heartbeat_number) else "day",
             "season": survival.season(heartbeat_number),
@@ -1368,6 +1373,132 @@ class FirstPairRuntime:
                   and survival.is_night(heartbeat_number)):
                 howling = True
         return {"nearby": visible, "howling": howling}
+
+    def _fauna_visible(self, agent_ref: str) -> dict:
+        """What this agent perceives of domesticatable fauna and snakes."""
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        pos = self._tile_xy(position or "")
+        visible = []
+        if pos is not None:
+            for entity in getattr(self._world_state, "fauna", []) or []:
+                tile = entity.get("tile")
+                if isinstance(tile, list):
+                    tile = tuple(tile)
+                if tile is None:
+                    continue
+                dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
+                if dist > 6:
+                    continue
+
+                item = {
+                    "kind": entity.get("kind"),
+                    "id": entity.get("id"),
+                    "distance": dist,
+                }
+                if entity.get("kind") in ("cow", "horse"):
+                    item["trust"] = int(entity.get("trust", 0))
+                    item["tamed"] = bool(entity.get("tamed", False))
+                if entity.get("kind") == "cow":
+                    item["milk_ready"] = bool(entity.get("milk_ready", False))
+                visible.append(item)
+        return {"nearby": visible}
+
+    def fauna_tick(self, heartbeat_number: int) -> None:
+        """One heartbeat of Phase 10JN fauna ecology."""
+        occupancy = self._world_state.tile_occupancy
+        agent_positions = {}
+        agent_xys = []
+        for ref in (self._adam_ref, self._eve_ref):
+            tile = occupancy.get(ref, "")
+            xy = self._tile_xy(tile)
+            if xy is not None:
+                agent_xys.append(xy)
+                agent_positions[ref] = xy
+
+        if not hasattr(self._world_state, "fauna") or self._world_state.fauna is None:
+            self._world_state.fauna = []
+
+        weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+        temperature = survival.effective_temperature(
+            heartbeat_number, weather
+        )
+        night = survival.is_night(heartbeat_number)
+
+        fire_xys = []
+        sheltered_tiles = set()
+        fire_kinds = ("fire", "forge", "furnace", "brazier", "hearth", "campfire")
+        for record in (self._world_state.public_objects or {}).values():
+            if not isinstance(record, dict):
+                continue
+            tile_id = record.get("tile_id", "")
+            if self._tile_continent(tile_id) != self._pair_continent:
+                continue
+            otype = str(record.get("object_type", "")).lower()
+            xy = self._tile_xy(tile_id)
+            if xy is None:
+                continue
+            fire_is_functional = (
+                any(kind in otype for kind in fire_kinds)
+                and self._is_functional_fire(record)
+            )
+            if fire_is_functional and (
+                weather not in ("rain", "storm", "blizzard")
+                or self._in_shelter(tile_id)
+            ):
+                fire_xys.append(xy)
+            if any(kind in otype for kind in ("shelter", "roof", "wall", "hut", "cabin", "lean")):
+                sheltered_tiles.add(xy)
+
+        import random as _random
+        import zlib as _zlib
+
+        rng = _random.Random(
+            heartbeat_number * 31 +
+            (_zlib.crc32(self._pair_id.encode("utf-8")) % 100000)
+        )
+
+        entities = fauna.spawn_fauna(
+            entities=self._world_state.fauna,
+            heartbeat_number=heartbeat_number,
+            agent_xys=agent_xys,
+            fire_xys=fire_xys,
+            sheltered_tiles=sheltered_tiles,
+            weather=weather,
+            temperature=temperature,
+            is_night=night,
+            rng=rng,
+        )
+
+        entities = fauna.move_fauna(
+            entities=entities,
+            agent_xys=agent_xys,
+            fire_xys=fire_xys,
+            sheltered_tiles=sheltered_tiles,
+            weather=weather,
+            temperature=temperature,
+            is_night=night,
+            rng=rng,
+        )
+
+        entities = fauna.advance_cow_milk(entities, heartbeat_number)
+
+        if fauna.snake_active(weather, temperature, night):
+            for agent_ref, entity_id, damage in fauna.snake_bite_events(
+                entities=entities,
+                agent_positions=agent_positions,
+                fire_xys=fire_xys,
+                sheltered_tiles=sheltered_tiles,
+            ):
+                vitals = self._vitals_for(agent_ref)
+                vitality = round(max(
+                    0.0,
+                    vitals.get("vitality", 100.0) - damage
+                ), 2)
+                vitals["vitality"] = vitality
+                if vitality <= 0.0:
+                    vitals["downed"] = True
+
+        self._world_state.fauna = entities
 
     def apply_survival_to_all(self, heartbeat_number: int) -> None:
         """One heartbeat of embodiment for every agent. Called once per
@@ -2474,6 +2605,7 @@ class FirstPairRuntime:
             # epistemic.7: the wild. Spawn, move, bite - the entities
             # live in world_state and persist across restarts.
             self.wildlife_tick(hb)
+            self.fauna_tick(hb)
 
             hb_observations: dict = {}
             for agent_ref in (self._adam_ref, self._eve_ref):
