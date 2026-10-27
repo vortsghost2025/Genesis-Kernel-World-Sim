@@ -2467,6 +2467,11 @@ def save_world_state(store: FirstPairPersistenceStore, state: WorldStateRecord) 
     store._append_provenance("world_state_update", {"objects": len(state.public_objects)})
 
 
+def load_world_state(store: FirstPairPersistenceStore) -> WorldStateRecord:
+    """Public wrapper for backward-compatible world-state loading."""
+    return _load_world_state(store)
+
+
 def load_memory(store: FirstPairPersistenceStore) -> dict:
     data = store._read_json(store._path(_MEMORY_FILE))
     if data and data.get("type") == "memory_record":
