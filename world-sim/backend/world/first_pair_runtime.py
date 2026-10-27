@@ -1582,6 +1582,8 @@ class FirstPairRuntime:
         resource_kind = action.get("resource_kind", "")
         if not target_id or not resource_kind:
             return {"status": "rejected", "reason": "Missing target or resource kind"}
+        if not isinstance(resource_kind, str) or not resource_kind.strip():
+            return {"status": "rejected", "reason": "Missing resource kind"}
 
         if resource_kind not in fauna.ANIMAL_FOOD_TRUST:
             return {"status": "rejected",

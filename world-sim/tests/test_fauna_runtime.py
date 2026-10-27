@@ -186,6 +186,23 @@ def test_offer_food_rejects_non_diet_before_mutation(tmp_path: Path):
     assert runtime._world_state.fauna[0]["trust"] == 0
 
 
+def test_offer_food_rejects_unhashable_resource_without_crash(tmp_path: Path):
+    from backend.world.first_pair_persistence import load_inventory
+    runtime = _action_runtime(tmp_path)
+
+    outcome = runtime._execute_action("east_adam", {
+        "action_type": "offer_food",
+        "target_id": "cow-1",
+        "resource_kind": {"bad": "dict"},
+        "reason": "offer food",
+    }, 100)
+
+    assert outcome["status"] == "rejected"
+    assert "resource kind" in outcome["reason"].lower()
+    assert runtime._world_state.fauna[0]["trust"] == 0
+    assert not load_inventory(runtime._store).get("east_adam")
+
+
 def test_milk_animal_only_for_ready_tamed_cow(tmp_path: Path):
     from backend.world.first_pair_persistence import add_to_inventory, load_inventory
     runtime = _action_runtime(tmp_path)
