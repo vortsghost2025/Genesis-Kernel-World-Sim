@@ -3,10 +3,19 @@
 Animal behavior is separate from wildlife hazards. This module is pure:
 (entities, environment, rng) -> entities. Runtime state is applied by
 FirstPairRuntime.
+
+Caller contracts: spawn_fauna, move_fauna, and advance_cow_milk all
+return new lists rather than mutating the input, so callers must
+reassign the result of every call:
+
+    entities = fauna.spawn_fauna(entities, heartbeat_number, ...)
+    entities = fauna.move_fauna(entities, ...)
+    entities = fauna.advance_cow_milk(entities, heartbeat_number)
 """
 
 from __future__ import annotations
 
+import copy
 import random
 
 from backend.world import wildlife
@@ -125,6 +134,16 @@ def find_fauna(entities: list[dict], target_id: str) -> dict | None:
 
 
 def trust_after(kind: str, resource_kind: str, current_trust: int) -> int:
+    """Trust gained by feeding a tameable animal, clamped at its threshold.
+
+    Fails closed: an unknown animal kind is rejected before
+    ``ANIMAL_FOOD_TRUST`` is indexed, so only TAMEABLE_KINDS ever gain
+    trust. Cow and horse behavior is unchanged.
+    """
+    if kind not in TAMEABLE_KINDS:
+        raise ValueError(f"fauna:not_tameable:{kind}")
+    if resource_kind not in ANIMAL_FOOD_TRUST:
+        raise ValueError(f"fauna:not_food:{resource_kind}")
     threshold = COW_TRUST_THRESHOLD if kind == "cow" else HORSE_TRUST_THRESHOLD
     return min(threshold, int(current_trust) + ANIMAL_FOOD_TRUST[resource_kind])
 
@@ -317,10 +336,14 @@ def advance_cow_milk(entities: list[dict], heartbeat_number: int) -> list[dict]:
     holding new entity dicts is returned, so callers must reassign:
 
         entities = fauna.advance_cow_milk(entities, heartbeat_number)
+
+    Returned entities are independent of the input, including their nested
+    mutable values (notably ``anchor_tile``), so mutating a result cannot
+    reach back into the caller's entities.
     """
     updated: list[dict] = []
     for entity in entities:
-        candidate = dict(entity)
+        candidate = copy.deepcopy(entity)
         if (
             candidate.get("kind") == "cow"
             and candidate.get("tamed")
@@ -335,14 +358,34 @@ def advance_cow_milk(entities: list[dict], heartbeat_number: int) -> list[dict]:
     return updated
 
 
+def _snake_id(entity: dict) -> str | None:
+    """Return a usable snake id, or None when the id is missing/malformed."""
+    entity_id = entity.get("id")
+    if isinstance(entity_id, str) and entity_id:
+        return entity_id
+    return None
+
+
 def snake_bite_events(entities: list[dict],
                       agent_positions: dict[str, tuple[int, int]],
                       fire_xys: list[tuple[int, int]],
                       sheltered_tiles: set[tuple[int, int]]) -> list[tuple[str, str, float]]:
-    """Return adjacent snake bite events. Bites never cross shelter or firelight."""
+    """Return adjacent snake bite events. Bites never cross shelter or firelight.
+
+    This is a pure function over the entities it is handed; it does NOT
+    check ``snake_active``. The runtime must gate every call with
+    ``fauna.snake_active(weather, temperature, is_night)`` so sleeping
+    (night, wet, or cold) snakes never produce bite events.
+
+    Entities with a missing or malformed id are skipped rather than
+    raising, so one bad record cannot break the whole heartbeat.
+    """
     events: list[tuple[str, str, float]] = []
     for entity in entities:
         if entity.get("kind") != "snake":
+            continue
+        snake_id = _snake_id(entity)
+        if snake_id is None:
             continue
         snake_tile = _entity_xy(entity)
         if snake_tile is None:
@@ -354,12 +397,19 @@ def snake_bite_events(entities: list[dict],
             if any(_dist(tile, fxy) <= SNAKE_FIRE_SAFETY_RADIUS for fxy in fire_xys):
                 continue
             if _dist(snake_tile, tile) <= 1:
-                events.append((agent_ref, entity["id"], SNAKE_BITE_DAMAGE))
+                events.append((agent_ref, snake_id, SNAKE_BITE_DAMAGE))
     return events
 
 
 def strike_snake(entity: dict, inventory: dict) -> tuple[dict, float, bool, int]:
-    """Strike a fauna snake. Reuses the existing wildlife tool balance."""
+    """Strike a fauna snake. Reuses the existing wildlife tool balance.
+
+    Raises ``ValueError("fauna:not_a_snake")`` before any damage is dealt
+    when the entity is not a snake, so cows and horses can never be hit
+    by a snake-strike action.
+    """
+    if entity.get("kind") != "snake":
+        raise ValueError("fauna:not_a_snake")
     multiplier = wildlife.best_tool_multiplier(inventory)
     damage = wildlife.UNARMED_DAMAGE * multiplier
     hp = max(0, entity.get("hp", SNAKE_HP) - damage)

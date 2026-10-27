@@ -9,7 +9,10 @@ from pathlib import Path
 WORLD_SIM = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORLD_SIM))
 
+import pytest
+
 from backend.world import fauna
+from backend.world import wildlife
 
 
 def _rng(seed: int = 7) -> random.Random:
@@ -27,9 +30,9 @@ def test_snake_active_requires_day_warmth_and_dry_sky():
 
 def test_spawn_fauna_never_spawns_adjacent():
     agents = [(0, 0)]
-    fishes: list[dict] = []
+    existing_fauna: list[dict] = []
     entities = fauna.spawn_fauna(
-        entities=fishes,
+        entities=existing_fauna,
         heartbeat_number=100,
         agent_xys=agents,
         fire_xys=[(0, 3)],
@@ -39,10 +42,94 @@ def test_spawn_fauna_never_spawns_adjacent():
         is_night=False,
         rng=_rng(),
     )
+    assert entities, "spawn did not occur"
     for entity in entities:
         tile = entity["tile"]
         distance = max(abs(tile[0]), abs(tile[1]))
         assert distance >= fauna.FAUNA_MIN_SPAWN_DISTANCE
+
+
+def _legal_candidate_tiles(agent_xys, fire_xys) -> list[tuple[int, int]]:
+    """Step-aligned spawn candidates that pass distance and fire checks."""
+    center_x, center_y = agent_xys[0]
+    allowed = []
+    for dx in range(
+        -fauna.FAUNA_MAX_SPAWN_DISTANCE,
+        fauna.FAUNA_MAX_SPAWN_DISTANCE + 1,
+        fauna.FAUNA_CANDIDATE_STEP,
+    ):
+        for dy in range(
+            -fauna.FAUNA_MAX_SPAWN_DISTANCE,
+            fauna.FAUNA_MAX_SPAWN_DISTANCE + 1,
+            fauna.FAUNA_CANDIDATE_STEP,
+        ):
+            tile = (center_x + dx, center_y + dy)
+            if any(
+                max(abs(tile[0] - ax), abs(tile[1] - ay))
+                < fauna.FAUNA_MIN_SPAWN_DISTANCE
+                for ax, ay in agent_xys
+            ):
+                continue
+            if any(
+                max(abs(tile[0] - fx), abs(tile[1] - fy))
+                <= wildlife.FIRE_SAFETY_RADIUS
+                for fx, fy in fire_xys
+            ):
+                continue
+            allowed.append(tile)
+    return allowed
+
+
+def _spawn_over_heartbeats(count: int, fire_xys, sheltered_tiles) -> list[dict]:
+    agents = [(0, 0)]
+    entities: list[dict] = []
+    for hb in range(100, 100 + count):
+        entities = fauna.spawn_fauna(
+            entities,
+            hb,
+            agents,
+            fire_xys,
+            sheltered_tiles,
+            "clear",
+            62.0,
+            False,
+            _rng(hb),
+        )
+    return entities
+
+
+def test_spawn_fauna_never_spawns_on_sheltered_tile():
+    fire_xys = [(0, 3)]
+    # Shelter only otherwise-legal candidates, so shelter is the single
+    # remaining reason a tile can be rejected.
+    sheltered_tiles = set(_legal_candidate_tiles([(0, 0)], fire_xys)[::5])
+    assert sheltered_tiles, "no legal candidates to shelter"
+
+    entities = _spawn_over_heartbeats(200, fire_xys, sheltered_tiles)
+    assert entities, "spawn did not occur"
+
+    for entity in entities:
+        assert tuple(entity["tile"]) not in sheltered_tiles
+
+
+def test_spawn_fauna_never_spawns_inside_fire_safety_radius():
+    # The fire sits on otherwise-legal candidate tiles, so only the fire
+    # safety radius can exclude them.
+    fire_xys = [(4, 4), (6, -4)]
+    assert any(
+        max(abs(tile[0] - 4), abs(tile[1] - 4))
+        <= wildlife.FIRE_SAFETY_RADIUS
+        for tile in _legal_candidate_tiles([(0, 0)], [])
+    ), "fire is not over a legal candidate tile"
+
+    entities = _spawn_over_heartbeats(200, fire_xys, set())
+    assert entities, "spawn did not occur"
+
+    for entity in entities:
+        tile = tuple(entity["tile"])
+        for fxy in fire_xys:
+            distance = max(abs(tile[0] - fxy[0]), abs(tile[1] - fxy[1]))
+            assert distance > wildlife.FIRE_SAFETY_RADIUS
 
 
 def test_spawn_fauna_respects_max_counts():
@@ -83,6 +170,19 @@ def test_spawn_fauna_is_deterministic():
 def test_trust_after_clamps_at_threshold():
     assert fauna.trust_after("cow", "wild_apples", 50) == 60
     assert fauna.trust_after("horse", "fiber_plants", 69) == 70
+
+
+def test_trust_after_rejects_unknown_animal_kinds():
+    assert set(fauna.TAMEABLE_KINDS) == {"cow", "horse"}
+    for kind in ("snake", "deer", "wolf", "flint"):
+        with pytest.raises(ValueError, match="fauna:not_tameable"):
+            fauna.trust_after(kind, "wild_apples", 10)
+
+
+def test_trust_after_rejects_unknown_foods():
+    for resource in ("stone", "flint", "meat"):
+        with pytest.raises(ValueError, match="fauna:not_food"):
+            fauna.trust_after("cow", resource, 10)
 
 
 def _tamed_cow(**overrides) -> dict:
@@ -131,7 +231,18 @@ def test_advance_cow_milk_is_pure_and_returns_new_list():
     assert result[0] is not original[0]
 
 
-def test_advance_cow_milk_ignores_wild_horses_and_ready_cows():
+def test_advance_cow_milk_does_not_share_nested_values():
+    original = [_tamed_cow(anchor_tile=[3, 4])]
+    result = fauna.advance_cow_milk(original, heartbeat_number=100)
+
+    assert result[0]["anchor_tile"] == [3, 4]
+    assert result[0]["anchor_tile"] is not original[0]["anchor_tile"]
+
+    result[0]["anchor_tile"].append(99)
+    assert original[0]["anchor_tile"] == [3, 4]
+
+
+def test_advance_cow_milk_ignores_untamed_cows_ready_cows_and_snakes():
     wild_cow = _tamed_cow(id="cow-wild", tamed=False)
     ready_cow = _tamed_cow(id="cow-ready", milk_ready=True, milk_ready_at_hb=50)
     snake = {"kind": "snake", "id": "snake-1", "tile": [3, 3], "hp": 2}
@@ -180,6 +291,7 @@ def test_cows_and_horses_spawn_in_daytime_clear_weather():
             _rng(hb),
         )
     spawned = fauna.count_kind(entities, "cow") + fauna.count_kind(entities, "horse")
+    assert entities, "spawn did not occur"
     assert spawned >= 1
 
 
@@ -236,6 +348,45 @@ def test_untamed_horse_does_not_flee_when_agent_is_far():
     )
     tile = moved[0]["tile"]
     assert max(abs(tile[0]), abs(tile[1])) <= 1
+
+
+def test_untamed_horse_with_trust_does_not_flee_from_nearby_agent():
+    horse = {
+        "kind": "horse",
+        "id": "horse-1",
+        "tile": [0, 0],
+        "hp": 5,
+        "trust": 1,
+        "tamed": False,
+        "anchor_tile": None,
+    }
+    agent_xys = [(1, 0)]
+    assert max(abs(0 - 1), abs(0 - 0)) <= fauna.HORSE_FLEE_RADIUS
+
+    # A fleeing horse always takes the maximum-distance neighbor (distance 2
+    # here). With trust the flee branch is skipped entirely, so the same
+    # setup drifts to a random neighbor and sometimes stays in contact range.
+    distances = []
+    for hb in range(100, 160):
+        moved = fauna.move_fauna(
+            [dict(horse)],
+            agent_xys=agent_xys,
+            fire_xys=[],
+            sheltered_tiles=set(),
+            weather="clear",
+            temperature=62.0,
+            is_night=False,
+            rng=_rng(hb),
+        )
+        tile = moved[0]["tile"]
+        assert max(abs(tile[0]), abs(tile[1])) <= 1, "moved more than one step"
+        distances.append(max(abs(tile[0] - 1), abs(tile[1] - 0)))
+
+    assert distances, "no horse movement sampled"
+    assert all(distance in (0, 1, 2) for distance in distances)
+    assert any(distance <= fauna.HORSE_FLEE_RADIUS for distance in distances), (
+        "trusted horse always fled instead of drifting"
+    )
 
 
 def test_snake_movement_avoids_shelter_and_firelight():
@@ -343,6 +494,42 @@ def test_snake_bite_events_ignore_fire_and_shelter():
     ) == []
 
 
+def test_snake_bite_events_skip_entities_without_a_valid_id():
+    malformed = [
+        {"kind": "snake", "tile": [1, 0]},
+        {"kind": "snake", "id": None, "tile": [1, 0]},
+        {"kind": "snake", "id": "", "tile": [1, 0]},
+        {"kind": "snake", "id": 17, "tile": [1, 0]},
+        {"kind": "snake", "id": "snake-ok", "tile": "nowhere"},
+    ]
+    bites = fauna.snake_bite_events(
+        malformed,
+        {"east_adam": (0, 0)},
+        fire_xys=[],
+        sheltered_tiles=set(),
+    )
+    assert bites == []
+
+
+def test_snake_bite_events_does_not_check_snake_active():
+    cold_night = fauna.snake_active("clear", 61.0, is_night=True)
+    assert cold_night is False
+
+    entities = [{
+        "kind": "snake",
+        "id": "snake-1",
+        "tile": [1, 0],
+        "hp": fauna.SNAKE_HP,
+    }]
+    bites = fauna.snake_bite_events(
+        entities=entities,
+        agent_positions={"east_adam": (0, 0)},
+        fire_xys=[],
+        sheltered_tiles=set(),
+    )
+    assert bites == [("east_adam", "snake-1", fauna.SNAKE_BITE_DAMAGE)]
+
+
 def test_tool_knife_kills_snake_in_one_strike():
     snake = {"kind": "snake", "id": "snake-1", "tile": [1, 0], "hp": 2}
     updated, damage, killed, meat = fauna.strike_snake(snake, {"flint_knife": 1})
@@ -350,6 +537,27 @@ def test_tool_knife_kills_snake_in_one_strike():
     assert updated["hp"] == 0.0
     assert killed is True
     assert meat == 1
+
+
+def test_raw_flint_kills_fresh_snake_in_one_strike():
+    assert wildlife.TOOL_DAMAGE_BONUS["flint"] == 2.0
+    snake = {"kind": "snake", "id": "snake-1", "tile": [1, 0], "hp": fauna.SNAKE_HP}
+    updated, damage, killed, meat = fauna.strike_snake(snake, {"flint": 1})
+    assert damage == 2.0
+    assert updated["hp"] == 0.0
+    assert killed is True
+    assert meat == fauna.SNAKE_MEAT_DROP
+
+
+def test_strike_snake_rejects_non_snake_entities():
+    for entity in (
+        {"kind": "cow", "id": "cow-1", "tile": [0, 1], "hp": 4},
+        {"kind": "horse", "id": "horse-1", "tile": [0, 1], "hp": 5},
+        {"kind": "deer", "id": "deer-1", "tile": [0, 1], "hp": 2},
+    ):
+        with pytest.raises(ValueError, match="fauna:not_a_snake"):
+            fauna.strike_snake(entity, {"flint_knife": 1})
+        assert entity["hp"] in (4, 5, 2)
 
 
 def test_unarmed_requires_two_snake_strikes():
