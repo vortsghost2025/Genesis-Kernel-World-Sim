@@ -81,11 +81,19 @@ def _legal_candidate_tiles(agent_xys, fire_xys) -> list[tuple[int, int]]:
 
 
 def _spawn_over_heartbeats(count: int, fire_xys, sheltered_tiles) -> list[dict]:
+    """Sample many independent spawns by re-spawning from an empty world.
+
+    Accumulating entities across heartbeats hits ``FAUNA_MAX_ALIVE`` after
+    the first few heartbeats, so only a handful of tiles would ever be
+    sampled and a blocked tile region could be missed by luck. Spawning
+    from a fresh empty entity list each heartbeat keeps every heartbeat
+    draw independent and yields many spawn tiles.
+    """
     agents = [(0, 0)]
-    entities: list[dict] = []
+    spawned: list[dict] = []
     for hb in range(100, 100 + count):
         entities = fauna.spawn_fauna(
-            entities,
+            [],
             hb,
             agents,
             fire_xys,
@@ -95,7 +103,8 @@ def _spawn_over_heartbeats(count: int, fire_xys, sheltered_tiles) -> list[dict]:
             False,
             _rng(hb),
         )
-    return entities
+        spawned.extend(entities)
+    return spawned
 
 
 def test_spawn_fauna_never_spawns_on_sheltered_tile():
@@ -107,6 +116,7 @@ def test_spawn_fauna_never_spawns_on_sheltered_tile():
 
     entities = _spawn_over_heartbeats(200, fire_xys, sheltered_tiles)
     assert entities, "spawn did not occur"
+    assert len(entities) >= 100, "too few spawns sampled to prove shelter coverage"
 
     for entity in entities:
         assert tuple(entity["tile"]) not in sheltered_tiles
@@ -124,6 +134,7 @@ def test_spawn_fauna_never_spawns_inside_fire_safety_radius():
 
     entities = _spawn_over_heartbeats(200, fire_xys, set())
     assert entities, "spawn did not occur"
+    assert len(entities) >= 100, "too few spawns sampled to prove fire coverage"
 
     for entity in entities:
         tile = tuple(entity["tile"])
@@ -363,9 +374,14 @@ def test_untamed_horse_with_trust_does_not_flee_from_nearby_agent():
     agent_xys = [(1, 0)]
     assert max(abs(0 - 1), abs(0 - 0)) <= fauna.HORSE_FLEE_RADIUS
 
-    # A fleeing horse always takes the maximum-distance neighbor (distance 2
-    # here). With trust the flee branch is skipped entirely, so the same
-    # setup drifts to a random neighbor and sometimes stays in contact range.
+    # The fixture re-seeds the horse each heartbeat: this samples drift
+    # behavior per heartbeat, not a multi-heartbeat trajectory, so the
+    # flee branch is either taken or skipped on every independent draw.
+    #
+    # A fleeing horse always takes the maximum-distance neighbor, which is
+    # exactly HORSE_FLEE_RADIUS from the agent here. Asserting an interior
+    # distance therefore proves the flee branch was skipped, instead of
+    # merely accepting the radius the bug itself would produce.
     distances = []
     for hb in range(100, 160):
         moved = fauna.move_fauna(
@@ -384,8 +400,8 @@ def test_untamed_horse_with_trust_does_not_flee_from_nearby_agent():
 
     assert distances, "no horse movement sampled"
     assert all(distance in (0, 1, 2) for distance in distances)
-    assert any(distance <= fauna.HORSE_FLEE_RADIUS for distance in distances), (
-        "trusted horse always fled instead of drifting"
+    assert any(distance < fauna.HORSE_FLEE_RADIUS for distance in distances), (
+        "trusted horse stayed at the flee radius instead of drifting"
     )
 
 
