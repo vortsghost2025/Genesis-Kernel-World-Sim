@@ -233,3 +233,48 @@ def test_milk_animal_only_for_ready_tamed_cow(tmp_path: Path):
     assert load_inventory(runtime._store)["east_adam"]["milk"] == 1
     assert runtime._world_state.fauna[0]["milk_ready"] is False
     assert runtime._world_state.fauna[0]["milk_ready_at_hb"] == 121
+
+
+def test_attack_snake_succeeds_and_drops_meat(tmp_path: Path):
+    from backend.world.first_pair_persistence import add_to_inventory, load_inventory
+    runtime = _runtime(tmp_path)
+    runtime._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    runtime._world_state.fauna = [{
+        "kind": "snake", "id": "snake-1", "tile": [1, 0], "hp": 2,
+    }]
+    runtime._world_state.wildlife = []
+    # A snake's 2 HP needs a knapped knife (2.2 dmg) to fall in one strike;
+    # bare hands deal 1 damage and wound it instead.
+    add_to_inventory(runtime._store, "east_adam", "flint_knife", 1)
+
+    outcome = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "snake-1",
+        "reason": "kill snake",
+    }, 100)
+
+    assert outcome["status"] == "success"
+    assert outcome["target_kind"] == "snake"
+    assert outcome["killed"] is True
+    assert outcome["meat"] == 1
+    assert load_inventory(runtime._store)["east_adam"]["meat"] == 1
+    assert runtime._world_state.fauna == []
+
+
+def test_attack_cow_is_rejected(tmp_path: Path):
+    runtime = _runtime(tmp_path)
+    runtime._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    runtime._world_state.fauna = [{
+        "kind": "cow", "id": "cow-1", "tile": [1, 0], "hp": 4,
+        "trust": 0, "tamed": False, "milk_ready": False,
+    }]
+    runtime._world_state.wildlife = []
+
+    outcome = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "cow-1",
+        "reason": "kill cow",
+    }, 100)
+
+    assert outcome["status"] == "rejected"
+    assert "not hostile" in outcome["reason"].lower()

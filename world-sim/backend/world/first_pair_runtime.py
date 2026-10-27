@@ -1743,37 +1743,71 @@ class FirstPairRuntime:
         }
 
     def _execute_attack(self, agent_ref: str, action: dict) -> dict:
-        """Strike an adjacent animal. Tools decide: iron kills a deer
-        outright; bare hands take two strikes. A killed deer drops meat
-        into the hunter's hands; a struck wolf flees and leaves some."""
+        """Strike an adjacent animal. Wolves/deer stay in wildlife; snakes are fauna."""
         target_id = action.get("target_id", "")
         entities = self._world_state.wildlife or []
+
         entity = next((e for e in entities
                        if e.get("id") == target_id), None)
+
         if entity is None:
             # Fallback: allow target_id as kind ("wolf", "deer") if adjacent
-            pos = self._world_state.tile_occupancy.get(agent_ref)
-            pxy = self._tile_xy(pos)
-            if pxy is not None:
+            pos0 = self._world_state.tile_occupancy.get(agent_ref)
+            pxy0 = self._tile_xy(pos0 or "")
+            if pxy0 is not None and target_id in ("wolf", "deer"):
                 matches = []
                 for candidate in entities:
-                    if candidate.get("kind") == target_id:
-                        c_exy = self._entity_xy(candidate.get("tile"))
-                        if c_exy is not None and max(abs(pxy[0] - c_exy[0]), abs(pxy[1] - c_exy[1])) <= 1:
-                            matches.append(candidate)
+                    if candidate.get("kind") != target_id:
+                        continue
+                    c_exy = self._entity_xy(candidate.get("tile"))
+                    if c_exy is not None and max(abs(pxy0[0] - c_exy[0]), abs(pxy0[1] - c_exy[1])) <= 1:
+                        matches.append(candidate)
                 if len(matches) == 1:
                     entity = matches[0]
                     target_id = entity.get("id", target_id)
                 elif len(matches) > 1:
                     match_ids = ", ".join(e.get("id", "?") for e in matches)
-                    return {
-                        "status": "rejected",
-                        "reason": f"Multiple {target_id}s within reach; specify exact target_id ({match_ids})",
-                    }
-        if entity is None:
+                    return {"status": "rejected",
+                            "reason": f"Multiple {target_id}s within reach; specify exact target_id ({match_ids})"}
+
+        if entity is not None:
+            etile = entity.get("tile")
+            if isinstance(etile, list):
+                etile = tuple(etile)
+            pos = self._world_state.tile_occupancy.get(agent_ref)
+            pxy = self._tile_xy(pos)
+            exy = self._entity_xy(etile)
+            if pxy is None or exy is None or max(
+                    abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+                return {"status": "rejected",
+                        "reason": "The animal is not within reach"}
+
+            inventory = load_inventory(self._store).get(agent_ref, {})
+            entity, dmg, killed, meat = wildlife.strike(entity, inventory)
+            outcome = {"status": "success", "target_id": target_id,
+                       "target_kind": entity.get("kind"),
+                       "damage": dmg, "killed": killed, "meat": meat}
+            if killed:
+                self._world_state.wildlife = [e for e in entities if e.get("id") != target_id]
+                if meat:
+                    add_to_inventory(self._store, agent_ref, wildlife.MEAT, meat)
+                    outcome["meat_held"] = meat
+            else:
+                self._world_state.wildlife = [
+                    e if e.get("id") != target_id else entity for e in entities]
+            return outcome
+
+        faunae = getattr(self._world_state, "fauna", []) or []
+        target = next((e for e in faunae if e.get("id") == target_id), None)
+        if target is None:
+            return {"status": "rejected", "reason": "No such animal here"}
+
+        kind = target.get("kind", "animal")
+        if kind != "snake":
             return {"status": "rejected",
-                    "reason": "No such animal here"}
-        etile = entity.get("tile")
+                    "reason": "This animal is not hostile"}
+
+        etile = target.get("tile")
         if isinstance(etile, list):
             etile = tuple(etile)
         pos = self._world_state.tile_occupancy.get(agent_ref)
@@ -1781,39 +1815,27 @@ class FirstPairRuntime:
         exy = self._entity_xy(etile)
         if pxy is None or exy is None or max(
                 abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
-            return {"status": "rejected",
-                    "reason": "The animal is not within reach"}
-        inventory = load_inventory(self._store).get(agent_ref, {})
-        entity, dmg, killed, meat = wildlife.strike(entity, inventory)
-        kind = entity.get("kind", "animal")
-        if killed:
-            if kind == "wolf":
-                detail = f"Struck wolf for {dmg} damage; wolf fled the area and left {meat} meat"
-            else:
-                detail = f"Struck deer for {dmg} damage; deer killed and dropped {meat} meat"
-        else:
-            detail = f"Struck {kind} for {dmg} damage ({entity.get('hp')} HP remaining)"
+            return {"status": "rejected", "reason": "The animal is not within reach"}
 
+        inventory = load_inventory(self._store).get(agent_ref, {})
+        target, dmg, killed, meat = fauna.strike_snake(target, inventory)
         outcome = {
             "status": "success",
             "target_id": target_id,
             "target_kind": kind,
             "damage": dmg,
             "killed": killed,
-            "driven_off": (killed and kind == "wolf"),
             "meat": meat,
-            "detail": detail,
+            "driven_off": False,
         }
         if killed:
-            self._world_state.wildlife = [
-                e for e in entities if e.get("id") != target_id]
+            self._world_state.fauna = [e for e in faunae if e.get("id") != target_id]
             if meat:
                 add_to_inventory(self._store, agent_ref, wildlife.MEAT, meat)
                 outcome["meat_held"] = meat
         else:
-            self._world_state.wildlife = [
-                e if e.get("id") != target_id else entity
-                for e in entities]
+            self._world_state.fauna = [
+                e if e.get("id") != target_id else target for e in faunae]
         return outcome
 
     # ------------------------------------------------------------------
