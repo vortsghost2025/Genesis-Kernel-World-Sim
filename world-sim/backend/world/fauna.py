@@ -310,23 +310,29 @@ def move_fauna(entities: list[dict], agent_xys: list[tuple[int, int]],
     return moved
 
 
-def advance_cow_milk(entities: list[dict], heartbeat_number: int) -> bool:
-    """Advance tamed cow milk readiness after the specified interval."""
-    changed = False
-    for entity in entities:
-        if entity.get("kind") != "cow" or not entity.get("tamed"):
-            continue
-        if entity.get("milk_ready"):
-            continue
+def advance_cow_milk(entities: list[dict], heartbeat_number: int) -> list[dict]:
+    """Advance tamed cow milk readiness after the specified interval.
 
-        ready_at = int(entity.get("milk_ready_at_hb") or 0)
-        if ready_at == 0:
-            entity["milk_ready_at_hb"] = heartbeat_number
-            changed = True
-        elif heartbeat_number - ready_at >= MILK_READY_HEARTBEATS:
-            entity["milk_ready"] = True
-            changed = True
-    return changed
+    Pure: the input list and its entity dicts are never mutated. A new list
+    holding new entity dicts is returned, so callers must reassign:
+
+        entities = fauna.advance_cow_milk(entities, heartbeat_number)
+    """
+    updated: list[dict] = []
+    for entity in entities:
+        candidate = dict(entity)
+        if (
+            candidate.get("kind") == "cow"
+            and candidate.get("tamed")
+            and not candidate.get("milk_ready")
+        ):
+            ready_at = int(candidate.get("milk_ready_at_hb") or 0)
+            if ready_at == 0:
+                candidate["milk_ready_at_hb"] = heartbeat_number
+            elif heartbeat_number - ready_at >= MILK_READY_HEARTBEATS:
+                candidate["milk_ready"] = True
+        updated.append(candidate)
+    return updated
 
 
 def snake_bite_events(entities: list[dict],

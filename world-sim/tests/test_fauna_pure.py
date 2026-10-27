@@ -85,8 +85,8 @@ def test_trust_after_clamps_at_threshold():
     assert fauna.trust_after("horse", "fiber_plants", 69) == 70
 
 
-def test_advance_cow_milk_respects_interval():
-    entities = [{
+def _tamed_cow(**overrides) -> dict:
+    cow = {
         "kind": "cow",
         "id": "cow-1",
         "tile": [0, 1],
@@ -96,30 +96,208 @@ def test_advance_cow_milk_respects_interval():
         "milk_ready": False,
         "milk_ready_at_hb": 0,
         "anchor_tile": [0, 1],
-    }]
-    fauna.advance_cow_milk(entities, heartbeat_number=100)
+    }
+    cow.update(overrides)
+    return cow
+
+
+def test_advance_cow_milk_respects_interval():
+    entities = [_tamed_cow()]
+    entities = fauna.advance_cow_milk(entities, heartbeat_number=100)
     assert entities[0]["milk_ready"] is False
     assert entities[0]["milk_ready_at_hb"] == 100
 
-    fauna.advance_cow_milk(entities, heartbeat_number=243)
+    entities = fauna.advance_cow_milk(entities, heartbeat_number=243)
     assert entities[0]["milk_ready"] is False
     assert entities[0]["milk_ready_at_hb"] == 100
 
 
 def test_advance_cow_milk_becomes_ready_after_interval():
-    entities = [{
+    entities = [_tamed_cow(milk_ready_at_hb=100)]
+    entities = fauna.advance_cow_milk(entities, heartbeat_number=244)
+    assert entities[0]["milk_ready"] is True
+
+
+def test_advance_cow_milk_is_pure_and_returns_new_list():
+    original = [_tamed_cow()]
+    frozen = [dict(original[0])]
+
+    result = fauna.advance_cow_milk(original, heartbeat_number=100)
+
+    assert result is not original
+    assert original == frozen
+    assert original[0]["milk_ready_at_hb"] == 0
+    assert result[0]["milk_ready_at_hb"] == 100
+    assert result[0] is not original[0]
+
+
+def test_advance_cow_milk_ignores_wild_horses_and_ready_cows():
+    wild_cow = _tamed_cow(id="cow-wild", tamed=False)
+    ready_cow = _tamed_cow(id="cow-ready", milk_ready=True, milk_ready_at_hb=50)
+    snake = {"kind": "snake", "id": "snake-1", "tile": [3, 3], "hp": 2}
+    entities = [wild_cow, ready_cow, snake]
+
+    result = fauna.advance_cow_milk(entities, heartbeat_number=100)
+
+    assert result[0] == wild_cow
+    assert result[1] == ready_cow
+    assert result[2] == snake
+    assert entities == [wild_cow, ready_cow, snake]
+
+
+def test_cows_and_horses_only_spawn_in_daytime_clear_weather():
+    bad_skies = (("rain", False), ("storm", False), ("blizzard", False), ("clear", True))
+    for weather, is_night in bad_skies:
+        entities: list[dict] = []
+        for hb in range(100, 260):
+            entities = fauna.spawn_fauna(
+                entities,
+                hb,
+                [(0, 0)],
+                [],
+                set(),
+                weather,
+                62.0,
+                is_night,
+                _rng(hb),
+            )
+        assert fauna.count_kind(entities, "cow") == 0
+        assert fauna.count_kind(entities, "horse") == 0
+
+
+def test_cows_and_horses_spawn_in_daytime_clear_weather():
+    entities: list[dict] = []
+    for hb in range(100, 300):
+        entities = fauna.spawn_fauna(
+            entities,
+            hb,
+            [(0, 0)],
+            [],
+            set(),
+            "clear",
+            62.0,
+            False,
+            _rng(hb),
+        )
+    spawned = fauna.count_kind(entities, "cow") + fauna.count_kind(entities, "horse")
+    assert spawned >= 1
+
+
+def test_untamed_horse_flees_from_nearby_agent():
+    horse = {
+        "kind": "horse",
+        "id": "horse-1",
+        "tile": [0, 0],
+        "hp": 5,
+        "trust": 0,
+        "tamed": False,
+        "anchor_tile": None,
+    }
+    agent_xys = [(1, 0)]
+    before = max(abs(0 - 1), abs(0 - 0))
+    assert before <= fauna.HORSE_FLEE_RADIUS
+
+    for hb in range(100, 140):
+        moved = fauna.move_fauna(
+            [dict(horse)],
+            agent_xys=agent_xys,
+            fire_xys=[],
+            sheltered_tiles=set(),
+            weather="clear",
+            temperature=62.0,
+            is_night=False,
+            rng=_rng(hb),
+        )
+        tile = moved[0]["tile"]
+        after = max(abs(tile[0] - 1), abs(tile[1] - 0))
+        assert after > before
+        horse["tile"] = tile
+
+
+def test_untamed_horse_does_not_flee_when_agent_is_far():
+    horse = {
+        "kind": "horse",
+        "id": "horse-1",
+        "tile": [0, 0],
+        "hp": 5,
+        "trust": 0,
+        "tamed": False,
+        "anchor_tile": None,
+    }
+    moved = fauna.move_fauna(
+        [horse],
+        agent_xys=[(0, 12)],
+        fire_xys=[],
+        sheltered_tiles=set(),
+        weather="clear",
+        temperature=62.0,
+        is_night=False,
+        rng=_rng(7),
+    )
+    tile = moved[0]["tile"]
+    assert max(abs(tile[0]), abs(tile[1])) <= 1
+
+
+def test_snake_movement_avoids_shelter_and_firelight():
+    fire_xys = [(2, 2)]
+    sheltered = {(1, 0)}
+    for hb in range(100, 260):
+        moved = fauna.move_fauna(
+            [{"kind": "snake", "id": "snake-1", "tile": [0, 0], "hp": 2}],
+            agent_xys=[(0, 0)],
+            fire_xys=fire_xys,
+            sheltered_tiles=sheltered,
+            weather="clear",
+            temperature=62.0,
+            is_night=False,
+            rng=_rng(hb),
+        )
+        tile = moved[0]["tile"]
+        assert tuple(tile) not in sheltered
+        assert max(abs(tile[0] - 2), abs(tile[1] - 2)) > fauna.SNAKE_FIRE_SAFETY_RADIUS
+
+
+def test_snake_holds_still_when_all_neighbors_are_blocked():
+    blocked = {(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)}
+    moved = fauna.move_fauna(
+        [{"kind": "snake", "id": "snake-1", "tile": [0, 0], "hp": 2}],
+        agent_xys=[(0, 0)],
+        fire_xys=[],
+        sheltered_tiles=blocked,
+        weather="clear",
+        temperature=62.0,
+        is_night=False,
+        rng=_rng(11),
+    )
+    assert moved[0]["tile"] == [0, 0]
+
+
+def test_tamed_cow_stays_within_anchor_radius():
+    cow = {
         "kind": "cow",
         "id": "cow-1",
-        "tile": [0, 1],
+        "tile": [0, 0],
         "hp": 4,
         "trust": 60,
         "tamed": True,
         "milk_ready": False,
-        "milk_ready_at_hb": 100,
-        "anchor_tile": [0, 1],
-    }]
-    fauna.advance_cow_milk(entities, heartbeat_number=244)
-    assert entities[0]["milk_ready"] is True
+        "milk_ready_at_hb": 0,
+        "anchor_tile": [0, 0],
+    }
+    for hb in range(100, 240):
+        moved = fauna.move_fauna(
+            [dict(cow)],
+            agent_xys=[(0, 20)],
+            fire_xys=[],
+            sheltered_tiles=set(),
+            weather="clear",
+            temperature=62.0,
+            is_night=False,
+            rng=_rng(hb),
+        )
+        tile = moved[0]["tile"]
+        assert max(abs(tile[0] - 0), abs(tile[1] - 0)) <= fauna.TAMED_ANCHOR_RADIUS
+        cow["tile"] = tile
 
 
 def test_find_fauna_returns_exact_id():
