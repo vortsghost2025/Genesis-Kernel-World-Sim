@@ -322,6 +322,13 @@ class WorldStateRecord:
     # epistemic.7: living entities (wolves, deer). Tiles are coordinate
     # tuples serialized as lists; hp in kind-specific units.
     wildlife: list = field(default_factory=list)
+    # 10JN: fauna entities (cows, horses, snakes) with their own behaviour
+    # domain, kept as a sibling of wildlife rather than folded into it.
+    # Persisted so a recovered interaction is durable: without this field
+    # save_world_state silently dropped every fauna mutation while the
+    # journal still claimed fauna_applied. Absent from stores written
+    # before the fauna domain existed, which load as an empty list.
+    fauna: list = field(default_factory=list)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = "world_state.1"

@@ -24,6 +24,16 @@ from backend.world.first_pair_persistence import (
 
 _FAUNA_INTERACTION_FILE = "fauna_interactions.jsonl"
 
+#: Journal control fields owned by this module, never by caller intent. An
+#: intent that could rewrite them could forge a stage (claiming a mutation
+#: that never happened) or a timestamp, so they are rejected wholesale.
+_FAUNA_JOURNAL_CONTROL_KEYS = frozenset({
+    "event_id",
+    "stage",
+    "created_at_utc",
+    "schema_version",
+})
+
 _STAGE_RANK = {
     "intent": 0,
     "inventory_applied": 1,
@@ -77,7 +87,17 @@ def new_event_id(prefix: str, heartbeat_number: int,
 
 def begin_animal_interaction(store: FirstPairPersistenceStore,
                              event_id: str, intent: dict[str, Any]) -> None:
-    """Durably declare an intended interaction before any mutation."""
+    """Durably declare an intended interaction before any mutation.
+
+    Caller intent supplies payload only. Journal control fields are set
+    here and are never overridable: a caller that could write its own
+    `stage` could certify a mutation that never happened.
+    """
+    reserved = sorted(_FAUNA_JOURNAL_CONTROL_KEYS & set(intent))
+    if reserved:
+        raise ValueError(
+            "fauna_interaction:reserved_key:" + ",".join(reserved)
+        )
     event = {
         "event_id": event_id,
         "stage": "intent",
@@ -156,15 +176,27 @@ def _apply_milk(target: dict[str, Any], intent: dict[str, Any]) -> None:
 
 def _inventory_matches(store: FirstPairPersistenceStore,
                        intent: dict[str, Any], snapshot_key: str) -> bool:
-    """True when current inventory matches the intent's before/after snapshot."""
+    """True when current inventory matches the intent's before/after snapshot.
+
+    An agent with no inventory entry never matches a snapshot: a row that
+    was never written and a row whose holdings were consumed both read as
+    zero, so absence is not evidence that the inventory mutation happened.
+    Refusing the match here keeps recovery on the fail-closed path instead
+    of granting fauna trust for an interaction that never touched
+    inventory.
+    """
     expected = intent.get(snapshot_key)
     if not isinstance(expected, dict):
         return False
 
     agent_ref = intent["agent_ref"]
-    inventory = load_inventory(store).get(agent_ref, {})
+    inventory = load_inventory(store)
+    if agent_ref not in inventory:
+        return False
+
+    agent_holdings = inventory[agent_ref]
     actual = {
-        kind: int(inventory.get(kind, 0))
+        kind: int(agent_holdings.get(kind, 0))
         for kind in expected
     }
     desired = {kind: int(value) for kind, value in expected.items()}
@@ -180,6 +212,12 @@ def recover_fauna_interactions(store: FirstPairPersistenceStore,
     snapshot but the marker was not written, recovery completes the fauna
     change. If inventory still matches the "before" snapshot, the interaction
     is a noop. Any other state fails closed.
+
+    Ordering is load-bearing: the fauna mutation is persisted through
+    save_world_state BEFORE the fauna_applied marker is appended, so the
+    marker is never written for state that is not on disk. A crash between
+    the two re-runs recovery, which finds the fauna change already applied
+    and is a noop.
     """
     grouped: dict[str, list[dict[str, Any]]] = {}
     for event in load_fauna_events(store):
