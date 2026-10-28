@@ -118,6 +118,7 @@ from backend.world.mystery_reveal import (
 )
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
+MAX_ACTIVE_GOALS_EXPOSED: int = 8
 _SAFE_OBJECT_ID_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
 )
@@ -571,7 +572,11 @@ class FirstPairRuntime:
             self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
         )
 
-        agent_goals = [g for g in self._goals if g.agent_id == view["agent_id"]]
+        agent_goals = [
+            g
+            for g in self._goals
+            if g.agent_id == view["agent_id"] and getattr(g, "status", "") in ("active", "in_progress")
+        ][-MAX_ACTIVE_GOALS_EXPOSED:]
         agent_pending_questions = [
             q
             for q in self._questions
@@ -848,7 +853,11 @@ class FirstPairRuntime:
         sel_manifest["heartbeat"] = heartbeat_number
 
         # --- Bounded human context (max 4 combined) ---
-        active_goal_ids = {g.goal_id for g in agent_goals if g.status == "active"}
+        active_goal_ids = {
+            g.goal_id
+            for g in agent_goals
+            if getattr(g, "status", "") in ("active", "in_progress")
+        }
         human_selected, human_answered_ids, human_unresolved_ids, human_omitted_count = select_human_context(
             answered_questions=agent_answered_questions,
             unresolved_questions=[q.__dict__ for q in agent_pending_questions],

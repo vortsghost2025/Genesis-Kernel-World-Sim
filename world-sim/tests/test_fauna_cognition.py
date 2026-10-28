@@ -74,7 +74,7 @@ def test_prompt_recognizes_milk_and_fauna_actions():
     assert "offer_food" in prompt
     assert "milk_animal" in prompt
     assert "milk: 28" in prompt
-    assert "A cow is nearby; it is tamed and milk is ready [id: cow-1]." in prompt
+    assert "A cow is nearby (adjacent); it is tamed and milk is ready [id: cow-1]. You can milk it using milk_animal." in prompt
     assert "A snake is nearby; it is dangerous [id: snake-1]." in prompt
 
 

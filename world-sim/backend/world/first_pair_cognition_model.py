@@ -1554,23 +1554,48 @@ def build_system_prompt(context: AgentContext) -> str:
                 "you are completely safe from animal attacks."
             )
 
-        # Fauna (10JN): tameable animals and the snake, named as facts.
+        # Fauna (10JN/10JR): tameable animals and the snake, named as facts with distance and affordance verbs.
         fauna_obs = (context.observation or {}).get("fauna") or {}
         fauna_near = fauna_obs.get("nearby") or []
         if fauna_near:
             for animal in fauna_near:
                 animal_kind = animal.get("kind")
                 animal_id = animal.get("id")
+                dist = animal.get("distance")
+                if dist is not None and dist <= 1:
+                    dist_str = " (adjacent)"
+                elif dist is not None and dist > 1:
+                    dist_str = f" ({dist} tiles away)"
+                else:
+                    dist_str = ""
+
                 if animal_kind == "cow":
                     if animal.get("tamed") and animal.get("milk_ready"):
+                        if dist is not None and dist <= 1:
+                            _lines.append(
+                                f"A cow is nearby (adjacent); it is tamed and milk is ready [id: {animal_id}]. You can milk it using milk_animal."
+                            )
+                        else:
+                            _lines.append(
+                                f"A cow is nearby{dist_str}; it is tamed and milk is ready [id: {animal_id}]."
+                            )
+                    elif animal.get("tamed"):
                         _lines.append(
-                            f"A cow is nearby; it is tamed and milk is ready [id: {animal_id}]."
+                            f"A cow is nearby{dist_str}; it is tamed [id: {animal_id}]."
                         )
                     else:
-                        state = "tamed" if animal.get("tamed") else "untamed"
-                        _lines.append(
-                            f"A cow is nearby; it is {state} [id: {animal_id}]."
-                        )
+                        if dist is not None and dist <= 1:
+                            _lines.append(
+                                f"A cow is nearby (adjacent); it is untamed [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
+                            )
+                        elif dist is not None and dist > 1:
+                            _lines.append(
+                                f"A cow is nearby ({dist} tiles away); it is untamed [id: {animal_id}]. You can move closer to interact."
+                            )
+                        else:
+                            _lines.append(
+                                f"A cow is nearby; it is untamed [id: {animal_id}]."
+                            )
                 elif animal_kind == "horse":
                     if animal.get("tamed"):
                         state = "tamed"
@@ -1578,9 +1603,24 @@ def build_system_prompt(context: AgentContext) -> str:
                         state = "wary"
                     else:
                         state = "untamed"
-                    _lines.append(
-                        f"A horse is nearby; it is {state} [id: {animal_id}]."
-                    )
+
+                    if state == "tamed":
+                        _lines.append(
+                            f"A horse is nearby{dist_str}; it is tamed [id: {animal_id}]."
+                        )
+                    else:
+                        if dist is not None and dist <= 1:
+                            _lines.append(
+                                f"A horse is nearby (adjacent); it is {state} [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
+                            )
+                        elif dist is not None and dist > 1:
+                            _lines.append(
+                                f"A horse is nearby ({dist} tiles away); it is {state} [id: {animal_id}]. You can move closer to interact."
+                            )
+                        else:
+                            _lines.append(
+                                f"A horse is nearby; it is {state} [id: {animal_id}]."
+                            )
                 elif animal_kind == "snake":
                     _lines.append(
                         f"A snake is nearby; it is dangerous [id: {animal_id}]."
