@@ -405,6 +405,8 @@ _VALID_ACTIONS = frozenset({
     "use_object",
     "eat",
     "attack",
+    "offer_food",
+    "milk_animal",
 })
 
 
@@ -514,6 +516,8 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     # eat: epistemic.4 — consume food from belongings to satisfy hunger.
     "eat": frozenset({"action_type", "resource_kind", "reason", "food_type", "food", "item"}),
     "attack": frozenset({"action_type", "target_id", "reason"}),
+    "offer_food": frozenset({"action_type", "target_id", "resource_kind", "reason"}),
+    "milk_animal": frozenset({"action_type", "target_id", "reason"}),
 }
 
 
@@ -680,6 +684,24 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
                 total += amount
             if total > _MAX_BUILD_MATERIAL_TOTAL:
                 errors.append("action:materials_total_too_large")
+
+    elif at == "offer_food":
+        for field_name in ("target_id", "resource_kind", "reason"):
+            value = raw.get(field_name, "")
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"action:empty_{field_name}")
+        food = raw.get("resource_kind", "")
+        if isinstance(food, str) and food not in (
+            "wild_berries", "edible_roots", "wild_apples",
+            "wild_grain", "fiber_plants",
+        ):
+            errors.append("action:invalid_animal_food")
+
+    elif at == "milk_animal":
+        for field_name in ("target_id", "reason"):
+            value = raw.get(field_name, "")
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"action:empty_{field_name}")
 
     return errors
 
@@ -1116,7 +1138,9 @@ Available actions:
 - build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
-- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
+- attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area; a snake struck and defeated leaves 1 meat. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
+- offer_food: offer one unit of animal food to an adjacent cow or horse (requires: target_id, resource_kind, reason) - accepted animal foods are wild_berries, edible_roots, wild_apples, wild_grain, and fiber_plants
+- milk_animal: milk an adjacent tamed cow when milk is ready (requires: target_id, reason)
 """
 
 # Free speech. One optional top-level field, documented in the contract and
@@ -1385,6 +1409,7 @@ def build_system_prompt(context: AgentContext) -> str:
                         "wild_berries", "mushrooms", "edible_roots",
                         "wild_apples", "nuts", "honeycomb", "wild_grain",
                         "fish", "shellfish", "meat", "cooked_meal",
+                        "milk",
                     ) and isinstance(v, int) and v > 0
                 ]
                 if edible_held:
@@ -1399,7 +1424,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     )
 
                 _lines.append(
-                    "Fact: each food satisfies hunger (cooked_meal: 75, fish: 40, meat: 40, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
+                    "Fact: each food satisfies hunger (cooked_meal: 75, fish: 40, meat: 40, milk: 28, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
                     "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22). "
                     "Storing food in containers protects your supply."
                 )
@@ -1511,6 +1536,38 @@ def build_system_prompt(context: AgentContext) -> str:
                 "or approach within 3 tiles of a lit fire. Inside a constructed shelter or beside a lit fire, "
                 "you are completely safe from animal attacks."
             )
+
+        # Fauna (10JN): tameable animals and the snake, named as facts.
+        fauna_obs = (context.observation or {}).get("fauna") or {}
+        fauna_near = fauna_obs.get("nearby") or []
+        if fauna_near:
+            for animal in fauna_near:
+                animal_kind = animal.get("kind")
+                animal_id = animal.get("id")
+                if animal_kind == "cow":
+                    if animal.get("tamed") and animal.get("milk_ready"):
+                        _lines.append(
+                            f"A cow is nearby; it is tamed and milk is ready [id: {animal_id}]."
+                        )
+                    else:
+                        state = "tamed" if animal.get("tamed") else "untamed"
+                        _lines.append(
+                            f"A cow is nearby; it is {state} [id: {animal_id}]."
+                        )
+                elif animal_kind == "horse":
+                    if animal.get("tamed"):
+                        state = "tamed"
+                    elif animal.get("trust", 0) == 0:
+                        state = "wary"
+                    else:
+                        state = "untamed"
+                    _lines.append(
+                        f"A horse is nearby; it is {state} [id: {animal_id}]."
+                    )
+                elif animal_kind == "snake":
+                    _lines.append(
+                        f"A snake is nearby; it is dangerous [id: {animal_id}]."
+                    )
 
         if _lines:
             body_section = (
