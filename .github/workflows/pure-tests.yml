@@ -105,4 +105,8 @@ jobs:
             tests/test_wildlife_runtime.py \
             tests/test_smelt_and_craft.py \
             tests/test_insects_and_bees.py \
+            tests/test_fauna_pure.py \
+            tests/test_fauna_interactions.py \
+            tests/test_fauna_runtime.py \
+            tests/test_fauna_cognition.py \
             -v
