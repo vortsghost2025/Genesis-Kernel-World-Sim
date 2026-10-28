@@ -278,3 +278,42 @@ def test_attack_cow_is_rejected(tmp_path: Path):
 
     assert outcome["status"] == "rejected"
     assert "not hostile" in outcome["reason"].lower()
+
+
+def test_attack_snake_without_tool_requires_two_strikes(tmp_path: Path):
+    from backend.world.first_pair_persistence import load_inventory
+    runtime = _runtime(tmp_path)
+    runtime._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    runtime._world_state.fauna = [{
+        "kind": "snake", "id": "snake-1", "tile": [1, 0], "hp": 2,
+    }]
+    runtime._world_state.wildlife = []
+
+    first = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "snake-1",
+        "reason": "strike snake",
+    }, 100)
+
+    assert first["status"] == "success"
+    assert first["target_kind"] == "snake"
+    assert first["damage"] == 1.0
+    assert first["killed"] is False
+    assert first["meat"] == 0
+    assert runtime._world_state.fauna[0]["id"] == "snake-1"
+    assert runtime._world_state.fauna[0]["hp"] == 1.0
+    assert load_inventory(runtime._store).get("east_adam", {}) == {}
+
+    second = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "snake-1",
+        "reason": "strike snake again",
+    }, 101)
+
+    assert second["status"] == "success"
+    assert second["target_kind"] == "snake"
+    assert second["damage"] == 1.0
+    assert second["killed"] is True
+    assert second["meat"] == 1
+    assert load_inventory(runtime._store)["east_adam"]["meat"] == 1
+    assert runtime._world_state.fauna == []
