@@ -1382,9 +1382,7 @@ class FirstPairRuntime:
         visible = []
         if pos is not None:
             for entity in getattr(self._world_state, "fauna", []) or []:
-                tile = entity.get("tile")
-                if isinstance(tile, list):
-                    tile = tuple(tile)
+                tile = self._entity_xy(entity.get("tile"))
                 if tile is None:
                     continue
                 dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
@@ -1784,9 +1782,25 @@ class FirstPairRuntime:
 
             inventory = load_inventory(self._store).get(agent_ref, {})
             entity, dmg, killed, meat = wildlife.strike(entity, inventory)
-            outcome = {"status": "success", "target_id": target_id,
-                       "target_kind": entity.get("kind"),
-                       "damage": dmg, "killed": killed, "meat": meat}
+            kind = entity.get("kind", "animal")
+            if killed:
+                if kind == "wolf":
+                    detail = f"Struck wolf for {dmg} damage; wolf fled the area and left {meat} meat"
+                else:
+                    detail = f"Struck deer for {dmg} damage; deer killed and dropped {meat} meat"
+            else:
+                detail = f"Struck {kind} for {dmg} damage ({entity.get('hp')} HP remaining)"
+
+            outcome = {
+                "status": "success",
+                "target_id": target_id,
+                "target_kind": kind,
+                "damage": dmg,
+                "killed": killed,
+                "driven_off": (killed and kind == "wolf"),
+                "meat": meat,
+                "detail": detail,
+            }
             if killed:
                 self._world_state.wildlife = [e for e in entities if e.get("id") != target_id]
                 if meat:

@@ -26,6 +26,8 @@ from backend.world.first_pair_persistence import (
     CONTINUITY_MAX_CHARS,
     CONTINUITY_MAX_OPEN_QUESTIONS,
 )
+from backend.world.fauna import ANIMAL_FOOD_TRUST
+from backend.world import survival
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -38,6 +40,20 @@ _MAX_REASON_CHARS = 1000
 _MAX_DECISION_CHARS = 500
 _MAX_IDENTIFIER_CHARS = 128
 _MAX_GOAL_UPDATES = 16
+_PROMPT_HUNGER_FACT_ORDER = (
+    "cooked_meal",
+    "fish",
+    "meat",
+    "milk",
+    "wild_apples",
+    "edible_roots",
+    "honeycomb",
+    "shellfish",
+    "wild_berries",
+    "nuts",
+    "mushrooms",
+    "wild_grain",
+)
 _MAX_MEMORY_CANDIDATES = 16
 _MAX_HUMAN_QUESTIONS = 8
 _MAX_MESSAGE_CHARS = 2000
@@ -691,10 +707,7 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"action:empty_{field_name}")
         food = raw.get("resource_kind", "")
-        if isinstance(food, str) and food not in (
-            "wild_berries", "edible_roots", "wild_apples",
-            "wild_grain", "fiber_plants",
-        ):
+        if isinstance(food, str) and food not in ANIMAL_FOOD_TRUST:
             errors.append("action:invalid_animal_food")
 
     elif at == "milk_animal":
@@ -1423,9 +1436,13 @@ def build_system_prompt(context: AgentContext) -> str:
                         "You currently hold no food in your belongings."
                     )
 
+                hunger_fact_values = ", ".join(
+                    f"{kind}: {int(survival.EAT_SATISFACTION[kind])}"
+                    for kind in _PROMPT_HUNGER_FACT_ORDER
+                    if kind in survival.EAT_SATISFACTION
+                )
                 _lines.append(
-                    "Fact: each food satisfies hunger (cooked_meal: 75, fish: 40, meat: 40, milk: 28, wild_apples: 36, edible_roots: 34, honeycomb: 32, "
-                    "shellfish: 30, wild_berries: 28, nuts: 25, mushrooms: 22, wild_grain: 22). "
+                    f"Fact: each food satisfies hunger ({hunger_fact_values}). "
                     "Storing food in containers protects your supply."
                 )
             if (_sb.get("warmth", 100) or 100) <= 60:

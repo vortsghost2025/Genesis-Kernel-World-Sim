@@ -317,3 +317,54 @@ def test_attack_snake_without_tool_requires_two_strikes(tmp_path: Path):
     assert second["meat"] == 1
     assert load_inventory(runtime._store)["east_adam"]["meat"] == 1
     assert runtime._world_state.fauna == []
+
+
+def test_wildlife_attack_preserves_detail_and_driven_off(tmp_path: Path):
+    from backend.world import wildlife
+    from backend.world.first_pair_persistence import add_to_inventory
+    runtime = _runtime(tmp_path)
+    runtime._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    runtime._world_state.wildlife = [{
+        "kind": "deer", "id": "deer-1", "tile": [1, 0], "hp": 2,
+    }]
+    runtime._world_state.fauna = []
+    add_to_inventory(runtime._store, "east_adam", "flint_knife", 1)
+
+    deer_outcome = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "deer-1",
+        "reason": "hunt deer",
+    }, 100)
+
+    assert deer_outcome["status"] == "success"
+    assert deer_outcome["killed"] is True
+    assert deer_outcome["driven_off"] is False
+    assert "Struck deer" in deer_outcome["detail"]
+
+    runtime._world_state.wildlife = [{
+        "kind": "wolf", "id": "wolf-1", "tile": [1, 0], "hp": wildlife.WOLF_FLEE_HP,
+    }]
+    wolf_outcome = runtime._execute_action("east_adam", {
+        "action_type": "attack",
+        "target_id": "wolf-1",
+        "reason": "strike wolf",
+    }, 101)
+
+    assert wolf_outcome["status"] == "success"
+    assert wolf_outcome["killed"] is True
+    assert wolf_outcome["driven_off"] is True
+    assert "wolf fled" in wolf_outcome["detail"]
+
+
+def test_fauna_visible_skips_malformed_tiles(tmp_path: Path):
+    runtime = _runtime(tmp_path)
+    runtime._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    runtime._world_state.fauna = [
+        {"kind": "snake", "id": "snake-valid", "tile": [1, 0], "hp": 2},
+        {"kind": "snake", "id": "snake-short", "tile": [5], "hp": 2},
+        {"kind": "snake", "id": "snake-string", "tile": "nowhere", "hp": 2},
+        {"kind": "snake", "id": "snake-none", "tile": [None, 1], "hp": 2},
+    ]
+
+    observed = runtime._fauna_visible("east_adam")
+    assert [animal["id"] for animal in observed["nearby"]] == ["snake-valid"]

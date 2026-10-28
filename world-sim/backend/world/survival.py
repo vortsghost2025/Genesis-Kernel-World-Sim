@@ -90,6 +90,7 @@ EAT_SATISFACTION = {       # raw food: hunger points satisfied (human scale meal
     "honeycomb": 32.0,
     "wild_grain": 22.0,
     "fish": 40.0,
+    "meat": 40.0,
     "shellfish": 30.0,
     "cooked_meal": 75.0,   # fire-cooked hearty meal (lasts nearly two full days)
     "milk": 28.0,
