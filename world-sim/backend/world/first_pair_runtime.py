@@ -1406,28 +1406,41 @@ class FirstPairRuntime:
         """What this agent perceives of domesticatable fauna and snakes."""
         position = self._world_state.tile_occupancy.get(agent_ref)
         pos = self._tile_xy(position or "")
-        visible = []
+        nearby = []
+        distant = []
         if pos is not None:
             for entity in getattr(self._world_state, "fauna", []) or []:
                 tile = self._entity_xy(entity.get("tile"))
                 if tile is None:
                     continue
                 dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
-                if dist > 6:
-                    continue
+                kind = entity.get("kind")
 
-                item = {
-                    "kind": entity.get("kind"),
-                    "id": entity.get("id"),
-                    "distance": dist,
-                }
-                if entity.get("kind") in ("cow", "horse"):
-                    item["trust"] = int(entity.get("trust", 0))
-                    item["tamed"] = bool(entity.get("tamed", False))
-                if entity.get("kind") == "cow":
-                    item["milk_ready"] = bool(entity.get("milk_ready", False))
-                visible.append(item)
-        return {"nearby": visible}
+                if dist <= 6:
+                    item = {
+                        "kind": kind,
+                        "id": entity.get("id"),
+                        "distance": dist,
+                    }
+                    if kind in ("cow", "horse"):
+                        item["trust"] = int(entity.get("trust", 0))
+                        item["tamed"] = bool(entity.get("tamed", False))
+                    if kind == "cow":
+                        item["milk_ready"] = bool(entity.get("milk_ready", False))
+                    nearby.append(item)
+                elif fauna.HORIZON_SIGHT_MIN <= dist <= fauna.HORIZON_SIGHT_MAX and kind != "snake":
+                    item = {
+                        "kind": kind,
+                        "id": entity.get("id"),
+                        "distance": dist,
+                    }
+                    if kind in ("cow", "horse"):
+                        item["trust"] = int(entity.get("trust", 0))
+                        item["tamed"] = bool(entity.get("tamed", False))
+                    if kind == "cow":
+                        item["milk_ready"] = bool(entity.get("milk_ready", False))
+                    distant.append(item)
+        return {"nearby": nearby, "distant": distant}
 
     def fauna_tick(self, heartbeat_number: int) -> None:
         """One heartbeat of Phase 10JN fauna ecology."""

@@ -94,8 +94,10 @@ def _free_drift_step(entity: dict, tile: tuple[int, int],
         return _bounded_anchor_step(entity, tile, rng)
     options = _neighbors(tile)
     if signal_xys:
+        base_dist = min(_dist(tile, sig) for sig in signal_xys)
         weights = [
-            _attraction_weight(option, signal_xys) for option in options
+            _attraction_weight(option, base_dist, signal_xys)
+            for option in options
         ]
         total = sum(weights)
         roll = rng.random() * total
@@ -129,12 +131,14 @@ Only fires and agent occupation count — not shelters, not storage. This keeps 
 
 #### Attraction weight function
 
-`_attraction_weight(option, signal_xys)` returns a float in `[1.0, PASTORAL_ATTRACTION_WEIGHT]`:
+`_attraction_weight(option, base_dist, signal_xys)` returns a float in `[1.0, PASTORAL_ATTRACTION_WEIGHT]`:
 
 - `1.0` when the candidate tile is outside `PASTORAL_ATTRACTION_RADIUS` of every signal tile (uniform behaviour, i.e. today's dynamics).
-- Scales with `(radius - chebyshev_dist) / radius` so strength rises smoothly as the grazer approaches signal.
+- **Weighted by distance *gain*, not absolute distance.** `gain = max(0, base_dist - option_dist)` where `base_dist` is the grazer's current distance to signal. A tile that closes the gap by one step receives the full `PASTORAL_ATTRACTION_WEIGHT`; neutral tiles stay at `1.0`.
 - Never returns `0.0`, guaranteeing every neighbour remains reachable — the bias cannot become a trap.
-- Clipped to `PASTORAL_ATTRACTION_WEIGHT` at distance 0.
+- Clipped to `PASTORAL_ATTRACTION_WEIGHT`.
+
+> **Measured regression note (Phase 10KH review, 2026-10-29).** The originally specified scheme — weighting by absolute distance, `1 + (W-1) * (radius - dist)/radius` — is *nearly flat across an 8-neighbourhood*, because all candidates sit within one tile of one another and `(16-d)/16` changes by only ~0.06 per tile. Measured pull was **0.043 tiles/step at distance 6** and 0.163 at distance 14: effectively no attraction in the common case, and distance-dependent when it did register. Raising `PASTORAL_ATTRACTION_WEIGHT` from 6 to 100 improved it by only 0.012 — the weight cap is not the lever. The distance-gain gradient restores contrast and yields **0.65 tiles/step uniformly from distance 4 to 15**, with ~13% of steps still moving away or holding. Determinism is unaffected (still exactly one `rng.random()` draw in the same call position; weights are data-derived).
 
 #### Tamed animals
 

@@ -1171,6 +1171,115 @@ for this cycle; it does not replace it and is not one of your actions.
 """
 
 
+def _format_fauna_lines(obs_or_fauna_obs: dict) -> list[str]:
+    """Format nearby and distant horizon fauna lines for the cognition prompt."""
+    lines: list[str] = []
+    if not obs_or_fauna_obs:
+        return lines
+
+    fauna_obs = obs_or_fauna_obs.get("fauna", obs_or_fauna_obs) if isinstance(obs_or_fauna_obs, dict) else {}
+    if not isinstance(fauna_obs, dict):
+        return lines
+
+    fauna_near = fauna_obs.get("nearby") or []
+    if fauna_near:
+        for animal in fauna_near:
+            animal_kind = animal.get("kind")
+            animal_id = animal.get("id")
+            dist = animal.get("distance")
+            if dist is not None and dist <= 1:
+                dist_str = " (adjacent)"
+            elif dist is not None and dist > 1:
+                dist_str = f" ({dist} tiles away)"
+            else:
+                dist_str = ""
+
+            if animal_kind == "cow":
+                if animal.get("tamed") and animal.get("milk_ready"):
+                    if dist is not None and dist <= 1:
+                        lines.append(
+                            f"A cow is nearby (adjacent); it is tamed and milk is ready [id: {animal_id}]. You can milk it using milk_animal."
+                        )
+                    else:
+                        lines.append(
+                            f"A cow is nearby{dist_str}; it is tamed and milk is ready [id: {animal_id}]."
+                        )
+                elif animal.get("tamed"):
+                    lines.append(
+                        f"A cow is nearby{dist_str}; it is tamed [id: {animal_id}]."
+                    )
+                else:
+                    if dist is not None and dist <= 1:
+                        lines.append(
+                            f"A cow is nearby (adjacent); it is untamed [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
+                        )
+                    elif dist is not None and dist > 1:
+                        lines.append(
+                            f"A cow is nearby ({dist} tiles away); it is untamed [id: {animal_id}]. You can move closer to interact."
+                        )
+                    else:
+                        lines.append(
+                            f"A cow is nearby; it is untamed [id: {animal_id}]."
+                        )
+            elif animal_kind == "horse":
+                if animal.get("tamed"):
+                    state = "tamed"
+                elif animal.get("trust", 0) == 0:
+                    state = "wary"
+                else:
+                    state = "untamed"
+
+                if state == "tamed":
+                    lines.append(
+                        f"A horse is nearby{dist_str}; it is tamed [id: {animal_id}]."
+                    )
+                else:
+                    if dist is not None and dist <= 1:
+                        lines.append(
+                            f"A horse is nearby (adjacent); it is {state} [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
+                        )
+                    elif dist is not None and dist > 1:
+                        lines.append(
+                            f"A horse is nearby ({dist} tiles away); it is {state} [id: {animal_id}]. You can move closer to interact."
+                        )
+                    else:
+                        lines.append(
+                            f"A horse is nearby; it is {state} [id: {animal_id}]."
+                        )
+            elif animal_kind == "snake":
+                lines.append(
+                    f"A snake is nearby; it is dangerous [id: {animal_id}]."
+                )
+
+    # Distant Horizon Sighting (Phase 10KH)
+    fauna_distant = fauna_obs.get("distant") or []
+    if fauna_distant:
+        seen_ids = set()
+        valid_distant = []
+        for animal in fauna_distant:
+            if not isinstance(animal, dict):
+                continue
+            aid = animal.get("id")
+            if not aid or aid in seen_ids:
+                continue
+            if animal.get("kind") == "snake":
+                continue
+            seen_ids.add(aid)
+            valid_distant.append(animal)
+
+        valid_distant.sort(key=lambda a: a.get("distance", 999))
+        for animal in valid_distant:
+            kind = animal.get("kind", "animal")
+            aid = animal.get("id", "unknown")
+            dist = animal.get("distance")
+            dist_str = f" about {dist} tiles away" if dist is not None else ""
+            lines.append(
+                f"On the horizon: a {kind} grazes{dist_str} [id: {aid}]. It is too far to interact with now."
+            )
+
+    return lines
+
+
 def build_system_prompt(context: AgentContext) -> str:
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
@@ -1557,77 +1666,8 @@ def build_system_prompt(context: AgentContext) -> str:
                 "you are completely safe from animal attacks."
             )
 
-        # Fauna (10JN/10JR): tameable animals and the snake, named as facts with distance and affordance verbs.
-        fauna_obs = (context.observation or {}).get("fauna") or {}
-        fauna_near = fauna_obs.get("nearby") or []
-        if fauna_near:
-            for animal in fauna_near:
-                animal_kind = animal.get("kind")
-                animal_id = animal.get("id")
-                dist = animal.get("distance")
-                if dist is not None and dist <= 1:
-                    dist_str = " (adjacent)"
-                elif dist is not None and dist > 1:
-                    dist_str = f" ({dist} tiles away)"
-                else:
-                    dist_str = ""
-
-                if animal_kind == "cow":
-                    if animal.get("tamed") and animal.get("milk_ready"):
-                        if dist is not None and dist <= 1:
-                            _lines.append(
-                                f"A cow is nearby (adjacent); it is tamed and milk is ready [id: {animal_id}]. You can milk it using milk_animal."
-                            )
-                        else:
-                            _lines.append(
-                                f"A cow is nearby{dist_str}; it is tamed and milk is ready [id: {animal_id}]."
-                            )
-                    elif animal.get("tamed"):
-                        _lines.append(
-                            f"A cow is nearby{dist_str}; it is tamed [id: {animal_id}]."
-                        )
-                    else:
-                        if dist is not None and dist <= 1:
-                            _lines.append(
-                                f"A cow is nearby (adjacent); it is untamed [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
-                            )
-                        elif dist is not None and dist > 1:
-                            _lines.append(
-                                f"A cow is nearby ({dist} tiles away); it is untamed [id: {animal_id}]. You can move closer to interact."
-                            )
-                        else:
-                            _lines.append(
-                                f"A cow is nearby; it is untamed [id: {animal_id}]."
-                            )
-                elif animal_kind == "horse":
-                    if animal.get("tamed"):
-                        state = "tamed"
-                    elif animal.get("trust", 0) == 0:
-                        state = "wary"
-                    else:
-                        state = "untamed"
-
-                    if state == "tamed":
-                        _lines.append(
-                            f"A horse is nearby{dist_str}; it is tamed [id: {animal_id}]."
-                        )
-                    else:
-                        if dist is not None and dist <= 1:
-                            _lines.append(
-                                f"A horse is nearby (adjacent); it is {state} [id: {animal_id}]. You can offer animal foods (wild_berries, edible_roots, wild_apples, wild_grain, fiber_plants) using offer_food to build trust."
-                            )
-                        elif dist is not None and dist > 1:
-                            _lines.append(
-                                f"A horse is nearby ({dist} tiles away); it is {state} [id: {animal_id}]. You can move closer to interact."
-                            )
-                        else:
-                            _lines.append(
-                                f"A horse is nearby; it is {state} [id: {animal_id}]."
-                            )
-                elif animal_kind == "snake":
-                    _lines.append(
-                        f"A snake is nearby; it is dangerous [id: {animal_id}]."
-                    )
+        # Fauna (10JN/10JR/10KH): tameable animals, distant horizon sightings, and snakes
+        _lines.extend(_format_fauna_lines((context.observation or {}).get("fauna") or {}))
 
         # Permanent continental scale grounding and active embodiment (Phase 10JV/10JX)
         _lines.append(
