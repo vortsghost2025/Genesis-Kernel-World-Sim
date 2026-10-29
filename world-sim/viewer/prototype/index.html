@@ -604,6 +604,38 @@ header {
   color: #cbd5e1;
   white-space: nowrap;
 }
+
+/* Animal Floating World-Space Tag Overlay */
+.animal-floating-tag {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 24;
+  transition: opacity 0.2s ease;
+}
+.animal-tag-name {
+  font-family: var(--font-ui);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(10, 16, 26, 0.90);
+  border: 1px solid rgba(254, 202, 87, 0.35);
+  color: #feca57;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+.animal-tag-threat {
+  border-color: rgba(255, 71, 87, 0.65);
+  color: #ff6b81;
+}
+.animal-tag-domestic {
+  border-color: rgba(46, 213, 115, 0.65);
+  color: #2ed573;
+}
 </style>
 </head>
 <body>
@@ -651,6 +683,7 @@ header {
         <div class="tag-name" id="tag-name-eve">EVE</div>
         <div class="tag-action" id="tag-act-eve">NO ACTION RECORDED</div>
       </div>
+      <div id="fauna-tags-container"></div>
 
       <!-- 3D Camera Controls -->
       <div class="camera-toolbar">
@@ -659,6 +692,7 @@ header {
         <button class="cam-btn" id="cam-focus-adam">🧍 Focus Adam</button>
         <button class="cam-btn" id="cam-focus-eve">🧍 Focus Eve</button>
         <button class="cam-btn" id="cam-topdown">🗺️ Top-Down</button>
+        <button class="cam-btn" id="cam-interior">🏠 Enter House (Interior)</button>
       </div>
 
       <!-- Scale & Continent Telemetry HUD -->
@@ -679,6 +713,7 @@ header {
         <button class="ctrl-btn primary" id="pb-play">▶ PLAY</button>
         <button class="ctrl-btn" id="pb-prev" title="Step Back 1 Heartbeat">◀</button>
         <button class="ctrl-btn" id="pb-next" title="Step Forward 1 Heartbeat">▶</button>
+        <button class="ctrl-btn" id="btn-replay-recent" title="Replay Recent Activity (Last 30 HB)" style="background:rgba(254, 202, 87, 0.18); border-color:#feca57; color:#feca57; font-weight:600;">⏪ REPLAY RECENT</button>
         <button class="ctrl-btn live-pill active" id="pb-live">● LIVE</button>
 
         <div class="slider-wrap">
@@ -1376,9 +1411,10 @@ function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow
 }
 
 function createShelterSprite(x, z, h, scale = 1.0, withShadow = true) {
-  const w = 2.55 * scale;
-  const ht = 2.35 * scale;
-  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 1.18 * scale : 0, withShadow ? 1.12 * scale : 0, 0.12 * scale);
+  // Rescaled to true human architectural scale (5.4m x 4.4m, ~2.2m door clearance)
+  const w = 5.4 * scale;
+  const ht = 4.4 * scale;
+  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * scale : 0, withShadow ? 2.2 * scale : 0, 0.18 * scale);
 }
 
 function createStorageSprite(x, z, h, scale = 1.0, withShadow = true) {
@@ -1970,6 +2006,543 @@ const charFigures = {
 };
 
 // -------------------------------------------------------------
+// 3D FAUNA & DOMESTIC ANIMAL SUBSYSTEM (PHASE 10KB)
+// -------------------------------------------------------------
+function createAnimalCanvasTexture(kind) {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  if (kind === "cow") {
+    ctx.fillStyle = "#f8f9fa";
+    ctx.beginPath(); ctx.ellipse(64, 76, 42, 28, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2f3640";
+    ctx.beginPath(); ctx.arc(52, 70, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(82, 82, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f8f9fa";
+    ctx.beginPath(); ctx.ellipse(32, 54, 18, 16, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f8a5c2";
+    ctx.beginPath(); ctx.ellipse(22, 60, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1e272e"; ctx.fillRect(28, 48, 4, 4);
+    ctx.fillStyle = "#e0dcd3"; ctx.fillRect(36, 38, 4, 8); ctx.fillRect(44, 40, 4, 8);
+    ctx.fillStyle = "#2f3640";
+    ctx.fillRect(40, 96, 7, 24); ctx.fillRect(52, 96, 7, 24);
+    ctx.fillRect(72, 96, 7, 24); ctx.fillRect(84, 96, 7, 24);
+  } else if (kind === "horse") {
+    ctx.fillStyle = "#8b4513";
+    ctx.beginPath(); ctx.ellipse(66, 72, 38, 22, -0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(36, 46, 12, 20, 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(26, 36, 14, 10, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2c1507"; ctx.fillRect(38, 32, 8, 26);
+    ctx.beginPath(); ctx.ellipse(98, 76, 8, 22, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#6e330a";
+    ctx.fillRect(42, 88, 5, 34); ctx.fillRect(52, 88, 5, 34);
+    ctx.fillRect(74, 88, 5, 34); ctx.fillRect(84, 88, 5, 34);
+    ctx.fillStyle = "#1e272e"; ctx.fillRect(24, 34, 3, 3);
+  } else if (kind === "snake") {
+    ctx.fillStyle = "#2ed573";
+    ctx.beginPath(); ctx.arc(64, 84, 28, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1e272e";
+    ctx.beginPath(); ctx.arc(64, 84, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#26af61";
+    ctx.beginPath(); ctx.ellipse(78, 68, 14, 10, 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ff4757";
+    ctx.fillRect(92, 66, 8, 2); ctx.fillRect(98, 64, 4, 2); ctx.fillRect(98, 68, 4, 2);
+    ctx.fillStyle = "#ffa502"; ctx.fillRect(78, 64, 3, 3);
+  } else if (kind === "deer") {
+    ctx.fillStyle = "#cd853f";
+    ctx.beginPath(); ctx.ellipse(64, 74, 34, 20, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(38, 50, 9, 18, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(28, 40, 11, 8, -0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#8b5a2b"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(32, 34); ctx.lineTo(26, 18); ctx.lineTo(20, 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(26, 24); ctx.lineTo(34, 18); ctx.stroke();
+    ctx.fillStyle = "#b57233";
+    ctx.fillRect(44, 90, 4, 32); ctx.fillRect(52, 90, 4, 32);
+    ctx.fillRect(72, 90, 4, 32); ctx.fillRect(80, 90, 4, 32);
+  } else {
+    // wolf
+    ctx.fillStyle = "#747d8c";
+    ctx.beginPath(); ctx.ellipse(64, 74, 36, 20, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(36, 54, 14, 14, 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(24, 58, 12, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#57606f";
+    ctx.beginPath(); ctx.moveTo(34, 44); ctx.lineTo(30, 32); ctx.lineTo(38, 38); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(96, 76, 8, 20, 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(42, 88, 5, 32); ctx.fillRect(52, 88, 5, 32);
+    ctx.fillRect(74, 88, 5, 32); ctx.fillRect(84, 88, 5, 32);
+    ctx.fillStyle = "#ffa502"; ctx.fillRect(32, 50, 3, 3);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
+const faunaTextures = {
+  cow: createAnimalCanvasTexture("cow"),
+  horse: createAnimalCanvasTexture("horse"),
+  snake: createAnimalCanvasTexture("snake"),
+  deer: createAnimalCanvasTexture("deer"),
+  wolf: createAnimalCanvasTexture("wolf")
+};
+
+const faunaFiguresGroup = new THREE.Group();
+scene.add(faunaFiguresGroup);
+const faunaActiveFigures = new Map();
+const faunaTagsContainer = document.getElementById("fauna-tags-container");
+
+function createFaunaFigure(kind) {
+  const tex = faunaTextures[kind] || faunaTextures.deer;
+  const isSnake = (kind === "snake");
+  const isHorse = (kind === "horse");
+  const isCow = (kind === "cow");
+  const w = isHorse ? 1.6 : (isCow ? 1.5 : (isSnake ? 0.9 : 1.3));
+  const ht = isHorse ? 1.5 : (isCow ? 1.3 : (isSnake ? 0.5 : 1.2));
+
+  const group = new THREE.Group();
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.35 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(w, ht, 1);
+  sprite.position.y = ht * 0.5 - (isSnake ? 0.08 : 0.04);
+  group.add(sprite);
+
+  const shadow = createGroundShadowDecal(w * 0.38, ht * 0.35, 0.65);
+  group.add(shadow);
+
+  group.userData = { sprite, shadow, w, ht, kind };
+  return group;
+}
+
+function updateFaunaFigures(pairName, hb) {
+  if (selectedPair === "orbit") {
+    faunaFiguresGroup.visible = false;
+    if (faunaTagsContainer) faunaTagsContainer.innerHTML = "";
+    return;
+  }
+  faunaFiguresGroup.visible = true;
+
+  const pair = PAIRS[pairName] || {};
+  const cid = (pairName === "west") ? "cont_b" : "cont_a";
+  const rawFauna = [
+    ...(pair.fauna || []),
+    ...(pair.wildlife || [])
+  ];
+
+  const presentIds = new Set();
+  let tagHtml = "";
+
+  rawFauna.forEach((entity, idx) => {
+    if (!entity) return;
+    const eid = String(entity.id || `fauna-${idx}`);
+    const kind = String(entity.kind || "deer").toLowerCase();
+    presentIds.add(eid);
+
+    let fig = faunaActiveFigures.get(eid);
+    if (!fig) {
+      fig = createFaunaFigure(kind);
+      faunaFiguresGroup.add(fig);
+      faunaActiveFigures.set(eid, fig);
+    }
+
+    let tx = 0, tz = 0;
+    if (Array.isArray(entity.tile)) {
+      tx = entity.tile[0];
+      tz = entity.tile[1];
+    } else if (typeof entity.tile === "string") {
+      const match = entity.tile.match(/(-?\d+)_(-?\d+)$/);
+      if (match) {
+        tx = parseInt(match[1], 10);
+        tz = parseInt(match[2], 10);
+      } else {
+        const t = tilesById.get(entity.tile);
+        if (t && t.coordinates) { tx = t.coordinates.x; tz = t.coordinates.y; }
+      }
+    }
+
+    const th = getTerrainHeight(cid, tx, tz);
+    const idleBob = Math.sin((performance.now() * 0.002) + idx) * 0.02;
+    fig.position.set(tx, th + idleBob, tz);
+    fig.visible = true;
+
+    const sPos = toScreenXY(new THREE.Vector3(tx, th + fig.userData.ht + 0.15, tz), camera, canvas);
+    if (sPos.inFront) {
+      const isThreat = (kind === "wolf" || kind === "snake");
+      const isTamed = Boolean(entity.tamed);
+      const isMilk = Boolean(entity.milk_ready);
+      let emoji = (kind === "cow") ? "🐮" : (kind === "horse" ? "🐴" : (kind === "snake" ? "🐍" : (kind === "wolf" ? "🐺" : "🦌")));
+      let statusStr = "";
+      if (kind === "cow") {
+        statusStr = isTamed ? (isMilk ? "Milk Ready" : "Tamed") : `Untamed (${entity.trust || 0} trust)`;
+      } else if (kind === "horse") {
+        statusStr = isTamed ? "Tamed" : `Untamed (${entity.trust || 0} trust)`;
+      } else if (kind === "snake") {
+        statusStr = "Hazard";
+      } else if (kind === "wolf") {
+        statusStr = "Threat";
+      } else {
+        statusStr = "Wild";
+      }
+
+      const tagClass = isThreat ? "animal-tag-threat" : (isTamed ? "animal-tag-domestic" : "");
+      tagHtml += `<div class="animal-floating-tag" style="left:${sPos.x}px; top:${sPos.y}px;">
+        <div class="animal-tag-name ${tagClass}">${emoji} ${kind.toUpperCase()} [${statusStr}]</div>
+      </div>`;
+    }
+  });
+
+  for (const [id, fig] of faunaActiveFigures.entries()) {
+    if (!presentIds.has(id)) {
+      faunaFiguresGroup.remove(fig);
+      faunaActiveFigures.delete(id);
+    }
+  }
+
+  if (faunaTagsContainer) {
+    faunaTagsContainer.innerHTML = tagHtml;
+  }
+}
+
+// -------------------------------------------------------------
+// 3D PRECIPITATION & WEATHER PARTICLE SYSTEM
+// -------------------------------------------------------------
+const rainCount = 2000;
+const rainGeom = new THREE.BufferGeometry();
+const rainPositions = new Float32Array(rainCount * 6);
+const rainSeeds = [];
+for (let i = 0; i < rainCount; i++) {
+  const rx = (Math.random() - 0.5) * 80;
+  const ry = Math.random() * 32;
+  const rz = (Math.random() - 0.5) * 80;
+  const spd = 24 + Math.random() * 14;
+  rainSeeds.push({ rx, ry, rz, spd });
+  const idx = i * 6;
+  rainPositions[idx] = rx;
+  rainPositions[idx + 1] = ry;
+  rainPositions[idx + 2] = rz;
+  rainPositions[idx + 3] = rx - 0.3;
+  rainPositions[idx + 4] = ry - 1.25;
+  rainPositions[idx + 5] = rz;
+}
+rainGeom.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+const rainMat = new THREE.LineBasicMaterial({
+  color: 0x9dc4e8,
+  transparent: true,
+  opacity: 0.42,
+  depthWrite: false
+});
+const rainLines = new THREE.LineSegments(rainGeom, rainMat);
+rainLines.frustumCulled = false;
+rainLines.visible = false;
+scene.add(rainLines);
+
+function getWeatherAt(pairName, hb) {
+  const p = PAIRS[pairName] || {};
+  const w = p.weather || {};
+  let wtype = String(w.current || "clear").toLowerCase();
+  const temp = (w.temperature != null) ? w.temperature : 17;
+  const season = w.season || "Spring";
+  if (playbackMode === "replay" && hb != null) {
+    const cycle = Math.floor(hb / 40) % 4;
+    const weatherCycle = ["clear", "overcast", "rain", "storm"];
+    wtype = weatherCycle[cycle];
+  }
+  return {
+    weather: wtype,
+    temperature: temp,
+    season: season
+  };
+}
+
+function updateWeatherAtmospherics(pairName, hb) {
+  if (selectedPair === "orbit") {
+    rainLines.visible = false;
+    return;
+  }
+  const env = getWeatherAt(pairName, hb);
+  const wtype = env.weather || "clear";
+  const isRaining = (wtype === "rain" || wtype === "storm");
+
+  const weatherHud = document.getElementById("weather-hud");
+  if (weatherHud) {
+    weatherHud.textContent = `${env.season} (${env.temperature}°C) // ${wtype.toUpperCase()}`;
+  }
+
+  rainLines.visible = isRaining;
+  if (isRaining) {
+    rainMat.opacity = (wtype === "storm") ? 0.65 : 0.38;
+    scene.fog.density = (wtype === "storm") ? 0.016 : 0.010;
+    scene.fog.color.setHex((wtype === "storm") ? 0x3a4855 : 0x607080);
+    sunLight.intensity = (wtype === "storm") ? 0.22 : 0.45;
+    ambientLight.intensity = (wtype === "storm") ? 0.32 : 0.45;
+  } else if (wtype === "overcast") {
+    scene.fog.density = 0.008;
+    scene.fog.color.setHex(0x8fa0b0);
+    sunLight.intensity = 0.65;
+    ambientLight.intensity = 0.52;
+  } else {
+    scene.fog.density = 0.0065;
+    scene.fog.color.setHex(0x7ca0be);
+    sunLight.intensity = 0.92;
+    ambientLight.intensity = 0.58;
+  }
+}
+
+// -------------------------------------------------------------
+// DOLLHOUSE INTERIOR CUTAWAY & LIVING HOMESTEAD
+// -------------------------------------------------------------
+const interiorGroup = new THREE.Group();
+interiorGroup.visible = false;
+scene.add(interiorGroup);
+
+const floorGeom = new THREE.PlaneGeometry(4.8, 3.8);
+floorGeom.rotateX(-Math.PI / 2);
+const floorCanvas = document.createElement("canvas");
+floorCanvas.width = 128; floorCanvas.height = 128;
+const fctx = floorCanvas.getContext("2d");
+fctx.fillStyle = "#4a2e18"; fctx.fillRect(0, 0, 128, 128);
+fctx.fillStyle = "#3a2210";
+for (let p = 0; p < 128; p += 16) { fctx.fillRect(0, p, 128, 2); }
+const floorTex = new THREE.CanvasTexture(floorCanvas);
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85 });
+const floorMesh = new THREE.Mesh(floorGeom, floorMat);
+floorMesh.position.y = 0.05;
+interiorGroup.add(floorMesh);
+
+const hearthStoneGeom = new THREE.CylinderGeometry(0.55, 0.65, 0.25, 12);
+const hearthStoneMat = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 });
+const hearthStoneMesh = new THREE.Mesh(hearthStoneGeom, hearthStoneMat);
+hearthStoneMesh.position.set(0, 0.15, 0);
+interiorGroup.add(hearthStoneMesh);
+
+const hearthLight = new THREE.PointLight(0xff8822, 1.4, 9);
+hearthLight.position.set(0, 0.65, 0);
+interiorGroup.add(hearthLight);
+
+const hearthFlameSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: propTextures.campfire,
+  transparent: true,
+  alphaTest: 0.3
+}));
+hearthFlameSprite.scale.set(0.9, 0.85, 1);
+hearthFlameSprite.position.set(0, 0.55, 0);
+interiorGroup.add(hearthFlameSprite);
+
+const bedGeom = new THREE.BoxGeometry(1.6, 0.15, 0.9);
+const bedMat = new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 });
+const bedMesh = new THREE.Mesh(bedGeom, bedMat);
+bedMesh.position.set(-1.3, 0.1, 0.7);
+interiorGroup.add(bedMesh);
+
+const crateGeom = new THREE.BoxGeometry(0.7, 0.6, 0.7);
+const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 });
+const crateMesh = new THREE.Mesh(crateGeom, crateMat);
+crateMesh.position.set(1.4, 0.32, 0.8);
+interiorGroup.add(crateMesh);
+
+let isInteriorModeActive = false;
+let activeShelterTileCoords = null;
+let cutawayShelterProp = null;
+
+function toggleInteriorCutaway(enable, sx, sz, sh) {
+  isInteriorModeActive = enable;
+  interiorGroup.visible = enable;
+  if (cutawayShelterProp) {
+    cutawayShelterProp.visible = true;
+    cutawayShelterProp = null;
+  }
+  if (enable && sx != null) {
+    interiorGroup.position.set(sx, sh, sz);
+    activeShelterTileCoords = { x: sx, z: sz, h: sh };
+    const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
+    const oGroup = objectGroups[cid];
+    if (oGroup) {
+      for (const child of oGroup.children) {
+        if (Math.hypot(child.position.x - sx, child.position.z - sz) < 1.2) {
+          child.visible = false;
+          cutawayShelterProp = child;
+          break;
+        }
+      }
+    }
+  } else {
+    activeShelterTileCoords = null;
+  }
+}
+
+// -------------------------------------------------------------
+// EMBODIED ACTION FX & CONSTRUCTION SCAFFOLDING
+// -------------------------------------------------------------
+const actionFxGroup = new THREE.Group();
+scene.add(actionFxGroup);
+
+function createAgentActionFx(name) {
+  const group = new THREE.Group();
+  group.visible = false;
+
+  // 1. Timber Scaffolding wireframe (for build, create_public_object, addon_to)
+  const sGeom = new THREE.WireframeGeometry(new THREE.BoxGeometry(2.4, 2.0, 2.4));
+  const sMat = new THREE.LineBasicMaterial({ color: 0xc29b68, transparent: true, opacity: 0.85 });
+  const scaffolding = new THREE.LineSegments(sGeom, sMat);
+  scaffolding.position.y = 1.0;
+  scaffolding.visible = false;
+  group.add(scaffolding);
+
+  // 2. Dynamic particles (woodchips, sawdust, crop sparkles, fauna hearts)
+  const pCount = 36;
+  const pGeom = new THREE.BufferGeometry();
+  const pPositions = new Float32Array(pCount * 3);
+  const pColors = new Float32Array(pCount * 3);
+  const pSeeds = [];
+  for (let i = 0; i < pCount; i++) {
+    const px = (Math.random() - 0.5) * 1.6;
+    const py = Math.random() * 1.8 + 0.2;
+    const pz = (Math.random() - 0.5) * 1.6;
+    pPositions[i * 3] = px;
+    pPositions[i * 3 + 1] = py;
+    pPositions[i * 3 + 2] = pz;
+    pColors[i * 3] = 1.0;
+    pColors[i * 3 + 1] = 0.8;
+    pColors[i * 3 + 2] = 0.5;
+    pSeeds.push({
+      baseX: px, baseY: py, baseZ: pz,
+      vx: (Math.random() - 0.5) * 1.2,
+      vy: Math.random() * 1.2 + 0.4,
+      vz: (Math.random() - 0.5) * 1.2,
+      life: Math.random()
+    });
+  }
+  pGeom.setAttribute("position", new THREE.BufferAttribute(pPositions, 3));
+  pGeom.setAttribute("color", new THREE.BufferAttribute(pColors, 3));
+
+  const pMat = new THREE.PointsMaterial({
+    size: 0.22,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85
+  });
+  const particlePoints = new THREE.Points(pGeom, pMat);
+  particlePoints.visible = false;
+  group.add(particlePoints);
+
+  return {
+    group,
+    scaffolding,
+    particlePoints,
+    pSeeds,
+    activeAction: null,
+    fxType: null
+  };
+}
+
+const actionFx = {
+  adam: createAgentActionFx("adam"),
+  eve: createAgentActionFx("eve")
+};
+actionFxGroup.add(actionFx.adam.group);
+actionFxGroup.add(actionFx.eve.group);
+
+function updateAgentActionFx(agentShort, act, worldX, worldH, worldZ) {
+  const fx = actionFx[agentShort];
+  if (!fx) return;
+
+  if (selectedPair === "orbit" || !act) {
+    fx.group.visible = false;
+    fx.fxType = null;
+    return;
+  }
+
+  const actType = String(act.type || act.action || "").toLowerCase();
+  let fxType = null;
+
+  if (actType === "hew_timber" || actType.includes("chop") || actType.includes("fell")) {
+    fxType = "woodchip";
+  } else if (actType === "build" || actType === "create_public_object" || actType === "addon_to") {
+    fxType = "scaffold";
+  } else if (actType === "plant_crop" || actType === "harvest_crop" || actType.includes("crop") || actType.includes("cultivat")) {
+    fxType = "crop";
+  } else if (actType === "offer_food" || actType === "milk_animal" || actType.includes("animal")) {
+    fxType = "fauna";
+  }
+
+  fx.fxType = fxType;
+
+  if (!fxType) {
+    fx.group.visible = false;
+    fx.scaffolding.visible = false;
+    fx.particlePoints.visible = false;
+    return;
+  }
+
+  fx.group.visible = true;
+  fx.group.position.set(worldX, worldH, worldZ);
+
+  if (fxType === "scaffold") {
+    fx.scaffolding.visible = true;
+    fx.particlePoints.visible = true;
+  } else {
+    fx.scaffolding.visible = false;
+    fx.particlePoints.visible = true;
+  }
+
+  // Set particle color palette based on action
+  const colors = fx.particlePoints.geometry.attributes.color.array;
+  for (let i = 0; i < fx.pSeeds.length; i++) {
+    const idx = i * 3;
+    if (fxType === "woodchip") {
+      // Woodchip amber / warm brown
+      colors[idx] = 0.82 + Math.random() * 0.15;
+      colors[idx + 1] = 0.52 + Math.random() * 0.15;
+      colors[idx + 2] = 0.25;
+    } else if (fxType === "scaffold") {
+      // Sawdust pale golden
+      colors[idx] = 0.95;
+      colors[idx + 1] = 0.88;
+      colors[idx + 2] = 0.65;
+    } else if (fxType === "crop") {
+      // Crop emerald green & golden grain
+      if (i % 2 === 0) {
+        colors[idx] = 0.45; colors[idx + 1] = 0.85; colors[idx + 2] = 0.35;
+      } else {
+        colors[idx] = 0.95; colors[idx + 1] = 0.85; colors[idx + 2] = 0.25;
+      }
+    } else if (fxType === "fauna") {
+      // Fauna warm affection rose
+      colors[idx] = 1.0;
+      colors[idx + 1] = 0.45;
+      colors[idx + 2] = 0.65;
+    }
+  }
+  fx.particlePoints.geometry.attributes.color.needsUpdate = true;
+}
+
+function animateActionParticles(dt, time) {
+  if (selectedPair === "orbit") return;
+  for (const short of ["adam", "eve"]) {
+    const fx = actionFx[short];
+    if (fx && fx.group.visible && fx.particlePoints.visible) {
+      const positions = fx.particlePoints.geometry.attributes.position.array;
+      for (let i = 0; i < fx.pSeeds.length; i++) {
+        const s = fx.pSeeds[i];
+        s.life += dt * 1.8;
+        if (s.life > 1.0) {
+          s.life = 0;
+        }
+        const idx = i * 3;
+        positions[idx] = s.baseX + s.vx * s.life;
+        positions[idx + 1] = s.baseY + s.vy * s.life;
+        positions[idx + 2] = s.baseZ + s.vz * s.life;
+      }
+      fx.particlePoints.geometry.attributes.position.needsUpdate = true;
+      if (fx.scaffolding && fx.scaffolding.visible) {
+        fx.scaffolding.rotation.y = Math.sin(time * 0.001) * 0.05;
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------
 // BUILD SCENE
 // -------------------------------------------------------------
 buildContinentMesh("cont_a");
@@ -2086,6 +2659,43 @@ function applyCameraMode(mode, immediate = true) {
     const cz = (az + ez) * 0.5;
     const ch = getTerrainHeight(cid, cx, cz);
     smoothMoveCamera(new THREE.Vector3(cx, ch + 52, cz + 4.0), new THREE.Vector3(cx, ch, cz), immediate);
+  } else if (mode === "interior") {
+    const btn = document.getElementById("cam-interior");
+    if (btn) btn.classList.add("active");
+    scene.fog.density = 0.004;
+    camera.fov = 36;
+    camera.updateProjectionMatrix();
+
+    let targetX = ax, targetZ = az;
+    let closestDist = Infinity;
+    const pobjs = (PAIRS[pairName] || {}).public_objects || {};
+    for (const obj of Object.values(pobjs)) {
+      if (!obj) continue;
+      const otype = String(obj.object_type || "").toLowerCase();
+      if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut")) {
+        const tid = obj.tile_id;
+        const t = tilesById.get(tid);
+        if (t && t.coordinates) {
+          const d = Math.hypot(t.coordinates.x - ax, t.coordinates.y - az);
+          if (d < closestDist) {
+            closestDist = d;
+            targetX = t.coordinates.x;
+            targetZ = t.coordinates.y;
+          }
+        }
+      }
+    }
+    const sh = getTerrainHeight(cid, targetX, targetZ);
+    smoothMoveCamera(
+      new THREE.Vector3(targetX - 0.4, sh + 1.85, targetZ + 3.8),
+      new THREE.Vector3(targetX, sh + 0.95, targetZ - 0.2),
+      false
+    );
+    toggleInteriorCutaway(true, targetX, targetZ, sh);
+  }
+
+  if (mode !== "interior") {
+    toggleInteriorCutaway(false);
   }
 }
 
@@ -2132,6 +2742,8 @@ function focusCiv(pairName) {
     objectGroups[cid].position.set(0, 0, 0);
 
     updatePublicObjectsAndClearings(pairName, currentHb);
+    updateFaunaFigures(pairName, currentHb);
+    updateWeatherAtmospherics(pairName, currentHb);
     applyCameraMode(activeCamMode === "orbit" ? "landscape" : activeCamMode, true);
   }
 
@@ -2219,6 +2831,18 @@ function getAgentActionAtHb(pn, ref, hb) {
   } else if (actType === "build" || actType === "create_public_object") {
     const otype = act.object_type ? ` (${act.object_type})` : "";
     label = `Constructing Object${otype}`;
+  } else if (actType === "addon_to") {
+    label = "Expanding Settlement Addon";
+  } else if (actType === "hew_timber") {
+    label = "Hewing Timber";
+  } else if (actType === "plant_crop") {
+    label = "Planting Crops";
+  } else if (actType === "harvest_crop") {
+    label = "Harvesting Crops";
+  } else if (actType === "offer_food" || actType === "feed_animal") {
+    label = "Offering Food to Fauna";
+  } else if (actType === "milk_animal") {
+    label = "Milking Domestic Fauna";
   } else if (actType === "modify_owned_public_object" || actType === "use_object") {
     label = "Operating Public Object";
   } else if (actType === "inspect_public_object") {
@@ -2548,6 +3172,8 @@ function syncHeartbeatScene(immediateCam = false) {
     updatePublicObjectsAndClearings("west", currentHb);
   } else {
     updatePublicObjectsAndClearings(pairName, currentHb);
+    updateFaunaFigures(pairName, currentHb);
+    updateWeatherAtmospherics(pairName, currentHb);
     applyCameraMode(activeCamMode, immediateCam);
   }
   updateHUD();
@@ -2563,6 +3189,25 @@ document.getElementById("cam-cinematic").onclick = () => applyCameraMode("landsc
 document.getElementById("cam-focus-adam").onclick = () => applyCameraMode("adam", false);
 document.getElementById("cam-focus-eve").onclick = () => applyCameraMode("eve", false);
 document.getElementById("cam-topdown").onclick = () => applyCameraMode("topdown", false);
+const camInterior = document.getElementById("cam-interior");
+if (camInterior) camInterior.onclick = () => applyCameraMode("interior", false);
+
+function replayRecentActivity(count = 35) {
+  currentHb = Math.max(minHb, maxHb - count);
+  isPlaying = true;
+  playbackMode = "replay";
+  playSpeed = 2;
+  playBtn.textContent = "⏸ PAUSE";
+  document.querySelectorAll(".speed-opt").forEach(b => {
+    b.classList.toggle("active", b.dataset.spd === "2");
+  });
+  syncHeartbeatScene(false);
+}
+
+const btnReplayRecent = document.getElementById("btn-replay-recent");
+if (btnReplayRecent) {
+  btnReplayRecent.onclick = () => replayRecentActivity(35);
+}
 
 // Playback Controls
 const playBtn = document.getElementById("pb-play");
@@ -2683,6 +3328,18 @@ function updateAllAgentFigures(time) {
           // Natural walking gait: subtle, gentle vertical cadence (0.024m) rather than high hopping
           strideBob = Math.sin(alpha * Math.PI * 2) * 0.024;
         }
+        // Directional sprite flip: face movement direction East vs West
+        const dx = cx - px;
+        if (Math.abs(dx) > 0.01 && fig.userData && fig.userData.sprite) {
+          fig.userData.sprite.scale.x = (dx > 0) ? Math.abs(fig.userData.charW) : -Math.abs(fig.userData.charW);
+        }
+      }
+
+      // Interior mode positioning: place agents around the central hearth inside
+      if (isInteriorModeActive && activeShelterTileCoords) {
+        const isEve = (agentShort === "eve");
+        finalX = activeShelterTileCoords.x + (isEve ? -1.2 : 0.8);
+        finalZ = activeShelterTileCoords.z + (isEve ? 0.6 : 0.4);
       }
 
       // Small companion offset when both agents share the exact same tile
@@ -2717,6 +3374,9 @@ function updateAllAgentFigures(time) {
       } else {
         tagEl.style.display = "none";
       }
+
+      // Update Action FX (woodchips, scaffolding, crop harvest, fauna interaction)
+      updateAgentActionFx(agentShort, act, finalX, finalH, finalZ);
     }
   }
 
@@ -2751,6 +3411,22 @@ function animate(time) {
   }
 
   updateAllAgentFigures(time);
+  animateActionParticles(dt, time);
+
+  // 3D Precipitation Rain Streaks Animation
+  if (rainLines && rainLines.visible) {
+    rainLines.position.set(camera.position.x, 0, camera.position.z);
+    const arr = rainLines.geometry.attributes.position.array;
+    for (let i = 0; i < rainSeeds.length; i++) {
+      const s = rainSeeds[i];
+      s.ry -= s.spd * dt;
+      if (s.ry < 0) s.ry = 32;
+      const idx = i * 6;
+      arr[idx + 1] = s.ry;
+      arr[idx + 4] = s.ry - 1.25;
+    }
+    rainLines.geometry.attributes.position.needsUpdate = true;
+  }
 
   // Subtle Campfire Flicker
   const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
@@ -2772,6 +3448,22 @@ function animate(time) {
 
 // Runtime Inspection & Automated Browser Test API
 window.__GENESIS_PROTO__ = {
+  faunaFiguresGroup,
+  faunaActiveFigures,
+  rainLines,
+  actionFxGroup,
+  actionFx,
+  updateAgentActionFx,
+  replayRecentActivity,
+  focusCoordinates(x, z) {
+    const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
+    const h = getTerrainHeight(cid, x, z);
+    smoothMoveCamera(
+      new THREE.Vector3(x - 2.5, h + 5.5, z + 8.5),
+      new THREE.Vector3(x, h + 0.8, z),
+      false
+    );
+  },
   getState() {
     return {
       selectedPair,

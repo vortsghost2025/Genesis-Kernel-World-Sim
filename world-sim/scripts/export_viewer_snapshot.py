@@ -274,6 +274,43 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
     return events[-limit:]
 
 
+def is_agent_sheltered(agent_ref: str, world_state: dict) -> bool:
+    """Check if an agent is currently sheltered on their occupied tile."""
+    occupancy = world_state.get("tile_occupancy", {})
+    tile_id = occupancy.get(agent_ref)
+    if not tile_id:
+        for k, v in occupancy.items():
+            if agent_ref in k or k in agent_ref:
+                tile_id = v
+                break
+    if not tile_id:
+        return False
+
+    shelter_kinds = (
+        "shelter", "hut", "wall", "roof", "cabin", "tent",
+        "lean", "cave", "cavern", "overhang", "grotto", "burrow",
+        "stable", "cellar", "compound"
+    )
+    public_objs = world_state.get("public_objects", {})
+    objs = public_objs.values() if isinstance(public_objs, dict) else public_objs
+    for record in objs:
+        if not isinstance(record, dict) or record.get("status") in ("destroyed", "dismantled"):
+            continue
+        rec_tid = record.get("tile_id", "")
+        if rec_tid == tile_id:
+            otype = str(record.get("object_type", "")).lower()
+            if any(k in otype for k in shelter_kinds):
+                return True
+    compounds = world_state.get("compounds", {}) or {}
+    for comp in compounds.values():
+        if isinstance(comp, dict):
+            for r_data in comp.get("rooms", {}).values():
+                if isinstance(r_data, dict) and r_data.get("roofed"):
+                    if r_data.get("tile_id") == tile_id or r_data.get("tile") == tile_id:
+                        return True
+    return False
+
+
 def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | None:
     """One pair's snapshot, or None if the store doesn't exist yet."""
     if not (store / "heartbeat.json").exists() or not (store / "world_state.json").exists():
@@ -406,6 +443,12 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
         "vitals": world_state.get("vitals", {}),
         "weather": weather_snapshot,
         "wildlife": list(world_state.get("wildlife") or []),
+        "fauna": list(world_state.get("fauna") or []),
+        "compounds": world_state.get("compounds", {}),
+        "shelter_occupancy": {
+            agent: is_agent_sheltered(agent, world_state)
+            for agent in agents
+        },
         "chronicle": build_chronicle(heartbeats, name_by_hash),
         "public_objects": world_state.get("public_objects", {}),
         "public_messages": [
