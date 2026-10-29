@@ -109,4 +109,6 @@ jobs:
             tests/test_fauna_interactions.py \
             tests/test_fauna_runtime.py \
             tests/test_fauna_cognition.py \
+            tests/test_goal_hygiene.py \
+            tests/test_fauna_field_observation.py \
             -v
