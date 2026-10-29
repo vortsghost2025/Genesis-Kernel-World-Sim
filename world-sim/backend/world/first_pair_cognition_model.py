@@ -1148,7 +1148,10 @@ Available actions:
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default. Holding tools (stone/iron axe, woven basket) increases gathering yield
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
-- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'storage_box', 'pantry', or 'container' stores food and materials; 'campfire' provides warmth; 'crafting_surface' enables tool crafting
+- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}; optional: addon_to referencing an existing adjacent structure to build a multi-room compound) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'shelter_stable' protects domestic animals from wolves and wandering; 'storage_cellar' preserves perishable food 4x longer; 'enclosed_garden' enables crop planting; 'campfire' or 'hearth' provides warmth (radiating throughout connected compound rooms); 'crafting_surface' enables tool crafting
+- hew_timber: strike a tree on your tile to fell it (requires: reason; optional: tool) — requires an axe (stone_axe, iron_axe) or knapped blade (flint_knife) to fell trees into structural timber logs for framing compounds
+- plant_crop: sow 1 unit of crop resource (wild_berries, edible_roots, wild_grain) into an enclosed garden bed (requires: target_id, resource_kind, reason)
+- harvest_crop: harvest mature produce and seed units from an enclosed garden bed (requires: target_id, reason)
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
 - attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area; a snake struck and defeated leaves 1 meat. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
@@ -1625,6 +1628,25 @@ def build_system_prompt(context: AgentContext) -> str:
                     _lines.append(
                         f"A snake is nearby; it is dangerous [id: {animal_id}]."
                     )
+
+        # Permanent continental scale grounding and active embodiment (Phase 10JV/10JX)
+        _lines.append(
+            "Fact: The continent is a vast, continuous landmass spanning 40,000 tiles (200x200). Your explored territory covers only a tiny fraction (<2%) of the world. Beyond your immediate sight lie high mountain ridges, river valleys, unexplored biomes, wild and domestic animals, and unmined resources. The world is never exhausted."
+        )
+        _lines.append(
+            "Fact: Part of being an embodied inhabitant is active learning: exploring the frontier, hewing timber, building modular compound shelters, and experimenting with physical materials to survive and thrive."
+        )
+
+        # Compound and garden affordances
+        pub_objs = context.world_public_objects or {}
+        for obj in pub_objs.values():
+            if isinstance(obj, dict):
+                otype = str(obj.get("object_type", "")).lower()
+                crop = obj.get("crop")
+                if "garden" in otype and crop:
+                    chb = crop.get("planted_heartbeat", 0)
+                    if context.heartbeat_number - chb >= 61:
+                        _lines.append(f"Garden bed [{obj.get('object_id')}] is mature. You can harvest it using harvest_crop.")
 
         if _lines:
             body_section = (

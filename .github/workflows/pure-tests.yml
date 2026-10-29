@@ -111,4 +111,6 @@ jobs:
             tests/test_fauna_cognition.py \
             tests/test_goal_hygiene.py \
             tests/test_fauna_field_observation.py \
+            tests/test_compound_architecture.py \
+            tests/test_cultivation.py \
             -v

@@ -1190,6 +1190,18 @@ class FirstPairRuntime:
                         return True  # a roofed fire keeps burning
                     continue  # an open fire is snuffed by the rain
                 return True
+
+        # Phase 10JX: Shared Compound Hearth (Thermodynamic Radiation)
+        compounds = getattr(self._world_state, "compounds", {}) or {}
+        for comp in compounds.values():
+            rooms = comp.get("rooms", {})
+            in_this_compound = any(r.get("tile_id") == tile_id for r in rooms.values())
+            if in_this_compound:
+                for r_oid, r_data in rooms.items():
+                    r_rec = self._world_state.public_objects.get(r_oid, {})
+                    r_type = str(r_rec.get("object_type", r_data.get("room_type", ""))).lower()
+                    if any(k in r_type for k in fire_kinds) and self._is_functional_fire(r_rec):
+                        return True
         return False
 
     def _nearby_smoke(self, tile_id: str,
@@ -1235,7 +1247,8 @@ class FirstPairRuntime:
         px, py = pos
         continent = self._tile_continent(tile_id)
         shelter_kinds = ("shelter", "hut", "wall", "roof", "cabin", "tent",
-                         "lean", "cave", "cavern", "overhang", "grotto", "burrow")
+                         "lean", "cave", "cavern", "overhang", "grotto", "burrow",
+                         "stable", "cellar")
         for record in self._world_state.public_objects.values():
             if not isinstance(record, dict):
                 continue
@@ -1250,6 +1263,11 @@ class FirstPairRuntime:
                 continue
             if max(abs(other[0] - px), abs(other[1] - py)) <= 1:
                 return True
+        compounds = getattr(self._world_state, "compounds", {}) or {}
+        for comp in compounds.values():
+            for r_data in comp.get("rooms", {}).values():
+                if r_data.get("roofed") and r_data.get("tile_id") == tile_id:
+                    return True
         return False
 
     def wildlife_tick(self, heartbeat_number: int) -> None:
@@ -1522,10 +1540,37 @@ class FirstPairRuntime:
             ate = 0.0
             if vitals.get("downed"):
                 ate = self._downed_tile_feed(agent_ref, position)
+
+            comfort_floor = survival.SHELTER_COMFORT_FLOOR
+            shelter_decay = survival.SHELTER_DECAY_FACTOR
+            regen_rate = None
+            if in_shelter and position:
+                comp_mass = 1
+                compounds = getattr(self._world_state, "compounds", {}) or {}
+                for comp in compounds.values():
+                    rooms = comp.get("rooms", {})
+                    if any(r.get("tile_id") == position for r in rooms.values()):
+                        comp_mass = max(comp_mass, comp.get("thermal_mass", len(rooms)))
+                if comp_mass >= 3:
+                    shelter_decay = 0.18
+                    comfort_floor = 62.0
+                    regen_rate = 1.50
+                elif comp_mass == 2:
+                    shelter_decay = 0.30
+                    comfort_floor = 52.0
+                    regen_rate = 1.25
+                else:
+                    shelter_decay = 0.45
+                    comfort_floor = 45.0
+                    regen_rate = 1.00
+
             self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
                 vitals, heartbeat_number, by_fire=by_fire,
                 in_shelter=in_shelter, ate_satisfaction=ate,
-                weather=weather)
+                weather=weather,
+                comfort_floor=comfort_floor,
+                shelter_decay_factor=shelter_decay,
+                regen_rate=regen_rate)
 
     def _downed_tile_feed(self, agent_ref: str, position: str | None) -> float:
         """A collapsed body eats from objects on its own tile.
@@ -1915,7 +1960,120 @@ class FirstPairRuntime:
             return self._execute_revise_charter(agent_ref, action, heartbeat_number)
         if action_type == "build":
             return self._execute_build(agent_ref, action, heartbeat_number)
+        if action_type == "hew_timber":
+            return self._execute_hew_timber(agent_ref, action, heartbeat_number)
+        if action_type == "plant_crop":
+            return self._execute_plant_crop(agent_ref, action, heartbeat_number)
+        if action_type == "harvest_crop":
+            return self._execute_harvest_crop(agent_ref, action, heartbeat_number)
         return {"status": "unknown_action", "action": action}
+
+    def _execute_hew_timber(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Causal tree felling: converts trees on tile into heavy structural timber."""
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        if not position:
+            return {"status": "rejected", "reason": "No current position"}
+
+        inv = self._get_agent_inventory(agent_ref)
+        has_axe = inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0 or inv.get("axe", 0) > 0
+        has_knife = inv.get("flint_knife", 0) > 0 or inv.get("knife", 0) > 0 or inv.get("knapped_flint", 0) > 0
+
+        if not (has_axe or has_knife):
+            return {
+                "status": "rejected",
+                "reason": "Cannot hew timber bare-handed. Requires an axe (stone_axe, iron_axe) or knapped blade (flint_knife) to fell trees into structural logs.",
+            }
+
+        tile_res = [r for r in self._current_tile_resources.get(position, []) if r.get("kind") in ("wood", "timber") and r.get("amount", 0) > 0]
+        if tile_res:
+            res = tile_res[0]
+            res["amount"] = max(0, res.get("amount", 0) - 1)
+
+        timber_yield = 2 if has_axe else 1
+        add_to_inventory(self._store, agent_ref, "timber", timber_yield)
+        return {
+            "status": "success",
+            "action_type": "hew_timber",
+            "timber_yield": timber_yield,
+            "tool_used": "axe" if has_axe else "blade",
+            "remaining": self._get_agent_inventory(agent_ref),
+            "detail": f"Hewn {timber_yield} structural timber logs from tree.",
+        }
+
+    def _execute_plant_crop(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Sow seed or root crop into an enclosed garden plot."""
+        target_id = action.get("target_id")
+        resource_kind = action.get("resource_kind", "")
+        if not target_id:
+            return {"status": "rejected", "reason": "Missing target_id for garden plot"}
+        obj = self._world_state.public_objects.get(target_id)
+        if not obj or not isinstance(obj, dict):
+            return {"status": "rejected", "reason": f"Garden plot '{target_id}' does not exist"}
+        obj_type = str(obj.get("object_type", "")).lower()
+        if "garden" not in obj_type:
+            return {"status": "rejected", "reason": f"Object '{target_id}' is not an enclosed garden plot"}
+
+        pos = self._world_state.tile_occupancy.get(agent_ref)
+        target_pos = obj.get("tile_id")
+        if pos != target_pos:
+            pxy = self._tile_xy(pos)
+            txy = self._tile_xy(target_pos)
+            if pxy is None or txy is None or max(abs(pxy[0] - txy[0]), abs(pxy[1] - txy[1])) > 1:
+                return {"status": "rejected", "reason": f"Too far from garden plot '{target_id}'"}
+
+        valid_crops = ("wild_berries", "edible_roots", "wild_grain")
+        if resource_kind not in valid_crops:
+            return {"status": "rejected", "reason": f"Invalid crop '{resource_kind}'. Valid crops are: {', '.join(valid_crops)}"}
+
+        inv = self._get_agent_inventory(agent_ref)
+        if inv.get(resource_kind, 0) < 1:
+            return {"status": "rejected", "reason": f"Insufficient {resource_kind}: need 1 to plant"}
+
+        add_to_inventory(self._store, agent_ref, resource_kind, -1)
+        obj["crop"] = {
+            "kind": resource_kind,
+            "planted_heartbeat": heartbeat_number,
+        }
+        return {
+            "status": "success",
+            "action_type": "plant_crop",
+            "target_id": target_id,
+            "crop_planted": resource_kind,
+            "remaining": self._get_agent_inventory(agent_ref),
+        }
+
+    def _execute_harvest_crop(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
+        """Harvest mature crops from an enclosed garden plot."""
+        target_id = action.get("target_id")
+        if not target_id:
+            return {"status": "rejected", "reason": "Missing target_id for garden plot"}
+        obj = self._world_state.public_objects.get(target_id)
+        if not obj or not isinstance(obj, dict):
+            return {"status": "rejected", "reason": f"Garden plot '{target_id}' does not exist"}
+
+        crop = obj.get("crop")
+        if not crop or not isinstance(crop, dict):
+            return {"status": "rejected", "reason": f"Garden plot '{target_id}' has no planted crop"}
+
+        planted_hb = crop.get("planted_heartbeat", 0)
+        age = heartbeat_number - planted_hb
+        if age < 61:
+            stage = "seeded" if age < 25 else "growing"
+            return {"status": "rejected", "reason": f"Crop is not mature yet (current stage: {stage}, age: {age} heartbeats; matures at 61)"}
+
+        crop_kind = crop.get("kind", "wild_berries")
+        yield_amount = 4
+        add_to_inventory(self._store, agent_ref, crop_kind, yield_amount)
+        obj["crop"] = None
+
+        return {
+            "status": "success",
+            "action_type": "harvest_crop",
+            "target_id": target_id,
+            "crop_harvested": crop_kind,
+            "amount_gathered": yield_amount,
+            "remaining": self._get_agent_inventory(agent_ref),
+        }
 
     def _execute_gather(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         """Collect a resource from the current tile."""
@@ -2060,11 +2218,31 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": "Invalid object_id"}
         if object_id in self._world_state.public_objects:
             return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
-        current_pos = self._world_state.tile_occupancy.get(
-            agent_ref, self._habitat["starting_tile_ids"][agent_ref]
-        )
-        if tile_id != current_pos:
-            return {"status": "rejected", "reason": f"Cannot build on tile {tile_id}: you are at {current_pos}"}
+        addon_to = action.get("addon_to")
+        parent_record = None
+        if addon_to:
+            parent_record = self._world_state.public_objects.get(addon_to)
+            if not parent_record or not isinstance(parent_record, dict):
+                return {"status": "rejected", "reason": f"Parent structure '{addon_to}' does not exist (nonexistent parent)"}
+            parent_tile = parent_record.get("tile_id")
+            parent_xy = self._tile_xy(parent_tile)
+            target_xy = self._tile_xy(tile_id)
+            if parent_xy is None or target_xy is None or max(abs(parent_xy[0] - target_xy[0]), abs(parent_xy[1] - target_xy[1])) > 1:
+                return {
+                    "status": "rejected",
+                    "reason": f"Addon tile {tile_id} is not adjacent to parent structure {addon_to} (tile: {parent_tile})"
+                }
+            current_pos = self._world_state.tile_occupancy.get(
+                agent_ref, self._habitat["starting_tile_ids"][agent_ref]
+            )
+            if tile_id != current_pos and parent_tile != current_pos:
+                return {"status": "rejected", "reason": f"Cannot build addon on tile {tile_id}: you are at {current_pos}"}
+        else:
+            current_pos = self._world_state.tile_occupancy.get(
+                agent_ref, self._habitat["starting_tile_ids"][agent_ref]
+            )
+            if tile_id != current_pos:
+                return {"status": "rejected", "reason": f"Cannot build on tile {tile_id}: you are at {current_pos}"}
         # Placement authority: you may always build on the tile you stand
         # on. Movement already governed how you got here (fog-derived
         # effective tiles grow with exploration); the old static policy
@@ -2105,6 +2283,64 @@ class FirstPairRuntime:
             materials=dict(materials),
         )
         self._world_state.public_objects[object_id] = record.to_envelope()
+
+        # Phase 10JX: Compound network tracking
+        if addon_to and parent_record:
+            if not hasattr(self._world_state, "compounds") or self._world_state.compounds is None:
+                self._world_state.compounds = {}
+            target_xy = self._tile_xy(tile_id)
+            parent_tile = parent_record.get("tile_id")
+            parent_xy = self._tile_xy(parent_tile)
+            target_compound = None
+            for c in self._world_state.compounds.values():
+                if addon_to in c.get("rooms", {}):
+                    target_compound = c
+                    break
+            is_hearth = "hearth" in str(object_type).lower() or "fire" in str(object_type).lower()
+            if target_compound is None:
+                compound_id = f"compound-{agent_ref}-{heartbeat_number}"
+                parent_is_hearth = "hearth" in str(parent_record.get("object_type", "")).lower() or "fire" in str(parent_record.get("object_type", "")).lower()
+                rooms = {
+                    addon_to: {
+                        "room_type": parent_record.get("object_type", "living_hearth"),
+                        "tile": list(parent_xy) if parent_xy else None,
+                        "tile_id": parent_tile,
+                        "roofed": True,
+                        "walls": True,
+                        "has_hearth": parent_is_hearth,
+                    },
+                    object_id: {
+                        "room_type": object_type,
+                        "tile": list(target_xy) if target_xy else None,
+                        "tile_id": tile_id,
+                        "roofed": True if "garden" not in str(object_type).lower() else False,
+                        "walls": True,
+                        "addon_to": addon_to,
+                        "has_hearth": is_hearth,
+                    }
+                }
+                hearth_tile = parent_tile if parent_is_hearth else (tile_id if is_hearth else None)
+                self._world_state.compounds[compound_id] = {
+                    "compound_id": compound_id,
+                    "owner_agent_id": view["agent_id"],
+                    "root_object_id": addon_to,
+                    "rooms": rooms,
+                    "thermal_mass": sum(1 for r in rooms.values() if r.get("roofed")),
+                    "active_hearth_tile": hearth_tile,
+                }
+            else:
+                target_compound["rooms"][object_id] = {
+                    "room_type": object_type,
+                    "tile": list(target_xy) if target_xy else None,
+                    "tile_id": tile_id,
+                    "roofed": True if "garden" not in str(object_type).lower() else False,
+                    "walls": True,
+                    "addon_to": addon_to,
+                    "has_hearth": is_hearth,
+                }
+                target_compound["thermal_mass"] = sum(1 for r in target_compound["rooms"].values() if r.get("roofed"))
+                if is_hearth:
+                    target_compound["active_hearth_tile"] = tile_id
         return {
             "status": "success",
             "object_id": object_id,

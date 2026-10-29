@@ -329,6 +329,9 @@ class WorldStateRecord:
     # journal still claimed fauna_applied. Absent from stores written
     # before the fauna domain existed, which load as an empty list.
     fauna: list = field(default_factory=list)
+    # 10JX: Compound Settlement Architecture: spatially contiguous networks of
+    # structural objects sharing enclosure, thermal mass, and security.
+    compounds: dict[str, dict] = field(default_factory=dict)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = "world_state.1"
@@ -2458,7 +2461,10 @@ def _default_declaration() -> dict:
 def _load_world_state(store: FirstPairPersistenceStore) -> WorldStateRecord:
     data = store._read_json(store._path(_WORLD_STATE_FILE))
     if data and data.get("type") == "world_state_record":
-        return WorldStateRecord(**data["data"])
+        from dataclasses import fields
+        valid_fields = {f.name for f in fields(WorldStateRecord)}
+        record_data = {k: v for k, v in data.get("data", {}).items() if k in valid_fields}
+        return WorldStateRecord(**record_data)
     return WorldStateRecord()
 
 

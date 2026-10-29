@@ -113,23 +113,28 @@ WARMTH_APPROACH_RATE = 0.10   # fraction of the gap closed per heartbeat
 FIRE_RADIUS = 3               # tiles: lit fire restores warmth here
 FIRE_WARMTH_PER_HB = 9.0      # standing by a fire, warmth climbs fast
 SHELTER_DECAY_FACTOR = 0.45   # inside shelter: cold drains < half as fast
+SHELTER_COMFORT_FLOOR = 45.0  # inside shelter: never feels colder than 45
 FREEZE_THRESHOLD = 20.0       # at/below this warmth: vitality drains
 
 
 def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
-                in_shelter: bool, wet: float = 0.0) -> float:
+                in_shelter: bool, wet: float = 0.0,
+                comfort_floor: float = SHELTER_COMFORT_FLOOR,
+                shelter_decay_factor: float = SHELTER_DECAY_FACTOR) -> float:
     """Warmth drifts toward the ambient comfort level.
 
     A fire dominates: warmth climbs toward 100 fast regardless of season.
     A shelter insulates: inside, comfort never falls below the floor -
     a structure traps heat and blocks wind, so a winter night inside is
     cool, not lethal, and a cold body warms toward the floor.
+    Compound architecture (10JV/10JX) increases the comfort floor and
+    reduces cold decay as rooms expand.
     A soaked body (wet >= 50) holds almost no heat: warmth moves at 0.4x
     speed in both directions - you cannot warm up while wet. epistemic.6.
     """
     comfort = max(0.0, min(100.0, ambient_temp))
     if in_shelter:
-        comfort = max(comfort, SHELTER_COMFORT_FLOOR)
+        comfort = max(comfort, comfort_floor)
     if by_fire and wet < 50.0:
         return min(100.0, warmth + FIRE_WARMTH_PER_HB)
     gap = comfort - warmth
@@ -137,7 +142,7 @@ def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
     if wet >= 50.0:
         change *= 0.4
     if change < 0 and in_shelter:
-        change *= SHELTER_DECAY_FACTOR
+        change *= shelter_decay_factor
     return max(0.0, min(100.0, warmth + change))
 
 
@@ -146,7 +151,6 @@ def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
 # inside never feels colder than 45 even in a blizzard; rest inside
 # heals vitality twice as fast. Summer days make shelters optional;
 # winter nights and storms make them the difference between 13 and 45.
-SHELTER_COMFORT_FLOOR = 45.0
 REST_REGEN_IN_SHELTER = 1.0      # fed + sheltered: heals 2x
 DOWNED_REGEN_IN_SHELTER = 0.4    # downed in shelter: stands ~2.5x sooner
 
@@ -259,9 +263,11 @@ STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
 
 
 def vitality_next(vitality: float, hunger: float, warmth: float,
-                  downed: bool, in_shelter: bool = False) -> float:
+                  downed: bool, in_shelter: bool = False,
+                  regen_rate: float | None = None) -> float:
     """Vitality drains under neglect, regenerates under care.
-    Rest inside a shelter heals twice as fast - comfort is medicine."""
+    Rest inside a shelter heals faster - comfort is medicine.
+    Compounds provide enhanced vitality recovery (Phase 10JV/10JX)."""
     if downed:
         rate = DOWNED_REGEN_IN_SHELTER if in_shelter else DOWNED_PASSIVE_REGEN
         return min(RECOVERY_STAND_AT, vitality + rate)
@@ -271,7 +277,10 @@ def vitality_next(vitality: float, hunger: float, warmth: float,
     if warmth <= FREEZE_THRESHOLD:
         v -= FREEZING_DRAIN
     if hunger <= 45.0 and warmth >= 50.0:
-        v += REST_REGEN_IN_SHELTER if in_shelter else REGEN_RATE
+        if regen_rate is not None:
+            v += regen_rate
+        else:
+            v += REST_REGEN_IN_SHELTER if in_shelter else REGEN_RATE
     return max(0.0, min(VITALITY_CAP, v))
 # --- the vitals block -------------------------------------------------------
 def initial_vitals() -> dict:
@@ -282,7 +291,10 @@ def initial_vitals() -> dict:
 
 def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
                     in_shelter: bool, ate_satisfaction: float = 0.0,
-                    weather: str = "clear") -> dict:
+                    weather: str = "clear",
+                    comfort_floor: float = SHELTER_COMFORT_FLOOR,
+                    shelter_decay_factor: float = SHELTER_DECAY_FACTOR,
+                    regen_rate: float | None = None) -> dict:
     """One heartbeat of embodiment. Returns a NEW vitals dict.
 
     `ate_satisfaction` is the hunger points satisfied by food eaten this
@@ -296,10 +308,13 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
                            in_shelter, by_fire)
     temp = effective_temperature(heartbeat_number, weather)
     warmth = warmth_next(vitals.get("warmth", 50.0), temp,
-                         by_fire, in_shelter, wetness)
+                         by_fire, in_shelter, wetness,
+                         comfort_floor=comfort_floor,
+                         shelter_decay_factor=shelter_decay_factor)
     downed = bool(vitals.get("downed", False))
     vitality = vitality_next(vitals.get("vitality", 100.0), hunger,
-                             warmth, downed, in_shelter)
+                             warmth, downed, in_shelter,
+                             regen_rate=regen_rate)
     if weather == "storm" and not in_shelter and not downed:
         vitality = max(0.0, vitality - STORM_EXPOSURE_DRAIN)
     if downed and vitality >= RECOVERY_STAND_AT:
