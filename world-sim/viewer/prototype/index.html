@@ -2754,6 +2754,12 @@ function focusCiv(pairName) {
 // Camera Smoothing with Terrain Clearance
 let camTargetPos = camera.position.clone();
 let controlsTargetPos = controls.target.clone();
+// True only while a *scripted* camera move (focus button, camera mode) is
+// still converging. The animate loop must never lerp unconditionally: doing
+// so re-imposes the last scripted target every frame and silently undoes the
+// user's own orbit/zoom, which reads as a camera that snaps back and refuses
+// to move or scroll.
+let camAnimating = false;
 
 function smoothMoveCamera(newPos, newTarget, immediate = false) {
   if (selectedPair !== "orbit") {
@@ -2769,9 +2775,33 @@ function smoothMoveCamera(newPos, newTarget, immediate = false) {
   if (immediate) {
     camera.position.copy(newPos);
     controls.target.copy(newTarget);
+    camAnimating = false;
     controls.update();
+  } else {
+    camAnimating = true;
   }
 }
+
+// The moment the operator touches the scene, the camera belongs to them.
+// Release any in-flight scripted move and resync the targets so a later
+// smoothMoveCamera starts from where the operator actually left the camera,
+// instead of yanking back to a stale position.
+controls.addEventListener('start', function onUserCameraStart() {
+  camAnimating = false;
+  camTargetPos.copy(camera.position);
+  controlsTargetPos.copy(controls.target);
+});
+
+// Expose both so the HUD's camera readout and the 'immediate' focus paths
+// cannot drift apart from the live controls state.
+window.__cameraControl = {
+  get animating() { return camAnimating; },
+  resync() {
+    camTargetPos.copy(camera.position);
+    controlsTargetPos.copy(controls.target);
+    camAnimating = false;
+  }
+};
 
 // -------------------------------------------------------------
 // TELEMETRY & PLAYBACK
@@ -3391,9 +3421,20 @@ function animate(time) {
   const dt = (time - lastTick) / 1000;
   lastTick = time;
 
-  // Camera interpolation
-  camera.position.lerp(camTargetPos, 0.12);
-  controls.target.lerp(controlsTargetPos, 0.12);
+  // Camera interpolation. Only while a scripted move is converging -- see
+  // the note at camAnimating's declaration. Once the operator takes over
+  // (controls 'start') or the move settles, the loop stops touching the
+  // camera entirely and OrbitControls owns it outright.
+  if (camAnimating) {
+    camera.position.lerp(camTargetPos, 0.12);
+    controls.target.lerp(controlsTargetPos, 0.12);
+    const settled =
+      camera.position.distanceTo(camTargetPos) < 0.05 &&
+      controls.target.distanceTo(controlsTargetPos) < 0.05;
+    if (settled) {
+      camAnimating = false;
+    }
+  }
   controls.update();
 
   // Playback advancement
