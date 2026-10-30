@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -1402,6 +1403,22 @@ class FirstPairRuntime:
                 howling = True
         return {"nearby": visible, "howling": howling}
 
+    @staticmethod
+    def _cardinal_bearing(from_xy: tuple[int, int], to_xy: tuple[int, int]) -> str:
+        """Compute 8-way compass bearing from from_xy to to_xy using grid coordinates.
+
+        Using Genesis coordinate conventions (dx > 0 East, dx < 0 West, dy < 0 North, dy > 0 South).
+        """
+        dx = to_xy[0] - from_xy[0]
+        dy = to_xy[1] - from_xy[1]
+        if dx == 0 and dy == 0:
+            return ""
+        angle = math.degrees(math.atan2(dy, dx))
+        norm_angle = (angle + 360.0) % 360.0
+        sector = int((norm_angle + 22.5) // 45.0) % 8
+        sectors = ("east", "southeast", "south", "southwest", "west", "northwest", "north", "northeast")
+        return sectors[sector]
+
     def _fauna_visible(self, agent_ref: str) -> dict:
         """What this agent perceives of domesticatable fauna and snakes."""
         position = self._world_state.tile_occupancy.get(agent_ref)
@@ -1433,6 +1450,7 @@ class FirstPairRuntime:
                         "kind": kind,
                         "id": entity.get("id"),
                         "distance": dist,
+                        "bearing": self._cardinal_bearing(pos, tile),
                     }
                     if kind in ("cow", "horse"):
                         item["trust"] = int(entity.get("trust", 0))

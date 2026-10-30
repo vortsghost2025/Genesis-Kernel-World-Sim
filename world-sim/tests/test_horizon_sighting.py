@@ -1,11 +1,14 @@
-"""Tests for Phase 10KH: Distant Horizon Sighting & Prompt Framing.
+"""Tests for Phase 10KH/10KS: Distant Horizon Sighting, Directionality & Prompt Framing.
 
 Verifies:
 1. Sighting horizon bounds: dist <= 6 -> nearby only; 7 <= dist <= 15 -> distant only; dist >= 16 -> neither.
 2. Snake exclusion: snakes never appear in distant sighting.
-3. Prompt line formatting: distant sightings are purely informational with no interaction verbs.
+3. Prompt line formatting (10KS Priority 2): distant sightings include directional bearing and actionable
+   navigational affordance ("Moving in that direction can bring it within pastoral range"), while
+   explicitly excluding interaction verbs (offer_food, milk_animal) and the demotivating "too far" copy.
 4. Sorting & deduplication: distant animals sorted by distance, deduplicated by id.
-5. Operator factual message discipline: operator statement contains no banned directive phrases.
+5. Cardinal bearing (10KS Priority 2): FirstPairRuntime._cardinal_bearing computes 8-way compass direction.
+6. Operator factual message discipline: operator statement contains no banned directive phrases.
 """
 from __future__ import annotations
 
@@ -27,6 +30,31 @@ def _mock_runtime_with_fauna(agent_ref: str, agent_xy: tuple[int, int], fauna_en
     rt._tile_xy = lambda tid: tuple(map(int, tid.replace("cont_a_gen_", "").split("_"))) if tid.startswith("cont_a_gen_") else None
     rt._entity_xy = lambda t: tuple(t) if isinstance(t, (list, tuple)) else None
     return rt
+
+
+def test_cardinal_bearing_eight_octants():
+    """Verify 8-way compass bearing calculation across standard coordinate grid."""
+    center = (0, 0)
+    octants = [
+        ((0, -10), "north"),
+        ((10, -10), "northeast"),
+        ((10, 0), "east"),
+        ((10, 10), "southeast"),
+        ((0, 10), "south"),
+        ((-10, 10), "southwest"),
+        ((-10, 0), "west"),
+        ((-10, -10), "northwest"),
+        # Near-axis off angles
+        ((10, -2), "east"),
+        ((10, -8), "northeast"),
+        ((2, -10), "north"),
+        ((-2, -10), "north"),
+    ]
+    for target, expected in octants:
+        bearing = first_pair_runtime.FirstPairRuntime._cardinal_bearing(center, target)
+        assert bearing == expected, f"Bearing from {center} to {target} was '{bearing}', expected '{expected}'"
+
+    assert first_pair_runtime.FirstPairRuntime._cardinal_bearing(center, center) == ""
 
 
 def test_horizon_sighting_bounds():
@@ -58,6 +86,25 @@ def test_horizon_sighting_bounds():
     assert "cow-vfar" not in nearby_ids and "cow-vfar" not in distant_ids
 
 
+def test_horizon_sighting_includes_directional_bearing():
+    """Distant sightings must carry an accurate directional bearing field."""
+    agent_ref = "east_adam"
+    agent_xy = (10, 10)
+    entities = [
+        {"id": "cow-ne", "kind": "cow", "tile": [18, 2], "trust": 0, "tamed": False}, # dx=+8, dy=-8 -> dist 8 northeast
+        {"id": "horse-w", "kind": "horse", "tile": [0, 10], "trust": 0, "tamed": False}, # dx=-10, dy=0 -> dist 10 west
+        {"id": "cow-s", "kind": "cow", "tile": [10, 22], "trust": 0, "tamed": False}, # dx=0, dy=+12 -> dist 12 south
+    ]
+
+    rt = _mock_runtime_with_fauna(agent_ref, agent_xy, entities)
+    vis = rt._fauna_visible(agent_ref)
+
+    distant_map = {e["id"]: e for e in vis["distant"]}
+    assert distant_map["cow-ne"]["bearing"] == "northeast"
+    assert distant_map["horse-w"]["bearing"] == "west"
+    assert distant_map["cow-s"]["bearing"] == "south"
+
+
 def test_horizon_excludes_snakes():
     """Snakes at distant horizon (dist 7-15) must NEVER be included in distant list."""
     agent_ref = "east_adam"
@@ -78,38 +125,30 @@ def test_horizon_excludes_snakes():
     assert len(distant_ids) == 0, f"Distant list must be empty, got {distant_ids}"
 
 
-def test_prompt_horizon_line_has_no_interaction_verbs():
-    """Distant animal prompt line must be purely observational, omitting offer_food / milk_animal."""
-    ctx = types.SimpleNamespace()
-    ctx.observation = {
+def test_prompt_horizon_line_renders_actionable_navigation_and_no_verbs():
+    """Distant animal prompt line must render bearing and directional affordance, omitting interaction verbs."""
+    obs = {
         "fauna": {
             "nearby": [],
             "distant": [
-                {"kind": "cow", "id": "cow-123", "distance": 12, "trust": 0, "tamed": False},
-                {"kind": "horse", "id": "horse-456", "distance": 9, "trust": 0, "tamed": False},
+                {"kind": "cow", "id": "cow-123", "distance": 12, "bearing": "northeast", "trust": 0, "tamed": False},
+                {"kind": "horse", "id": "horse-456", "distance": 9, "bearing": "west", "trust": 0, "tamed": False},
             ],
-        },
-        "self_body": {"state": "healthy", "hunger": 10, "warmth": 90, "vitality": 100},
-        "environment": {"weather": "clear", "temperature": 18, "season": "spring", "time_of_day": "day"},
+        }
     }
-    ctx.goals = []
-    ctx.inventory = {}
-    ctx.carried_weight = 0
-    ctx.max_capacity = 20
-    ctx.current_tile = "cont_a_gen_0_0"
-    ctx.agent_ref = "east_adam"
-    ctx.pair_id = "east"
 
-    # Minimal duck-typed model to format prompt lines
-    lines = first_pair_cognition_model._format_fauna_lines(ctx.observation)
+    lines = first_pair_cognition_model._format_fauna_lines(obs)
     full_text = " ".join(lines)
 
     assert "cow-123" in full_text
     assert "horse-456" in full_text
+    assert "to the northeast" in full_text
+    assert "to the west" in full_text
+    assert "moving in that direction can bring it within pastoral range" in full_text.lower()
+    assert "too far to interact" not in full_text.lower(), "Inhibitory copy must be removed"
     # Forbidden interaction verbs on distant lines:
     assert "offer_food" not in full_text, "Distant line must NOT suggest offer_food"
     assert "milk_animal" not in full_text, "Distant line must NOT suggest milk_animal"
-    assert "too far to interact" in full_text.lower() or "horizon" in full_text.lower()
 
 
 def test_operator_message_is_factual_only():

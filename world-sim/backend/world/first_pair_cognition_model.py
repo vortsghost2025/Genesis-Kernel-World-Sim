@@ -1272,9 +1272,12 @@ def _format_fauna_lines(obs_or_fauna_obs: dict) -> list[str]:
             kind = animal.get("kind", "animal")
             aid = animal.get("id", "unknown")
             dist = animal.get("distance")
-            dist_str = f" about {dist} tiles away" if dist is not None else ""
+            dist_str = f" ~{dist} tiles away" if dist is not None else ""
+            bearing = animal.get("bearing", "")
+            bearing_str = f" to the {bearing}" if bearing else ""
             lines.append(
-                f"On the horizon: a {kind} grazes{dist_str} [id: {aid}]. It is too far to interact with now."
+                f"On the horizon: a {kind} grazes{dist_str}{bearing_str} [id: {aid}]. "
+                f"Moving in that direction can bring it within pastoral range."
             )
 
     return lines
