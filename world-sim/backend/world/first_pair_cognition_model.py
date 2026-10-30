@@ -1136,6 +1136,40 @@ def _public_record_age_line(record: dict | None) -> str:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
+def _craft_recipe_advertisement() -> str:
+    """Disclose the crafting recipes as facts, not instructions.
+
+    Phase 10KM: `_CRAFT_RECIPES` was previously a private table, so the
+    prompt named only tool *categories* and the word "recipe" never
+    appeared. An agent could hold the exact materials for a flint_knife and
+    have no way to know the formula. This renders the table itself, so the
+    prompt can never drift from the code that enforces it.
+
+    It states what the world *is* (which materials combine into what) and
+    never what an agent *should make* -- the Standing Rule 7 line between
+    fact and strategy. The banned-phrase assertion lives in
+    tests/test_load_bearing_construction.py.
+    """
+    entries = []
+    # Imported lazily: first_pair_runtime imports this module at load time,
+    # so a module-level import here would be circular.
+    from backend.world.first_pair_runtime import FirstPairRuntime as _Runtime
+
+    for materials, output in sorted(
+        _Runtime._CRAFT_RECIPES.items(), key=lambda kv: (kv[1], kv[0])
+    ):
+        formula = ", ".join(f"{kind} x{amount}" for kind, amount in materials)
+        entries.append(f"{formula} -> {output}")
+    if not entries:
+        return ""
+    body = "; ".join(entries)
+    return (
+        "- Crafting recipes (use_object with operation 'craft' while standing on a "
+        "crafting_surface, forge, workbench, or workshop; declare the materials "
+        f"exactly as shown): {body}."
+    )
+
+
 _AVAILABLE_ACTIONS_DESC = """
 Available actions:
 - no_action: do nothing this cycle
@@ -1284,6 +1318,9 @@ def _format_fauna_lines(obs_or_fauna_obs: dict) -> list[str]:
 
 
 def build_system_prompt(context: AgentContext) -> str:
+    # Resolved at call time, not import time: first_pair_runtime imports this
+    # module while loading, so a module-level call would be circular.
+    _CRAFT_RECIPE_DESC = _craft_recipe_advertisement()
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
         json.dumps(context.unanswered_questions, indent=2)
@@ -1783,6 +1820,7 @@ Unresolved questions you have asked:
 Answers you have received:
 {answered_str}
 {_AVAILABLE_ACTIONS_DESC}
+{_CRAFT_RECIPE_DESC}
 {_MESSAGE_FIELD_DESC}
 You must respond with a single JSON object containing exactly these fields:
 - observation_summary (string): a concise summary of what you observe

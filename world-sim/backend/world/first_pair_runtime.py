@@ -120,6 +120,33 @@ from backend.world.mystery_reveal import (
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
 MAX_ACTIVE_GOALS_EXPOSED: int = 8
+
+# Phase 10KM: structural builds are load-bearing. A shelter/hut/cabin/roof
+# carries weight, so it needs hewn structural timber -- which in turn needs a
+# tree felled with an axe or knapped blade, which needs a crafted tool, which
+# needs a crafting surface. Campfires and other non-structural types keep
+# their existing material rules: fire must stay cheap.
+_STRUCTURAL_TIMBER_MIN = {
+    "shelter": 2,
+    "cabin": 3,
+    "hut": 2,
+    "roof": 1,
+}
+
+# Attaching a room to an existing structure shares walls, so the structural
+# component is discounted. Half the timber minimum, rounding up.
+_ADDON_STRUCTURAL_DISCOUNT_DIVISOR = 2
+
+# Phrases that would turn a disclosure of facts into an instruction. Used by
+# the cognition-model recipe advertisement and by its regression test.
+_BANNED_DIRECTIVE_PHRASES = (
+    "build a",
+    "go to",
+    "you should",
+    "move to",
+    "try building",
+    "head to",
+)
 _SAFE_OBJECT_ID_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
 )
@@ -2280,6 +2307,42 @@ class FirstPairRuntime:
         # whitelist was never updated and refused the agent's own tile
         # after she moved (HB701-743: 26 build attempts on her own tile,
         # all refused "Tile ... not in allowed tiles").
+
+        # Phase 10KM: structural builds are load-bearing. Anything carrying a
+        # roof must include hewn structural timber, which can only come from
+        # hew_timber with an axe or knapped blade -- which needs a crafted
+        # tool -- which needs a crafting surface. Attaching a room shares
+        # walls, so the structural component is discounted. Non-structural
+        # types (campfire, crafting_surface, enclosed_garden, storage) are
+        # unaffected: fire must stay cheap.
+        lowered_type = str(object_type or "").lower()
+        timber_min = 0
+        for structural, minimum in _STRUCTURAL_TIMBER_MIN.items():
+            if structural in lowered_type:
+                timber_min = max(timber_min, minimum)
+                break
+        if timber_min and addon_to and parent_record:
+            timber_min = (
+                timber_min + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1
+            ) // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
+        if timber_min:
+            declared_timber = 0
+            if isinstance(materials, dict):
+                try:
+                    declared_timber = int(materials.get("timber", 0) or 0)
+                except (TypeError, ValueError):
+                    declared_timber = 0
+            if declared_timber < timber_min:
+                return {
+                    "status": "rejected",
+                    "reason": (
+                        f"A {object_type} needs at least {timber_min} structural "
+                        f"timber to bear its own weight; you declared "
+                        f"{declared_timber}. Fell trees with hew_timber once you "
+                        f"hold an axe (stone_axe, iron_axe) or knapped blade "
+                        f"(flint_knife)."
+                    ),
+                }
 
         sanitized = sanitize_public_text(raw_description)
         if not sanitized.strip():
