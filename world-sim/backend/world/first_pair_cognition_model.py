@@ -1193,6 +1193,40 @@ def _public_record_age_line(record: dict | None) -> str:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
+def _structural_timber_requirement_desc() -> str:
+    """Disclose the structural timber floor as a fact, sourced from the runtime.
+
+    Live evidence (HB 6353-6394, verified 2026-10-31): Adam completed the whole
+    chain -- built a crafting_surface at HB 6354, crafted stone_axe at HB 6355,
+    and hewed timber twice at HB 6386/6388 -- yet every one of his shelter
+    builds declared materials of {"clay": 5, "stone": 5, "wood": 5} and never
+    included timber, so _execute_build rejected each one. He was not refusing
+    to build and he was not stuck on collisions; he was never told that a
+    structural type must DECLARE timber among its materials.
+
+    The example dict on the build line taught the opposite ("{"stone": 3} or
+    {"wood": 4}"). This renders the actual floor from the runtime's own table,
+    so the prompt can never drift from the code that enforces it.
+    """
+    from backend.world.first_pair_runtime import (
+        FirstPairRuntime as _Runtime,
+        _STRUCTURAL_TIMBER_MIN,
+    )
+
+    if not _STRUCTURAL_TIMBER_MIN:
+        return ""
+    parts = ", ".join(
+        "{} (at least {} timber)".format(kind, minimum)
+        for kind, minimum in sorted(_STRUCTURAL_TIMBER_MIN.items())
+    )
+    return (
+        "- Structural types need timber declared among their materials: %s. "
+        "Timber comes only from hew_timber on a tree tile, which needs an axe "
+        "(stone_axe, iron_axe) or knapped blade (flint_knife); excluding timber "
+        "from the materials dict rejects the build." % parts
+    )
+
+
 def _craft_recipe_advertisement() -> str:
     """Disclose the crafting recipes as facts, not instructions.
 
@@ -1378,6 +1412,7 @@ def build_system_prompt(context: AgentContext) -> str:
     # Resolved at call time, not import time: first_pair_runtime imports this
     # module while loading, so a module-level call would be circular.
     _CRAFT_RECIPE_DESC = _craft_recipe_advertisement()
+    _STRUCTURAL_TIMBER_DESC = _structural_timber_requirement_desc()
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
         json.dumps(context.unanswered_questions, indent=2)
@@ -1919,6 +1954,7 @@ Answers you have received:
 {answered_str}
 {_AVAILABLE_ACTIONS_DESC}
 {_CRAFT_RECIPE_DESC}
+{_STRUCTURAL_TIMBER_DESC}
 {_MESSAGE_FIELD_DESC}
 You must respond with a single JSON object containing exactly these fields:
 - observation_summary (string): a concise summary of what you observe

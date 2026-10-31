@@ -333,3 +333,61 @@ def test_build_chronicle_records_craft_and_hew_timber():
     assert "hew_timber" in kinds, f"Expected 'hew_timber' in chronicle kinds, got: {chron}"
     assert any("stone_axe" in t for t in texts)
     assert any("timber" in t for t in texts)
+
+
+def test_structural_timber_requirement_is_disclosed():
+    """The prompt must state that structural types must DECLARE timber.
+
+    Live evidence, HB 6353-6394: Adam completed the whole chain (crafting
+    surface at 6354, stone_axe at 6355, hew_timber at 6386 and 6388) and then
+    attempted a shelter five times declaring {"clay": 5, "stone": 5, "wood": 5}
+    -- never including timber -- so every build was rejected by the 10KM
+    floor. The build action's own example dict taught "{"stone": 3}" and said
+    nothing about timber, so the requirement was invisible until rejection.
+    This is the disclosure guard: the fact must be in the prompt, sourced from
+    the runtime table so the two cannot drift.
+    """
+    from backend.world.first_pair_cognition_model import (
+        _structural_timber_requirement_desc,
+    )
+    from backend.world.first_pair_runtime import _STRUCTURAL_TIMBER_MIN
+
+    desc = _structural_timber_requirement_desc()
+    for kind, minimum in _STRUCTURAL_TIMBER_MIN.items():
+        assert kind in desc, f"{kind} missing from timber disclosure"
+        assert str(minimum) in desc, f"floor for {kind} not stated"
+
+    # The failure mode was omission, so the wording must be explicit about
+    # declaring timber rather than merely holding it.
+    assert "declared among their materials" in desc, (
+        "disclosure must say timber must be DECLARED, not merely held"
+    )
+    assert "hew_timber" in desc, "disclosure must name the source of timber"
+
+    # Facts, not instructions.
+    for phrase in ("build a", "go to", "you should", "move to", "head to"):
+        assert phrase not in desc.lower(), f"directive phrase {phrase!r} leaked in"
+
+
+def test_structural_timber_disclosure_reaches_full_prompt():
+    """The disclosure must survive into build_system_prompt output, not just
+    exist as a helper -- a helper nobody calls is the same failure as the
+    schema parity bug this file guards."""
+    from backend.world.first_pair_cognition_interface import AgentContext
+    from backend.world.first_pair_cognition_model import build_system_prompt
+
+    ctx = AgentContext(
+        agent_id="a", canonical_name="Adam", canonical_ref="east_adam",
+        heartbeat_number=1, position="cont_a_north_000",
+        observation={"self_body": {"hunger": 50.0, "vitality": 100.0,
+                                   "warmth": 100.0, "wetness": 0.0,
+                                   "downed": False}},
+        memory=[], goals=[], unanswered_questions=[], world_public_objects={},
+        habitat_allowed_tiles=["cont_a_north_000"], habitat_movement_allowed=False,
+        previous_action=None, timestamp_utc="2026-10-31T00:00:00Z",
+        inventory={"timber": 0, "stone": 444}, owns_shelter=False,
+    )
+    prompt = build_system_prompt(ctx)
+    assert "Structural types need timber declared" in prompt, (
+        "timber requirement never reaches the rendered prompt"
+    )
