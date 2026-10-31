@@ -3195,6 +3195,8 @@ function renderSidebar() {
   }
 }
 
+let _lastCamSyncHb = null;
+
 function syncHeartbeatScene(immediateCam = false) {
   const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
   if (selectedPair === "orbit") {
@@ -3204,7 +3206,16 @@ function syncHeartbeatScene(immediateCam = false) {
     updatePublicObjectsAndClearings(pairName, currentHb);
     updateFaunaFigures(pairName, currentHb);
     updateWeatherAtmospherics(pairName, currentHb);
-    applyCameraMode(activeCamMode, immediateCam);
+    // Re-aim the camera only when the displayed heartbeat actually changed, or
+    // when a caller explicitly asks (a camera-mode button, Enter House, the
+    // replay jump). The 12-second live poll calls this with unchanged currentHb,
+    // and re-aiming on every poll slid the camera back out from wherever the
+    // operator had parked it -- even though nothing on screen had moved.
+    // Camera-mode buttons call applyCameraMode directly, so they still work.
+    if (immediateCam || currentHb !== _lastCamSyncHb) {
+      applyCameraMode(activeCamMode, immediateCam);
+    }
+    _lastCamSyncHb = currentHb;
   }
   updateHUD();
   renderSidebar();
