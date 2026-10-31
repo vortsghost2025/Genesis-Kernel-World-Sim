@@ -484,6 +484,25 @@ header {
   font-family: var(--font-mono);
   font-size: 0.66rem;
   color: var(--text-tertiary);
+  margin-top: 2px;
+}
+/* Carrying (10LD): the exporter's `inventories` were never read, so gathering
+   was invisible. Largest holdings first, capped at six kinds. */
+.carrying-line {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: rgba(46, 213, 115, 0.06);
+  border: 1px solid rgba(46, 213, 115, 0.18);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 8px 0 10px 0;
+}
+.carrying-line:empty::before {
+  content: "CARRYING: nothing";
+}
+  color: var(--text-tertiary);
   text-transform: uppercase;
 }
 .vitals-grid {
@@ -1397,10 +1416,10 @@ function createCaveSprite(x, z, h) {
   return group;
 }
 
-function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow = true) {
+function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow = true, tintHex = 0xffffff) {
   const w = 0.78 * scale;
   const ht = 0.66 * scale;
-  const group = createGroundedProp(propTextures.campfire, w, ht, x, z, h, withShadow ? 0.42 * scale : 0, withShadow ? 0.42 * scale : 0, 0.05 * scale);
+  const group = createGroundedProp(propTextures.campfire, w, ht, x, z, h, withShadow ? 0.42 * scale : 0, withShadow ? 0.42 * scale : 0, 0.05 * scale, tintHex);
   if (withLight) {
     const light = new THREE.PointLight(0xff7b18, 0.55, 5.5);
     light.position.set(0, 0.55, 0);
@@ -1410,23 +1429,84 @@ function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow
   return group;
 }
 
-function createShelterSprite(x, z, h, scale = 1.0, withShadow = true) {
+function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
   // Rescaled to true human architectural scale (5.4m x 4.4m, ~2.2m door clearance)
   const w = 5.4 * scale;
   const ht = 4.4 * scale;
-  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * scale : 0, withShadow ? 2.2 * scale : 0, 0.18 * scale);
+  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * scale : 0, withShadow ? 2.2 * scale : 0, 0.18 * scale, tintHex);
 }
 
-function createStorageSprite(x, z, h, scale = 1.0, withShadow = true) {
+function createStorageSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
   const w = 0.92 * scale;
   const ht = 0.86 * scale;
-  return createGroundedProp(propTextures.storage, w, ht, x, z, h, withShadow ? 0.46 * scale : 0, withShadow ? 0.44 * scale : 0, 0.05 * scale);
+  return createGroundedProp(propTextures.storage, w, ht, x, z, h, withShadow ? 0.46 * scale : 0, withShadow ? 0.44 * scale : 0, 0.05 * scale, tintHex);
 }
 
-function createLandmarkSprite(x, z, h, scale = 1.0, withShadow = true) {
+function createLandmarkSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
   const w = 1.22 * scale;
   const ht = 1.52 * scale;
-  return createGroundedProp(propTextures.landmark, w, ht, x, z, h, withShadow ? 0.52 * scale : 0, withShadow ? 0.48 * scale : 0, 0.08 * scale);
+  return createGroundedProp(propTextures.landmark, w, ht, x, z, h, withShadow ? 0.52 * scale : 0, withShadow ? 0.48 * scale : 0, 0.08 * scale, tintHex);
+}
+
+function getObjectVisualProfile(rec) {
+  if (!rec) return null;
+  const rawType = String(rec.object_type || rec.category || rec.id || "").toLowerCase();
+
+  if (rawType.includes("fire") || rawType.includes("hearth") || rawType === "campfire") {
+    return { id: "vis_campfire", category: "campfire", label: "Campfire / Hearth", color: 0xffaa44, scale: 1.0 };
+  }
+  if (rawType.includes("lean") || rawType.includes("leanto")) {
+    return { id: "vis_leanto", category: "shelter", label: "Lean-To", color: 0xa88454, scale: 0.9 };
+  }
+  if (rawType.includes("hut")) {
+    return { id: "vis_hut", category: "shelter", label: "Hut", color: 0xb58b5a, scale: 1.0 };
+  }
+  if (rawType.includes("shelter")) {
+    return { id: "vis_shelter", category: "shelter", label: "Shelter", color: 0xc29b68, scale: 1.1 };
+  }
+  if (rawType.includes("roof")) {
+    return { id: "vis_roof", category: "shelter", label: "Roof Canopy", color: 0x8a6d4b, scale: 1.0 };
+  }
+  if (rawType.includes("wall") || rawType.includes("palisade")) {
+    return { id: "vis_wall", category: "landmark", label: "Wall Palisade", color: 0x7a7a72, scale: 0.85 };
+  }
+  if (rawType.includes("door") || rawType.includes("gate")) {
+    return { id: "vis_door", category: "landmark", label: "Doorway", color: 0x6e4a2d, scale: 0.8 };
+  }
+  if (rawType.includes("bed")) {
+    return { id: "vis_bed", category: "storage", label: "Bed / Pallet", color: 0x96784e, scale: 0.75 };
+  }
+  if (rawType.includes("table")) {
+    return { id: "vis_table", category: "storage", label: "Hewn Table", color: 0x7c5936, scale: 0.75 };
+  }
+  if (rawType.includes("chair") || rawType.includes("stool") || rawType.includes("bench")) {
+    return { id: "vis_chair", category: "storage", label: "Chair / Stool", color: 0x68472b, scale: 0.65 };
+  }
+  if (rawType.includes("barrel")) {
+    return { id: "vis_barrel", category: "storage", label: "Wood Barrel", color: 0x5a3d24, scale: 0.7 };
+  }
+  if (rawType.includes("chest")) {
+    return { id: "vis_chest", category: "storage", label: "Iron Chest", color: 0x4d4239, scale: 0.72 };
+  }
+  if (rawType.includes("storage") || rawType.includes("box") || rawType.includes("crate")) {
+    return { id: "vis_storage_box", category: "storage", label: "Storage Box", color: 0x8a623a, scale: 0.8 };
+  }
+  if (rawType.includes("forge")) {
+    return { id: "vis_forge", category: "landmark", label: "Stone Forge", color: 0x3d3d3d, scale: 1.05 };
+  }
+  if (rawType.includes("furnace") || rawType.includes("kiln")) {
+    return { id: "vis_furnace", category: "landmark", label: "Furnace", color: 0x8c5e43, scale: 1.0 };
+  }
+  if (rawType.includes("crafting") || rawType.includes("workbench") || rawType.includes("workshop")) {
+    return { id: "vis_crafting_surface", category: "landmark", label: "Crafting Surface", color: 0x9e7349, scale: 0.95 };
+  }
+  if (rawType.includes("well") || rawType.includes("cistern")) {
+    return { id: "vis_well", category: "landmark", label: "Stone Well", color: 0x5f6769, scale: 0.9 };
+  }
+  if (rawType.includes("tool") || rawType.includes("rack")) {
+    return { id: "vis_tool", category: "landmark", label: "Tool Rack", color: 0xb38f5f, scale: 0.6 };
+  }
+  return { id: "vis_landmark", category: "landmark", label: "Monument / Landmark", color: 0xffffff, scale: 0.85 };
 }
 
 function classifyPublicObjectCategory(objectType) {
@@ -1720,17 +1800,22 @@ function updatePublicObjectsAndClearings(pn, hb) {
           const oh = getTerrainHeight(cid, ox, oz);
 
           const withShadow = (i < 2);
+          const prof = getObjectVisualProfile(rec);
+          const profScale = prof ? prof.scale : 1.0;
+          const profTint = prof ? prof.color : 0xffffff;
+          const effScale = scale * profScale;
+
           let propMesh = null;
           if (cat === "shelter") {
-            propMesh = createShelterSprite(ox, oz, oh, scale, withShadow);
+            propMesh = createShelterSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else if (cat === "campfire") {
             const addLight = !tileHasLight && (i === 0);
             if (addLight) tileHasLight = true;
-            propMesh = createCampfireSprite(ox, oz, oh, scale, addLight, withShadow);
+            propMesh = createCampfireSprite(ox, oz, oh, effScale, addLight, withShadow, profTint);
           } else if (cat === "storage") {
-            propMesh = createStorageSprite(ox, oz, oh, scale, withShadow);
+            propMesh = createStorageSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else {
-            propMesh = createLandmarkSprite(ox, oz, oh, scale, withShadow);
+            propMesh = createLandmarkSprite(ox, oz, oh, effScale, withShadow, profTint);
           }
 
           propMesh.userData = {
@@ -1738,6 +1823,8 @@ function updatePublicObjectsAndClearings(pn, hb) {
             object_id: rec.object_id,
             object_type: rec.object_type,
             category: cat,
+            visual_id: prof ? prof.id : "vis_landmark",
+            visualProfile: prof,
             tile_id: rec.tile_id,
             tileX: px,
             tileY: pz,
@@ -2243,11 +2330,19 @@ function getWeatherAt(pairName, hb) {
   let wtype = String(w.current || "clear").toLowerCase();
   const temp = (w.temperature != null) ? w.temperature : 17;
   const season = w.season || "Spring";
-  if (playbackMode === "replay" && hb != null) {
+
+  if (hb != null && w.changes_at_heartbeat != null) {
+    if (hb >= w.changes_at_heartbeat) {
+      wtype = String(w.next || w.current || "clear").toLowerCase();
+    } else {
+      wtype = String(w.current || "clear").toLowerCase();
+    }
+  } else if (playbackMode === "replay" && hb != null) {
     const cycle = Math.floor(hb / 40) % 4;
     const weatherCycle = ["clear", "overcast", "rain", "storm"];
     wtype = weatherCycle[cycle];
   }
+
   return {
     weather: wtype,
     temperature: temp,
@@ -2310,42 +2405,116 @@ const floorMesh = new THREE.Mesh(floorGeom, floorMat);
 floorMesh.position.y = 0.05;
 interiorGroup.add(floorMesh);
 
-const hearthStoneGeom = new THREE.CylinderGeometry(0.55, 0.65, 0.25, 12);
-const hearthStoneMat = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 });
-const hearthStoneMesh = new THREE.Mesh(hearthStoneGeom, hearthStoneMat);
-hearthStoneMesh.position.set(0, 0.15, 0);
-interiorGroup.add(hearthStoneMesh);
+const interiorPropsGroup = new THREE.Group();
+interiorGroup.add(interiorPropsGroup);
 
-const hearthLight = new THREE.PointLight(0xff8822, 1.4, 9);
-hearthLight.position.set(0, 0.65, 0);
-interiorGroup.add(hearthLight);
+function rebuildInteriorProps(tileId, pairName, hb) {
+  // Clear and dispose any dynamic interior props
+  while (interiorPropsGroup.children.length > 0) {
+    const c = interiorPropsGroup.children[0];
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+      else c.material.dispose();
+    }
+    interiorPropsGroup.remove(c);
+  }
 
-const hearthFlameSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: propTextures.campfire,
-  transparent: true,
-  alphaTest: 0.3
-}));
-hearthFlameSprite.scale.set(0.9, 0.85, 1);
-hearthFlameSprite.position.set(0, 0.55, 0);
-interiorGroup.add(hearthFlameSprite);
+  if (!tileId) return;
 
-const bedGeom = new THREE.BoxGeometry(1.6, 0.15, 0.9);
-const bedMat = new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 });
-const bedMesh = new THREE.Mesh(bedGeom, bedMat);
-bedMesh.position.set(-1.3, 0.1, 0.7);
-interiorGroup.add(bedMesh);
+  const activeObjects = reconstructPublicObjectsAtHb(pairName, hb);
+  const tileObjs = activeObjects.filter(o => o.tile_id === tileId);
 
-const crateGeom = new THREE.BoxGeometry(0.7, 0.6, 0.7);
-const crateMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 });
-const crateMesh = new THREE.Mesh(crateGeom, crateMat);
-crateMesh.position.set(1.4, 0.32, 0.8);
-interiorGroup.add(crateMesh);
+  let hasHearth = false;
+  let hasBed = false;
+  let hasTable = false;
+  let hasChair = false;
+  let hasStorage = false;
+  let hasWorkbench = false;
+
+  for (const obj of tileObjs) {
+    const otype = String(obj.object_type || "").toLowerCase();
+    if (otype.includes("fire") || otype.includes("hearth") || otype === "campfire") hasHearth = true;
+    else if (otype.includes("bed")) hasBed = true;
+    else if (otype.includes("table")) hasTable = true;
+    else if (otype.includes("chair") || otype.includes("bench") || otype.includes("stool")) hasChair = true;
+    else if (otype.includes("storage") || otype.includes("chest") || otype.includes("box") || otype.includes("crate") || otype.includes("barrel")) hasStorage = true;
+    else if (otype.includes("crafting") || otype.includes("workbench") || otype.includes("forge")) hasWorkbench = true;
+  }
+
+  // 1. Hearth / Fireplace (only if campfire/hearth object exists on tile)
+  if (hasHearth) {
+    const hsGeom = new THREE.CylinderGeometry(0.55, 0.65, 0.25, 12);
+    const hsMat = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 });
+    const hsMesh = new THREE.Mesh(hsGeom, hsMat);
+    hsMesh.position.set(0, 0.15, 0);
+    interiorPropsGroup.add(hsMesh);
+
+    const hLight = new THREE.PointLight(0xff8822, 1.4, 9);
+    hLight.position.set(0, 0.65, 0);
+    interiorPropsGroup.add(hLight);
+
+    const hFlame = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: propTextures.campfire,
+      transparent: true,
+      alphaTest: 0.3
+    }));
+    hFlame.scale.set(0.9, 0.85, 1);
+    hFlame.position.set(0, 0.55, 0);
+    interiorPropsGroup.add(hFlame);
+  }
+
+  // 2. Bed (only if bed object exists on tile)
+  if (hasBed) {
+    const bGeom = new THREE.BoxGeometry(1.6, 0.15, 0.9);
+    const bMat = new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 });
+    const bMesh = new THREE.Mesh(bGeom, bMat);
+    bMesh.position.set(-1.3, 0.1, 0.7);
+    interiorPropsGroup.add(bMesh);
+  }
+
+  // 3. Table
+  if (hasTable) {
+    const tGeom = new THREE.BoxGeometry(1.2, 0.5, 0.8);
+    const tMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.85 });
+    const tMesh = new THREE.Mesh(tGeom, tMat);
+    tMesh.position.set(0.9, 0.25, -0.6);
+    interiorPropsGroup.add(tMesh);
+  }
+
+  // 4. Chair
+  if (hasChair) {
+    const chGeom = new THREE.BoxGeometry(0.45, 0.4, 0.45);
+    const chMat = new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 });
+    const chMesh = new THREE.Mesh(chGeom, chMat);
+    chMesh.position.set(0.9, 0.2, 0.2);
+    interiorPropsGroup.add(chMesh);
+  }
+
+  // 5. Storage / Crate / Chest / Barrel
+  if (hasStorage) {
+    const cGeom = new THREE.BoxGeometry(0.7, 0.6, 0.7);
+    const cMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 });
+    const cMesh = new THREE.Mesh(cGeom, cMat);
+    cMesh.position.set(1.4, 0.32, 0.8);
+    interiorPropsGroup.add(cMesh);
+  }
+
+  // 6. Workbench / Crafting Surface
+  if (hasWorkbench) {
+    const wbGeom = new THREE.BoxGeometry(1.4, 0.55, 0.6);
+    const wbMat = new THREE.MeshStandardMaterial({ color: 0x825a32, roughness: 0.85 });
+    const wbMesh = new THREE.Mesh(wbGeom, wbMat);
+    wbMesh.position.set(-1.2, 0.28, -0.8);
+    interiorPropsGroup.add(wbMesh);
+  }
+}
 
 let isInteriorModeActive = false;
 let activeShelterTileCoords = null;
 let cutawayShelterProp = null;
 
-function toggleInteriorCutaway(enable, sx, sz, sh) {
+function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
   isInteriorModeActive = enable;
   interiorGroup.visible = enable;
   if (cutawayShelterProp) {
@@ -2354,7 +2523,8 @@ function toggleInteriorCutaway(enable, sx, sz, sh) {
   }
   if (enable && sx != null) {
     interiorGroup.position.set(sx, sh, sz);
-    activeShelterTileCoords = { x: sx, z: sz, h: sh };
+    activeShelterTileCoords = { x: sx, z: sz, h: sh, tileId: tileId };
+    rebuildInteriorProps(tileId, selectedPair, currentHb);
     const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
     const oGroup = objectGroups[cid];
     if (oGroup) {
@@ -2368,6 +2538,7 @@ function toggleInteriorCutaway(enable, sx, sz, sh) {
     }
   } else {
     activeShelterTileCoords = null;
+    rebuildInteriorProps(null, selectedPair, currentHb);
   }
 }
 
@@ -2667,6 +2838,7 @@ function applyCameraMode(mode, immediate = true) {
     camera.updateProjectionMatrix();
 
     let targetX = ax, targetZ = az;
+    let targetTid = null;
     let closestDist = Infinity;
     const pobjs = (PAIRS[pairName] || {}).public_objects || {};
     for (const obj of Object.values(pobjs)) {
@@ -2681,6 +2853,7 @@ function applyCameraMode(mode, immediate = true) {
             closestDist = d;
             targetX = t.coordinates.x;
             targetZ = t.coordinates.y;
+            targetTid = tid;
           }
         }
       }
@@ -2691,7 +2864,7 @@ function applyCameraMode(mode, immediate = true) {
       new THREE.Vector3(targetX, sh + 0.95, targetZ - 0.2),
       false
     );
-    toggleInteriorCutaway(true, targetX, targetZ, sh);
+    toggleInteriorCutaway(true, targetX, targetZ, sh, targetTid);
   }
 
   if (mode !== "interior") {
@@ -3104,6 +3277,19 @@ function renderSidebar() {
     const warmVal = Math.max(0, Math.min(100, Number(vitals.warmth) || 0));
     const hungVal = Math.max(0, Math.min(100, Number(vitals.hunger) || 0));
     const wetVal = Math.max(0, Math.min(100, Number(vitals.wetness) || 0));
+    // Carrying: the exporter writes `inventories`, and until 10LD the viewer
+    // never read it. Gathering was therefore invisible -- "adam gathered stone"
+    // appeared in the action dossier while the numbers that prove it happened
+    // were sitting unread in the payload. Show the holdings, largest first,
+    // so accumulation is legible.
+    const holdings = ((pair.inventories || {})[ref]) || {};
+    const carrying = Object.keys(holdings)
+      .filter(k => Number(holdings[k]) > 0)
+      .sort((a, b) => Number(holdings[b]) - Number(holdings[a]))
+      .slice(0, 6)
+      .map(k => `${k} x${Number(holdings[k])}`)
+      .join(", ");
+    const safeCarrying = carrying ? escapeHtml(carrying) : "nothing";
 
     const card = document.createElement("div");
     card.className = `agent-card ${isEast ? "east" : "west"}`;
@@ -3137,6 +3323,9 @@ function renderSidebar() {
           <div class="vital-label"><span>WETNESS</span><span>${Math.round(wetVal)}%</span></div>
           <div class="vital-track"><div class="vital-fill" style="width:${wetVal}%; background:#00d2d3;"></div></div>
         </div>
+      </div>
+      <div class="carrying-line">
+        CARRYING: ${safeCarrying}
       </div>
       <div class="action-dossier">
         <div class="action-provenance">CANONICAL ACTION [HB ${escapeHtml(currentHb)}]</div>
@@ -3332,6 +3521,16 @@ function toScreenXY(position, camera, canvas) {
 let lastTick = performance.now();
 const frameDurationsMs = [];
 
+function calculateGaitBob(alpha, hasMoved) {
+  if (!hasMoved || alpha <= 0.0 || alpha >= 1.0) return 0.0;
+  // Two steps per tile move (4*PI total phase)
+  const phase = alpha * Math.PI * 4;
+  // Compresses on footfall (gentle dip) and rises on stride extension (crest)
+  const raw = Math.sin(phase);
+  const shaped = (raw >= 0) ? (raw * 0.024) : (raw * 0.014);
+  return shaped;
+}
+
 function updateAllAgentFigures(time) {
   const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
   const cid = (pairName === "west") ? "cont_b" : "cont_a";
@@ -3365,33 +3564,51 @@ function updateAllAgentFigures(time) {
         const alpha = isPlaying ? stepProgress : 1.0;
         finalX = px + (cx - px) * alpha;
         finalZ = pz + (cz - pz) * alpha;
-        if (alpha > 0.0 && alpha < 1.0) {
-          // Natural walking gait: subtle, gentle vertical cadence (0.024m) rather than high hopping
-          strideBob = Math.sin(alpha * Math.PI * 2) * 0.024;
-        }
+        strideBob = calculateGaitBob(alpha, hasMoved);
+
         // Directional sprite flip: face movement direction East vs West
         const dx = cx - px;
-        if (Math.abs(dx) > 0.01 && fig.userData && fig.userData.sprite) {
-          fig.userData.sprite.scale.x = (dx > 0) ? Math.abs(fig.userData.charW) : -Math.abs(fig.userData.charW);
+        if (Math.abs(dx) > 0.001) {
+          fig.userData.facing = (dx > 0) ? 1 : -1;
         }
+      } else {
+        strideBob = 0.0;
       }
 
-      // Interior mode positioning: place agents around the central hearth inside
+      // Preserve last facing without resetting to default on idle
+      const currentFacing = (fig.userData && fig.userData.facing != null) ? fig.userData.facing : 1;
+      if (fig.userData && fig.userData.sprite) {
+        fig.userData.sprite.scale.x = currentFacing * Math.abs(fig.userData.charW);
+      }
+
+      // Interior mode & sheltered agent positioning: place agents inside the shelter
+      const pairData = PAIRS[pairName] || {};
+      const shelterOcc = pairData.shelter_occupancy || {};
+      const isSheltered = Boolean(shelterOcc[agentRef]);
+      const isEve = (agentShort === "eve");
+
       if (isInteriorModeActive && activeShelterTileCoords) {
-        const isEve = (agentShort === "eve");
-        finalX = activeShelterTileCoords.x + (isEve ? -1.2 : 0.8);
-        finalZ = activeShelterTileCoords.z + (isEve ? 0.6 : 0.4);
+        finalX = activeShelterTileCoords.x + (isEve ? -1.0 : 0.8);
+        finalZ = activeShelterTileCoords.z + (isEve ? 0.5 : 0.3);
+      } else if (isSheltered) {
+        finalX = cx + (isEve ? -1.0 : 0.8);
+        finalZ = cz + (isEve ? 0.5 : 0.3);
       }
 
       // Small companion offset when both agents share the exact same tile
       const otherRef = (agentShort === "adam") ? `${pairName}_eve` : `${pairName}_adam`;
       const otherTid = getAgentRecordedPos(pairName, otherRef, currentHb);
-      if (currTid === otherTid && !hasMoved) {
+      if (currTid === otherTid && !hasMoved && !isSheltered && !isInteriorModeActive) {
         if (agentShort === "adam") { finalX -= 0.32; finalZ += 0.18; }
         else { finalX += 0.32; finalZ -= 0.18; }
       }
 
-      const finalH = getTerrainHeight(cid, finalX, finalZ) + strideBob;
+      let finalH = getTerrainHeight(cid, finalX, finalZ) + strideBob;
+      if (isInteriorModeActive && activeShelterTileCoords) {
+        finalH = activeShelterTileCoords.h + 0.12;
+      } else if (isSheltered) {
+        finalH = getTerrainHeight(cid, cx, cz) + 0.12;
+      }
       fig.position.set(finalX, finalH, finalZ);
       fig.visible = (selectedPair !== "orbit");
 
@@ -3403,6 +3620,7 @@ function updateAllAgentFigures(time) {
       fig.userData.isBlocked = isBlocked;
       fig.userData.strideBob = strideBob;
       fig.userData.action = act;
+      fig.userData.isSheltered = isSheltered;
 
       // Screen Tag anchored cleanly above head
       const charH = (fig.userData && fig.userData.charH) || 1.42;

@@ -16,7 +16,12 @@ import re
 from pathlib import Path
 
 WORLD_SIM = Path(__file__).resolve().parents[1]
-VIEWER_HTML = WORLD_SIM / "viewer" / "index.html"
+# The real viewer lives at viewer/prototype/index.html. viewer/index.html is
+# only an 845-byte redirect shim that forwards to it, so pointing these
+# contract tests at the shim made them vacuous: every ViewerSide assertion
+# was checked against a file whose only content is a location.replace. That
+# included the innerHTML-escape guard, i.e. the XSS protection itself.
+VIEWER_HTML = WORLD_SIM / "viewer" / "prototype" / "index.html"
 EXPORTER = WORLD_SIM / "scripts" / "export_viewer_snapshot.py"
 BACKDROP_PNG = WORLD_SIM / "viewer" / "world_base.png"
 
@@ -96,12 +101,20 @@ class TestViewerSide:
             )
 
     def test_viewer_computes_weather_client_side(self):
-        """Accepted duplication: the viewer reimplements the weather
-        machine so playback can scrub history without re-fetching. The
-        vocabulary must stay aligned with backend/world/survival.py."""
+        """The viewer must resolve weather per-heartbeat so playback can
+        scrub history without re-fetching, and its vocabulary must stay
+        aligned with backend/world/survival.py.
+
+        Since 10LD the viewer no longer duplicates a client-side weather
+        TABLE: it reads the exporter's recorded schedule
+        (`weather.changes_at_heartbeat`), which is strictly better -- one
+        source of truth instead of two that can drift. Assert that instead.
+        """
         js = _viewer_js()
-        assert "getWeatherAt" in js
-        assert "WEATHER_TABLE" in js
+        assert "getWeatherAt" in js, "viewer must compute weather at a heartbeat"
+        assert "changes_at_heartbeat" in js, (
+            "viewer must read the exporter's recorded weather transition schedule"
+        )
         survival = (WORLD_SIM / "backend" / "world" / "survival.py"
                     ).read_text(encoding="utf-8")
         for wtype in ("clear", "overcast", "rain", "storm"):
@@ -135,8 +148,23 @@ class TestViewerSide:
         )
 
     def test_viewer_escapes_model_text_into_innerhtml(self):
-        """Agent-authored strings must not reach innerHTML raw."""
+        """Agent-authored strings must not reach innerHTML raw.
+
+        The escape helper is named `escapeHtml` -- an earlier version of this
+        test looked for a literal `function esc(`, which never matched and
+        made the check vacuous while still passing against the redirect shim.
+        Now assert the guard actually exists AND is actually used: an unused
+        escape helper protects nothing.
+        """
         js = _viewer_js()
-        assert "function esc(" in js, (
-            "viewer must escape model-authored text before innerHTML"
+        assert "function escapeHtml(" in js, (
+            "viewer must define an HTML escape helper"
         )
+        uses = js.count("escapeHtml(")
+        assert uses >= 10, (
+            f"escapeHtml must be used on agent-authored text; found {uses} uses"
+        )
+        # every innerHTML assignment that renders authored content must be
+        # escaped: spot-check the known authored sinks.
+        for sink in ("chronicle-title", "chronicle-desc", "action-text"):
+            assert sink in js, f"authored sink {sink} missing"
