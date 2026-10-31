@@ -161,26 +161,71 @@ def test_survey_goal_survives_with_partial_coverage(tmp_path: Path):
 
 
 def test_gather_goal_retires_at_threshold_only(tmp_path: Path):
-    """A gather goal retires only when inventory meets or exceeds the defined threshold."""
+    """A PURE gather goal retires when inventory meets the defined threshold."""
     goal = GoalRecord(
         "g-gather-1", "",
-        "Continue exploring uncharted hill terrain and gather stone",
+        "gather stone",
         "in_progress", 5000
     )
     runtime, agent_id = _make_runtime_with_goals(tmp_path, [goal])
 
-    # Set inventory below threshold (e.g. 5 stone < 20 threshold)
+    # Below the default threshold (5 stone < 20)
     first_pair_persistence.add_to_inventory(runtime._store, "east_adam", "stone", 5)
-
     retired_under = runtime.retire_stale_goals("east_adam", 5100)
-    assert not any(g.goal_id == "g-gather-1" for g in retired_under), "Gather goal should survive below threshold"
+    assert not any(g.goal_id == "g-gather-1" for g in retired_under), (
+        "Gather goal should survive below threshold"
+    )
 
-    # Set inventory above threshold (e.g. +35 stone -> 40 stone >= 20 threshold)
+    # At or above the default threshold (5 + 35 = 40 stone >= 20)
     first_pair_persistence.add_to_inventory(runtime._store, "east_adam", "stone", 35)
-
     retired_over = runtime.retire_stale_goals("east_adam", 5100)
-    assert any(g.goal_id == "g-gather-1" for g in retired_over), "Gather goal should retire at/above threshold"
+    assert any(g.goal_id == "g-gather-1" for g in retired_over), (
+        "Pure gather goal should retire at/above threshold"
+    )
     assert runtime._goals[0].status == "retired"
+
+
+def test_compound_explore_gather_goal_survives_implicit_threshold(tmp_path: Path):
+    """A COMPOUND explore+gather goal must not be retired by its gather half.
+
+    Live-data regression, 2026-10-30: 'Continue exploring uncharted hill
+    terrain and gather stone' was retired outright at 442 stone held, because
+    Rule 2 saw the gather verb and an arbitrary default threshold. That
+    destroyed the goal's exploration purpose -- the half that actually
+    explained what the agent was doing. A compound goal only retires on an
+    explicit, self-declared amount.
+    """
+    goal = GoalRecord(
+        "g-compound-1", "",
+        "Continue exploring uncharted hill terrain and gather stone",
+        "in_progress", 5359
+    )
+    runtime, _ = _make_runtime_with_goals(tmp_path, [goal])
+
+    # Hoard far past every default threshold.
+    first_pair_persistence.add_to_inventory(runtime._store, "east_adam", "stone", 500)
+
+    retired = runtime.retire_stale_goals("east_adam", 6100)
+    assert not any(g.goal_id == "g-compound-1" for g in retired), (
+        "Compound explore+gather goal must survive an implicit threshold"
+    )
+    assert runtime._goals[0].status == "in_progress"
+
+
+def test_compound_goal_retires_on_explicit_amount(tmp_path: Path):
+    """A compound goal DOES retire when it names its own amount explicitly."""
+    goal = GoalRecord(
+        "g-compound-2", "",
+        "Continue exploring and gather 20 stone",
+        "in_progress", 5359
+    )
+    runtime, _ = _make_runtime_with_goals(tmp_path, [goal])
+    first_pair_persistence.add_to_inventory(runtime._store, "east_adam", "stone", 25)
+
+    retired = runtime.retire_stale_goals("east_adam", 6100)
+    assert any(g.goal_id == "g-compound-2" for g in retired), (
+        "Explicit self-declared amount should retire even a compound goal"
+    )
 
 
 def test_fresh_test_goal_survives_age_rule(tmp_path: Path):

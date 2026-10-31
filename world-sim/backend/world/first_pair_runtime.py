@@ -582,14 +582,36 @@ class FirstPairRuntime:
                     if all(tid in known_tiles for tid in tile_matches):
                         should_retire = True
 
-            # Rule 2: Resource acquired
+            # Rule 2: Resource acquired.
+            #
+            # Two guards, both learned from live data. An agent's goal is
+            # often COMPOUND -- "continue exploring uncharted hill terrain and
+            # gather stone" carries an exploration purpose plus a gather. On
+            # 2026-10-30 this rule retired that exact goal at 442 stone held,
+            # killing the exploration half because the gather half happened to
+            # be over an arbitrary default. Retirement must not lose the other
+            # half of a compound goal.
+            #
+            # So Rule 2 fires only when:
+            #   (a) the description states an explicit amount for that
+            #       resource ("gather 20 stone"), which is a genuine,
+            #       self-declared threshold; or
+            #   (b) the goal is a PURE gather goal -- it contains a gather verb
+            #       and no exploration/survey verb -- so there is no second
+            #       purpose to destroy by retiring it.
             if not should_retire and any(k in desc_lower for k in ("gather", "accumulate", "collect")):
+                is_compound = any(
+                    k in desc_lower for k in ("explor", "survey", "map", "mapping", "uncharted")
+                )
                 for res_kind, def_thresh in DEFAULT_GATHER_RETIRE_THRESHOLDS.items():
                     if res_kind in desc_lower:
                         match_num = re.search(rf'(\d+)\s+{res_kind}', desc_lower)
+                        explicit = match_num is not None
                         thresh = int(match_num.group(1)) if match_num else def_thresh
                         current_amt = inv.get(res_kind, 0)
-                        if isinstance(current_amt, (int, float)) and current_amt >= thresh:
+                        if not isinstance(current_amt, (int, float)):
+                            break
+                        if current_amt >= thresh and (explicit or not is_compound):
                             should_retire = True
                             break
 
