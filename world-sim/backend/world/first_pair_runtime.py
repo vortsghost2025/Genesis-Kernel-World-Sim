@@ -2392,7 +2392,17 @@ class FirstPairRuntime:
         if not _is_safe_object_id(str(object_id or "")):
             return {"status": "rejected", "reason": "Invalid object_id"}
         if object_id in self._world_state.public_objects:
-            return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
+            existing_obj = self._world_state.public_objects.get(object_id)
+            existing_tile = existing_obj.get("tile_id") if isinstance(existing_obj, dict) else None
+            if existing_tile == tile_id:
+                return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
+            base_id = str(object_id)
+            candidate_id = f"{base_id}-hb{heartbeat_number}"
+            suffix = 2
+            while candidate_id in self._world_state.public_objects or not _is_safe_object_id(candidate_id):
+                candidate_id = f"{base_id}-hb{heartbeat_number}-{suffix}"
+                suffix += 1
+            object_id = candidate_id
         addon_to = action.get("addon_to")
         parent_record = None
         if addon_to:

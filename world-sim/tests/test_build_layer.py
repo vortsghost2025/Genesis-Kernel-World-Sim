@@ -124,7 +124,7 @@ class TestBuildActionValidation:
         assert "build" in _VALID_ACTIONS
         assert _ACTION_SCHEMAS["build"] == frozenset(
             {"action_type", "object_id", "object_type", "description",
-             "tile_id", "materials"}
+             "tile_id", "materials", "addon_to", "reason"}
         )
         assert "build" in _AVAILABLE_ACTIONS_DESC
 

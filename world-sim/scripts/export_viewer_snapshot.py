@@ -246,6 +246,40 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
                     events.append({"hb": hb, "kind": "build",
                                    "who": name,
                                    "text": f"built a {action.get('object_type', 'thing')}"})
+            elif at == "hew_timber":
+                if outcome.get("status") == "success":
+                    yield_amt = outcome.get("timber_yield", 1)
+                    events.append({"hb": hb, "kind": "hew_timber",
+                                   "who": name,
+                                   "text": f"hewed {yield_amt} structural timber"})
+            elif at == "use_object":
+                if outcome.get("status") == "success":
+                    op = outcome.get("operation") or action.get("operation")
+                    if outcome.get("crafted") or op == "craft":
+                        crafted_item = outcome.get("crafted") or "a tool"
+                        events.append({"hb": hb, "kind": "craft",
+                                       "who": name,
+                                       "text": f"crafted {crafted_item}"})
+                    elif op == "cook":
+                        events.append({"hb": hb, "kind": "cook",
+                                       "who": name,
+                                       "text": "cooked a hot meal"})
+                    elif op == "smelt":
+                        events.append({"hb": hb, "kind": "smelt",
+                                       "who": name,
+                                       "text": "smelted metal"})
+            elif at == "plant_crop":
+                if outcome.get("status") == "success":
+                    crop = outcome.get("crop_planted") or action.get("resource_kind", "crop")
+                    events.append({"hb": hb, "kind": "plant_crop",
+                                   "who": name,
+                                   "text": f"planted {crop}"})
+            elif at == "harvest_crop":
+                if outcome.get("status") == "success":
+                    crop = outcome.get("crop_harvested") or "crop"
+                    events.append({"hb": hb, "kind": "harvest_crop",
+                                   "who": name,
+                                   "text": f"harvested {crop}"})
             elif at == "eat":
                 outcome_status = outcome.get("status")
                 if outcome_status == "success":

@@ -423,6 +423,9 @@ _VALID_ACTIONS = frozenset({
     "attack",
     "offer_food",
     "milk_animal",
+    "hew_timber",
+    "plant_crop",
+    "harvest_crop",
 })
 
 
@@ -521,19 +524,22 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     "revise_charter": frozenset({"action_type", "charter_text"}),
     "build": frozenset({
         "action_type", "object_id", "object_type", "description",
-        "tile_id", "materials",
+        "tile_id", "materials", "addon_to", "reason",
     }),
     # use_object: deposit/extract require materials, inspect does not.
     # The schema accepts the union; the runtime rejects an operation
     # that is missing its own required field.
     "use_object": frozenset({
-        "action_type", "target_object_id", "operation", "materials",
+        "action_type", "target_object_id", "target_id", "operation", "materials", "reason",
     }),
     # eat: epistemic.4 — consume food from belongings to satisfy hunger.
     "eat": frozenset({"action_type", "resource_kind", "reason", "food_type", "food", "item"}),
     "attack": frozenset({"action_type", "target_id", "reason"}),
     "offer_food": frozenset({"action_type", "target_id", "resource_kind", "reason"}),
     "milk_animal": frozenset({"action_type", "target_id", "reason"}),
+    "hew_timber": frozenset({"action_type", "reason", "tool", "tile_id", "target_id"}),
+    "plant_crop": frozenset({"action_type", "target_id", "target_object_id", "resource_kind", "reason"}),
+    "harvest_crop": frozenset({"action_type", "target_id", "target_object_id", "reason"}),
 }
 
 
@@ -700,6 +706,14 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
                 total += amount
             if total > _MAX_BUILD_MATERIAL_TOTAL:
                 errors.append("action:materials_total_too_large")
+        addon_to = raw.get("addon_to")
+        if addon_to is not None:
+            if not isinstance(addon_to, str) or not addon_to.strip() or not _is_safe_id(addon_to):
+                errors.append("action:unsafe_addon_to")
+
+    elif at == "use_object":
+        if "target_object_id" not in raw and isinstance(raw.get("target_id"), str):
+            raw["target_object_id"] = raw["target_id"]
 
     elif at == "offer_food":
         for field_name in ("target_id", "resource_kind", "reason"):
@@ -715,6 +729,49 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             value = raw.get(field_name, "")
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"action:empty_{field_name}")
+
+    elif at == "hew_timber":
+        reason = raw.get("reason")
+        if reason is not None:
+            err = _check_length(reason, _MAX_REASON_CHARS, "action:reason")
+            if err:
+                errors.append(err)
+            elif _casefolded_contaminated(reason):
+                errors.append("action:contaminated_reason")
+        tool = raw.get("tool")
+        if tool is not None:
+            err = _check_length(tool, _MAX_TARGET_CHARS, "action:tool")
+            if err:
+                errors.append(err)
+            elif _casefolded_contaminated(tool):
+                errors.append("action:contaminated_tool")
+
+    elif at == "plant_crop":
+        tid = raw.get("target_id") or raw.get("target_object_id") or ""
+        if not isinstance(tid, str) or not tid.strip():
+            errors.append("action:empty_target_id")
+        else:
+            raw["target_id"] = tid.strip()
+            err = _check_length(raw["target_id"], _MAX_TARGET_CHARS, "action:target_id")
+            if err:
+                errors.append(err)
+        rk = raw.get("resource_kind", "")
+        if not isinstance(rk, str) or not rk.strip():
+            errors.append("action:empty_resource_kind")
+        else:
+            err = _check_length(rk, _MAX_TARGET_CHARS, "action:resource_kind")
+            if err:
+                errors.append(err)
+
+    elif at == "harvest_crop":
+        tid = raw.get("target_id") or raw.get("target_object_id") or ""
+        if not isinstance(tid, str) or not tid.strip():
+            errors.append("action:empty_target_id")
+        else:
+            raw["target_id"] = tid.strip()
+            err = _check_length(raw["target_id"], _MAX_TARGET_CHARS, "action:target_id")
+            if err:
+                errors.append(err)
 
     return errors
 
