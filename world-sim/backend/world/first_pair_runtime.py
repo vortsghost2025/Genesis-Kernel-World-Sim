@@ -120,6 +120,19 @@ from backend.world.mystery_reveal import (
 
 _DEFAULT_HEARTBEAT_LIMIT = 10
 MAX_ACTIVE_GOALS_EXPOSED: int = 8
+STALE_GOAL_AGE_HB: int = 500
+DEFAULT_GATHER_RETIRE_THRESHOLDS: dict[str, int] = {
+    "stone": 20,
+    "wild_berries": 20,
+    "wood": 10,
+    "clay": 10,
+    "fiber_plants": 10,
+    "edible_roots": 10,
+    "mushrooms": 10,
+    "iron_ore": 5,
+    "flint": 5,
+    "sand": 10,
+}
 
 # Phase 10KM: structural builds are load-bearing. A shelter/hut/cabin/roof
 # carries weight, so it needs hewn structural timber -- which in turn needs a
@@ -540,6 +553,60 @@ class FirstPairRuntime:
             return {}
         return dict(load_inventory(self._store).get(agent_ref, {}))
 
+    def retire_stale_goals(self, agent_ref: str, heartbeat_number: int) -> list[GoalRecord]:
+        """Phase 10KX/10KZ: Retire goals whose satisfying condition has objectively ceased to hold."""
+        view = self._agent_view(agent_ref)
+        agent_id = view["agent_id"]
+
+        try:
+            known_map = load_known_map(self._store.root, agent_ref)
+            known_tiles = set(known_map.get("known_tiles", {}).keys()) if isinstance(known_map, dict) else set()
+        except Exception:
+            known_tiles = set()
+
+        inv = self._get_agent_inventory(agent_ref)
+
+        retired: list[GoalRecord] = []
+        for g in self._goals:
+            if g.agent_id != agent_id or getattr(g, "status", "") not in ("active", "in_progress"):
+                continue
+
+            desc = g.description or ""
+            desc_lower = desc.lower()
+            should_retire = False
+
+            # Rule 1: Region surveyed
+            if any(k in desc_lower for k in ("survey", "map", "mapping", "explore")):
+                tile_matches = re.findall(r'cont_[a-z0-9_\-]+', desc)
+                if tile_matches:
+                    if all(tid in known_tiles for tid in tile_matches):
+                        should_retire = True
+
+            # Rule 2: Resource acquired
+            if not should_retire and any(k in desc_lower for k in ("gather", "accumulate", "collect")):
+                for res_kind, def_thresh in DEFAULT_GATHER_RETIRE_THRESHOLDS.items():
+                    if res_kind in desc_lower:
+                        match_num = re.search(rf'(\d+)\s+{res_kind}', desc_lower)
+                        thresh = int(match_num.group(1)) if match_num else def_thresh
+                        current_amt = inv.get(res_kind, 0)
+                        if isinstance(current_amt, (int, float)) and current_amt >= thresh:
+                            should_retire = True
+                            break
+
+            # Rule 3: Stale test goals
+            if not should_retire and "test whether" in desc_lower:
+                created_hb = getattr(g, "created_heartbeat", 0) or 0
+                if heartbeat_number - created_hb >= STALE_GOAL_AGE_HB:
+                    should_retire = True
+
+            if should_retire:
+                g.status = "retired"
+                retired.append(g)
+
+        if retired:
+            save_goals(self._store, self._goals)
+        return retired
+
     # ------------------------------------------------------------------
     # World pressure (docs/world_pressure_spec.md)
     # ------------------------------------------------------------------
@@ -600,11 +667,21 @@ class FirstPairRuntime:
             self._adam_memory if agent_ref == self._adam_ref else self._eve_memory
         )
 
-        agent_goals = [
+        active_goals_raw = [
             g
             for g in self._goals
             if g.agent_id == view["agent_id"] and getattr(g, "status", "") in ("active", "in_progress")
-        ][-MAX_ACTIVE_GOALS_EXPOSED:]
+        ]
+        # Phase 10KX/10KZ: Deduplicate goal descriptions before slice, keeping the most recent
+        # occurrence of each distinct description and preserving chronological order.
+        seen_descs = set()
+        deduped_rev = []
+        for g in reversed(active_goals_raw):
+            desc_norm = str(getattr(g, "description", "") or "").strip().lower()
+            if desc_norm not in seen_descs:
+                seen_descs.add(desc_norm)
+                deduped_rev.append(g)
+        agent_goals = list(reversed(deduped_rev))[-MAX_ACTIVE_GOALS_EXPOSED:]
         agent_pending_questions = [
             q
             for q in self._questions
@@ -1077,6 +1154,23 @@ class FirstPairRuntime:
             json.loads(tmp.read_text(encoding="utf-8"))
             tmp.replace(seen_path)
 
+        # Shelter ownership (Phase 10KX/10KZ)
+        shelter_kinds = (
+            "shelter", "hut", "wall", "roof", "cabin", "tent",
+            "lean", "cave", "cavern", "overhang", "grotto", "burrow",
+            "stable", "cellar"
+        )
+        owns_shelter = False
+        for record in (self._world_state.public_objects or {}).values():
+            if not isinstance(record, dict):
+                continue
+            creator = record.get("creator_agent_id", "")
+            if creator == view["agent_id"]:
+                otype = str(record.get("object_type", "")).lower()
+                if any(k in otype for k in shelter_kinds):
+                    owns_shelter = True
+                    break
+
         return AgentContext(
             agent_id=view["agent_id"],
             canonical_name=view["canonical_name"],
@@ -1114,6 +1208,7 @@ class FirstPairRuntime:
             inventory=self._get_agent_inventory(agent_ref),
             physics=dict(observation["physics"]),
             operator_messages=operator_messages,
+            owns_shelter=owns_shelter,
         )
 
     # ------------------------------------------------------------------
@@ -3141,6 +3236,8 @@ class FirstPairRuntime:
             self._load_tile_resources()
             self._pressure_tick = {}
             self._reconcile_capability_requests()
+            for ref in (self._adam_ref, self._eve_ref):
+                self.retire_stale_goals(ref, hb)
 
             # epistemic.4: one heartbeat of embodiment before the agents
             # reason — hunger rises, night cold bites, fires warm. The

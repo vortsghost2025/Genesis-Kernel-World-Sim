@@ -98,6 +98,8 @@ class AgentContext:
     # Operator-authored messages addressed to this agent (the human can
     # write; nothing obliges an agent to read, answer, or obey).
     operator_messages: list = field(default_factory=list)
+    # Shelter ownership (Phase 10KX/10KZ): true if this agent owns a constructed shelter
+    owns_shelter: bool = False
 
 
 @dataclass(frozen=True)

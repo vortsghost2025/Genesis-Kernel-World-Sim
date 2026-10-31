@@ -1542,8 +1542,8 @@ def build_system_prompt(context: AgentContext) -> str:
     _sb = (context.observation or {}).get("self_body") or {}
     _env = (context.observation or {}).get("environment") or {}
     body_section = ""
+    _lines = []
     if _sb:
-        _lines = []
         if _sb.get("downed"):
             _lines.append(
                 "Your body has collapsed (vitality 0). You cannot move, "
@@ -1728,11 +1728,50 @@ def build_system_prompt(context: AgentContext) -> str:
                     if context.heartbeat_number - chb >= 61:
                         _lines.append(f"Garden bed [{obj.get('object_id')}] is mature. You can harvest it using harvest_crop.")
 
-        if _lines:
-            body_section = (
-                "--- YOUR BODY (the store, speaking at the moment of need) ---\n"
-                + "\n".join("- " + line for line in _lines)
-            )
+    # Settlement awareness facts (Phase 10KX/10KZ).
+    #
+    # These live in their OWN section, not under YOUR BODY: a fact about
+    # timber or shelter is a statement about holdings and place, not about
+    # "the store speaking at the moment of need". They are also rendered
+    # independently of self_body -- appending them to _lines had the side
+    # effect of forcing the body section into existence even when no body
+    # data existed, which changed the prompt contract for every prompt
+    # lacking self_body.
+    settlement_lines: list[str] = []
+    inv = context.inventory if isinstance(context.inventory, dict) else {}
+    timber = inv.get("timber", 0) or 0
+    if timber == 0:
+        settlement_lines.append(
+            "Fact: you hold no structural timber. Felling a tree into timber "
+            "requires hew_timber with an axe or knapped blade."
+        )
+    else:
+        settlement_lines.append(
+            f"Fact: you hold {timber} structural timber in your belongings."
+        )
+
+    if not getattr(context, "owns_shelter", False):
+        settlement_lines.append("Fact: you own no shelter of your own.")
+
+    stone = inv.get("stone", 0) or 0
+    wood = inv.get("wood", 0) or 0
+    if stone > 0 or wood > 0:
+        settlement_lines.append(
+            f"Fact: you hold {stone} stone and {wood} wood in your belongings."
+        )
+
+    settlement_section = ""
+    if settlement_lines:
+        settlement_section = (
+            "--- SETTLEMENT (your holdings and shelter, stated as facts) ---\n"
+            + "\n".join("- " + line for line in settlement_lines)
+        )
+
+    if _lines:
+        body_section = (
+            "--- YOUR BODY (the store, speaking at the moment of need) ---\n"
+            + "\n".join("- " + line for line in _lines)
+        )
 
     # --- Operator: a human is watching and can write ---
     if context.operator_messages:
@@ -1763,6 +1802,8 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {anchor_section}
 
 {belongings_section}
+
+{settlement_section}
 
 {body_section}
 
