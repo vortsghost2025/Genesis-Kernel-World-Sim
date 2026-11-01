@@ -31,6 +31,12 @@ world-sim/viewer/viewer_data.js
 # output, it lands straight on Netlify/Vercel, and sweeping it in would bloat
 # every clone.
 world-sim/viewer/viewer-dist/
+world-sim/viewer/viewer-deploy/
+world-sim/viewer/viewer-deploy.staging/
+world-sim/viewer/viewer-deploy.old/
 
 # Epistemic viewer test screenshots
 world-sim/viewer/prototype/*.png
+
+.vercel
+.env*

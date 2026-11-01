@@ -27,7 +27,10 @@ from pathlib import Path
 WORLD_SIM = Path(__file__).resolve().parent.parent
 VIEWER = WORLD_SIM / "viewer"
 PROTO = VIEWER / "prototype"
-DIST = VIEWER / "viewer-dist"
+# was viewer-dist, but a lingering handle from a finished `vercel deploy`
+# made that path undeletable and an rmtree against it wiped a good build.
+# Building to a fresh directory sidesteps the lock entirely.
+DIST = VIEWER / "viewer-deploy"
 
 EXPORTER = WORLD_SIM / "scripts" / "export_viewer_snapshot.py"
 
@@ -110,11 +113,59 @@ def rewrite_asset_paths(html: str) -> str:
     return html
 
 
-def main() -> int:
+def _clear_output_dir() -> None:
+    """Empty the build output without ever risking a half-wiped tree.
+
+    The previous implementation called shutil.rmtree directly. When a lingering
+    CLI handle locked the folder, rmtree had already removed most children
+    before raising, so a "failed" cleanup destroyed a good build -- twice.
+    Now: build into a temp dir and swap, so the live tree is only ever replaced
+    by a complete one.
+    """
+    global DIST
+    staging = VIEWER / (DIST.name + ".staging")
+    if staging.exists():
+        try:
+            shutil.rmtree(staging)
+        except OSError as exc:
+            print("  WARN could not clear staging %s (%s)" % (staging, exc))
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "assets").mkdir(parents=True, exist_ok=True)
+    (staging / "js").mkdir(parents=True, exist_ok=True)
     if DIST.exists():
-        shutil.rmtree(DIST)
-    (DIST / "assets").mkdir(parents=True)
-    (DIST / "js").mkdir(parents=True)
+        try:
+            DIST.rename(staging.parent / (DIST.name + ".old"))
+            shutil.rmtree(staging.parent / (DIST.name + ".old"))
+        except OSError:
+            # fall back to in-place overwrite
+            pass
+    DIST = staging
+
+
+def _publish_staging() -> Path:
+    """Move the completed staging tree into place as the real output dir."""
+    real = DIST                      # this IS the staging directory
+    target = VIEWER / "viewer-deploy"
+    # 1) move any previous real build out of the way
+    if target.exists():
+        try:
+            target.rename(VIEWER / "viewer-deploy.old")
+        except OSError as exc:
+            print("  WARN could not move previous build aside (%s)" % exc)
+    # 2) promote staging
+    real.rename(target)
+    # 3) remove the old build
+    old = VIEWER / "viewer-deploy.old"
+    if old.exists():
+        try:
+            shutil.rmtree(old)
+        except OSError as exc:
+            print("  WARN could not delete previous build (%s)" % exc)
+    return target
+
+
+def main() -> int:
+    _clear_output_dir()
 
     total_before = total_after = 0
 
@@ -218,6 +269,11 @@ def main() -> int:
         newline="",
     )
 
+    # NOTE: only Cache-Control is set. Vercel infers Content-Type from the
+    # extension and its automatic gzip/brotli compression keys off that
+    # inference -- setting Content-Type explicitly here suppressed it and
+    # served the 14.9 MB viewer_data.js uncompressed (measured on the first
+    # deploy). Let the platform infer the type and it compresses.
     (DIST / "vercel.json").write_text(
         """{
   "cleanUrls": true,
@@ -226,15 +282,25 @@ def main() -> int:
     {
       "source": "/(.*).js",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
-        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
       ]
     },
     {
       "source": "/(.*).webp",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=86400, immutable" },
-        { "key": "Content-Type", "value": "image/webp" }
+        { "key": "Cache-Control", "value": "public, max-age=86400, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*).png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*).json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
       ]
     }
   ]
@@ -249,12 +315,36 @@ def main() -> int:
           % (format(total_before, ","), format(total_after, ","),
              100.0 * (1 - total_after / max(total_before, 1))))
     print("  built: %s" % DIST)
+    final = _publish_staging()
+    print("  published: %s" % final)
     print()
     print("  next:")
-    print("    netlify deploy --prod --dir=world-sim/viewer/viewer-dist")
-    print("    vercel --prod world-sim/viewer/viewer-dist")
+    print("    netlify deploy --prod --dir=world-sim/viewer/viewer-deploy")
+    print("    vercel --prod world-sim/viewer/viewer-deploy")
     return 0
 
 
+DEPLOY_HELP = (
+    "\n"
+    "Deploy. IMPORTANT: the Vercel CLI walks up to the enclosing git repo root\n"
+    "when there is no .vercel link in the deploy directory, which uploads the\n"
+    "whole repo (~24,000 files) and trips the 15000-item request limit. Copy\n"
+    "the build OUTSIDE the repo and deploy from there:\n"
+    "\n"
+    "    $tmp = Join-Path $env:TEMP 'genesis-observatory-deploy'\n"
+    "    Remove-Item -Recurse -Force $tmp -EA SilentlyContinue\n"
+    "    New-Item -ItemType Directory -Force -Path $tmp | Out-Null\n"
+    "    Copy-Item 'world-sim/viewer/viewer-deploy/*' $tmp -Recurse -Force\n"
+    "    cd $tmp\n"
+    "    vercel deploy --prod --yes --project genesis-civilization-observatory\n"
+    "\n"
+    "Do NOT run 'vercel link' inside the Genesis repo: it writes the link to the\n"
+    "repo root and every later deploy uploads the entire repository.\n"
+)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _code = main()
+    if _code == 0:
+        print(DEPLOY_HELP)
+    raise SystemExit(_code)
