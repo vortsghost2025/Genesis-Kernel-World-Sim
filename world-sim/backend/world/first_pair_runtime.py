@@ -2435,20 +2435,22 @@ class FirstPairRuntime:
         # after she moved (HB701-743: 26 build attempts on her own tile,
         # all refused "Tile ... not in allowed tiles").
 
-        # Phase 10KM: structural builds are load-bearing. Anything carrying a
+        # Phase 10KM / 10LM: structural builds are load-bearing. Anything carrying a
         # roof must include hewn structural timber, which can only come from
         # hew_timber with an axe or knapped blade -- which needs a crafted
         # tool -- which needs a crafting surface. Attaching a room shares
-        # walls, so the structural component is discounted. Non-structural
-        # types (campfire, crafting_surface, enclosed_garden, storage) are
-        # unaffected: fire must stay cheap.
+        # walls, so the structural component (both the timber floor and all
+        # declared structural materials) is discounted by half (rounding up).
+        # Non-structural types (campfire, crafting_surface, enclosed_garden,
+        # storage) are unaffected: fire must stay cheap.
         lowered_type = str(object_type or "").lower()
         timber_min = 0
         for structural, minimum in _STRUCTURAL_TIMBER_MIN.items():
             if structural in lowered_type:
                 timber_min = max(timber_min, minimum)
                 break
-        if timber_min and addon_to and parent_record:
+        is_discounted_structural_addon = bool(timber_min and addon_to and parent_record)
+        if is_discounted_structural_addon:
             timber_min = (
                 timber_min + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1
             ) // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
@@ -2483,15 +2485,32 @@ class FirstPairRuntime:
             if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
                 return {"status": "rejected", "reason": f"Invalid material amount for {kind}"}
 
-        holdings = self._get_agent_inventory(agent_ref)
+        effective_materials: dict[str, int] = {}
         for kind, amount in materials.items():
+            if is_discounted_structural_addon and kind != "timber":
+                effective_materials[kind] = max(
+                    1,
+                    (amount + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1)
+                    // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR,
+                )
+            elif is_discounted_structural_addon and kind == "timber":
+                effective_materials[kind] = max(
+                    timber_min,
+                    (amount + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1)
+                    // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR,
+                )
+            else:
+                effective_materials[kind] = amount
+
+        holdings = self._get_agent_inventory(agent_ref)
+        for kind, amount in effective_materials.items():
             if holdings.get(kind, 0) < amount:
                 return {
                     "status": "rejected",
                     "reason": f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}",
                 }
 
-        for kind, amount in materials.items():
+        for kind, amount in effective_materials.items():
             add_to_inventory(self._store, agent_ref, kind, -amount)
 
         record = PublicObjectRecord(
@@ -2501,7 +2520,7 @@ class FirstPairRuntime:
             object_type=object_type,
             public_description=sanitized,
             created_heartbeat=heartbeat_number,
-            materials=dict(materials),
+            materials=dict(effective_materials),
         )
         self._world_state.public_objects[object_id] = record.to_envelope()
 
@@ -2567,7 +2586,7 @@ class FirstPairRuntime:
             "object_id": object_id,
             "tile_id": tile_id,
             "object_type": object_type,
-            "materials_spent": dict(materials),
+            "materials_spent": dict(effective_materials),
             "remaining": self._get_agent_inventory(agent_ref),
         }
 

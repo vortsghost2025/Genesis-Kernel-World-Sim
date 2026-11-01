@@ -329,3 +329,18 @@ def test_construction_fx_absent_until_hew_timber_recorded():
     # Action FX must be explicitly absent/hidden when action is not hew_timber / build
     assert "fx.group.visible = false" in body
     assert "fx.scaffolding.visible = false" in body
+
+
+# ---------------------------------------------------------------------------
+# 12. Phase 10LM: Interior volume & foot trail legibility guards
+# ---------------------------------------------------------------------------
+def test_interior_volume_and_trail_legibility_present():
+    """Verify Phase 10LM interior volume (floor + perimeter sill walls) and
+    position_timeline foot trail derivation are wired into the observatory."""
+    script = _get_prototype_script()
+    assert "buildInteriorVolumeSpec" in script
+    assert "rebuildInteriorVolume" in script
+    assert "disposeInteriorVolume" in script
+    assert "deriveFootTrailsFromTimeline" in script
+    assert "buildMountainRanges" in script
+    assert "computeContinentHeightField" in script

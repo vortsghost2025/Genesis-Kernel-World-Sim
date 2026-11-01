@@ -1192,6 +1192,61 @@ const continentTextures = {
 continentTextures.cont_a.anisotropy = 8;
 continentTextures.cont_b.anisotropy = 8;
 
+function computeContinentHeightField(elevArr, terrArr, outArr) {
+  const dstOut = outArr || new Float32Array(200 * 200);
+  const rawElev = new Float32Array(200 * 200);
+  for (let idx = 0; idx < 40000; idx++) {
+    const terr = (terrArr && terrArr[idx]) ? String(terrArr[idx]) : "ocean";
+    const elev = (elevArr && elevArr[idx] != null) ? Number(elevArr[idx]) : 0.0;
+    if (terr === "ocean") {
+      rawElev[idx] = -0.35;
+    } else {
+      const eClamped = Math.max(0.0, elev);
+      const gentleBase = 0.18 + eClamped * 1.45;
+      const hillRise = Math.pow(Math.max(0.0, eClamped - 0.28), 1.35) * 9.5;
+      const mtnPeak = Math.pow(Math.max(0.0, eClamped - 0.50), 1.45) * 142.0;
+      rawElev[idx] = gentleBase + hillRise + mtnPeak;
+    }
+  }
+
+  const passA = new Float32Array(200 * 200);
+  for (let pass = 0; pass < 2; pass++) {
+    const src = (pass === 0) ? rawElev : passA;
+    const dst = (pass === 0) ? passA : dstOut;
+    for (let row = 0; row < 200; row++) {
+      for (let col = 0; col < 200; col++) {
+        const idx = row * 200 + col;
+        const terr = (terrArr && terrArr[idx]) ? String(terrArr[idx]) : "ocean";
+        const isHighRidge = (terr === "mountain" || src[idx] > 16.0);
+        const rad = isHighRidge ? 1 : 2;
+        let sum = 0, weightSum = 0;
+        for (let dr = -rad; dr <= rad; dr++) {
+          for (let dc = -rad; dc <= rad; dc++) {
+            const nr = row + dr;
+            const nc = col + dc;
+            if (nr >= 0 && nr < 200 && nc >= 0 && nc < 200) {
+              const dist2 = dr * dr + dc * dc;
+              const w = isHighRidge
+                ? ((dist2 === 0) ? 10 : (dist2 === 1) ? 3 : 1)
+                : ((dist2 === 0) ? 6 : (dist2 === 1) ? 4 : (dist2 === 2) ? 2 : 1);
+              sum += src[nr * 200 + nc] * w;
+              weightSum += w;
+            }
+          }
+        }
+        let smoothed = sum / weightSum;
+        if (terr === "ocean") {
+          smoothed = Math.min(-0.18, smoothed);
+        } else {
+          smoothed = Math.max(0.10, smoothed);
+        }
+        dst[idx] = smoothed;
+      }
+    }
+  }
+  return dstOut;
+}
+
 function buildContinentMesh(cid) {
   const group = continentGroups[cid];
   const tData = terrainDB ? terrainDB[cid] : null;
@@ -1202,8 +1257,8 @@ function buildContinentMesh(cid) {
 
   const pos = geom.attributes.position;
 
-  // 1. Raw Elevation & Terrain Mapping (Gentle Human-Scale Geography; Canonical Ocean Strictly Preserved)
-  const rawElev = new Float32Array(200 * 200);
+  // 1. Raw Elevation & Terrain Mapping (Phase 10LM Continental Relief: 30-60m summits, 2-6m hills; Canonical Ocean Strictly Preserved)
+  const elevInput = new Float32Array(200 * 200);
   const rawTerr = new Array(200 * 200);
   for (let row = 0; row < 200; row++) {
     for (let col = 0; col < 200; col++) {
@@ -1219,59 +1274,23 @@ function buildContinentMesh(cid) {
         const t = tileByContinentCoord.get(`${cid}:${x},${y}`);
         if (t) elev = t.elevation || 0.0;
       }
-
-      if (terr === "ocean") {
-        rawElev[idx] = -0.35;
-      } else {
-        const eClamped = Math.max(0.0, elev);
-        const gentleBase = 0.18 + eClamped * 1.15;
-        const mtnPeak = Math.pow(Math.max(0.0, eClamped - 0.52), 1.65) * 8.2;
-        rawElev[idx] = gentleBase + mtnPeak;
-      }
+      elevInput[idx] = elev;
       rawTerr[idx] = terr;
     }
   }
 
-  // 2. Two-Pass Gaussian Elevation Smoothing for Natural Rolling Hills (Canonical Ocean Remains Below 0.0; Land Remains >= 0.10)
-  let passA = new Float32Array(200 * 200);
-  for (let pass = 0; pass < 2; pass++) {
-    const src = (pass === 0) ? rawElev : passA;
-    const dst = (pass === 0) ? passA : heightLookup[cid];
-    for (let row = 0; row < 200; row++) {
-      for (let col = 0; col < 200; col++) {
-        const idx = row * 200 + col;
-        let sum = 0, weightSum = 0;
-        for (let dr = -2; dr <= 2; dr++) {
-          for (let dc = -2; dc <= 2; dc++) {
-            const nr = row + dr;
-            const nc = col + dc;
-            if (nr >= 0 && nr < 200 && nc >= 0 && nc < 200) {
-              const dist2 = dr * dr + dc * dc;
-              const w = (dist2 === 0) ? 6 : (dist2 === 1) ? 4 : (dist2 === 2) ? 2 : 1;
-              sum += src[nr * 200 + nc] * w;
-              weightSum += w;
-            }
-          }
-        }
-        let smoothed = sum / weightSum;
-        if (rawTerr[idx] === "ocean") {
-          smoothed = Math.min(-0.18, smoothed);
-        } else {
-          smoothed = Math.max(0.10, smoothed);
-        }
-        dst[idx] = smoothed;
-        if (pass === 1) {
-          pos.setY(idx, smoothed);
-        }
-      }
-    }
+  // 2. Ridge-Preserving Elevation Smoothing (Canonical Ocean Remains <= -0.18m; Land Remains >= 0.10m)
+  computeContinentHeightField(elevInput, rawTerr, heightLookup[cid]);
+  for (let idx = 0; idx < 40000; idx++) {
+    pos.setY(idx, heightLookup[cid][idx]);
   }
 
   geom.computeVertexNormals();
 
-  // Populate vertex colors from the macro biome/elevation palette + Fog-of-War darkening for unexplored tiles
+  // Populate vertex colors from the macro biome/elevation palette + slope cliff shading + Fog-of-War darkening
   const vColors = new Float32Array(200 * 200 * 3);
   const kset = knownCoordsByContinent[cid];
+  const hArr = heightLookup[cid];
 
   for (let row = 0; row < 200; row++) {
     for (let col = 0; col < 200; col++) {
@@ -1279,25 +1298,41 @@ function buildContinentMesh(cid) {
       const x = col - 100;
       const y = row - 100;
       const terr = rawTerr[idx];
-      const elev = (tData && tData.elev) ? (tData.elev[idx] || 0.0) : 0.25;
+      const elev = elevInput[idx] || 0.25;
+      const h = hArr[idx] || 0.0;
       const b = String((tData && tData.biome && tData.biome[idx]) || "");
       const w = String((tData && tData.water && tData.water[idx]) || "");
+
+      let maxNeighborDiff = 0.0;
+      if (terr !== "ocean") {
+        if (col > 0) maxNeighborDiff = Math.max(maxNeighborDiff, Math.abs(h - hArr[idx - 1]));
+        if (col < 199) maxNeighborDiff = Math.max(maxNeighborDiff, Math.abs(h - hArr[idx + 1]));
+        if (row > 0) maxNeighborDiff = Math.max(maxNeighborDiff, Math.abs(h - hArr[idx - 200]));
+        if (row < 199) maxNeighborDiff = Math.max(maxNeighborDiff, Math.abs(h - hArr[idx + 200]));
+      }
 
       const c = new THREE.Color();
       if (terr === "ocean") {
         c.setHex(0x0f2d4a);
       } else if (terr === "coast" || elev < 0.16) {
         c.setHex(0xb8ad82);
-      } else if (elev > 0.84) {
-        c.setHex(0xdce2e8);
-      } else if (elev > 0.70 || terr === "mountain") {
-        c.setHex(0x7c847e);
+      } else if (h > 34.0 || elev > 0.86) {
+        c.setHex(0xe8eef4);
+      } else if (h > 22.0 || elev > 0.76) {
+        c.setHex(0x9ca4ab);
+      } else if (elev > 0.68 || terr === "mountain") {
+        c.setHex(0x707874);
       } else if (terr === "forest" || b.includes("forest") || b.includes("woodland")) {
         c.setHex(0x3a6b34);
       } else if (terr === "hill" || b.includes("hill") || b.includes("highland")) {
         c.setHex(0x588242);
       } else {
         c.setHex(0x4c7e3c);
+      }
+
+      if (terr !== "ocean" && maxNeighborDiff > 4.2) {
+        const cliffFactor = Math.min(0.68, (maxNeighborDiff - 4.2) / 14.0);
+        c.lerp(new THREE.Color(0x54595e), cliffFactor);
       }
 
       if ((w === "river" || w === "stream" || w === "freshwater") && terr !== "ocean") {
@@ -1398,21 +1433,124 @@ function createBerrySprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
   return createGroundedProp(propTextures.berry, sz, sz * 0.88, x, z, h, sz * 0.42, sz * 0.42, 0.06, tintHex);
 }
 
+function computeMountainPeakScale(h, elev) {
+  const heightVal = Number(h) || 0;
+  const elevVal = Number(elev) || 0;
+  return Math.max(0.95, Math.min(4.2, 0.75 + (heightVal / 26.0) + Math.max(0, elevVal - 0.70) * 1.4));
+}
+
+function buildMountainRanges(mtnTiles) {
+  if (!Array.isArray(mtnTiles) || mtnTiles.length === 0) return [];
+  const byKey = new Map();
+  for (const t of mtnTiles) {
+    if (!t || t.x == null || t.z == null) continue;
+    byKey.set(`${t.x},${t.z}`, t);
+  }
+  const visited = new Set();
+  const ranges = [];
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+  for (const [key, startTile] of byKey.entries()) {
+    if (visited.has(key)) continue;
+    const comp = [];
+    const queue = [startTile];
+    visited.add(key);
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      comp.push(cur);
+      for (const [dx, dz] of dirs) {
+        const nk = `${cur.x + dx},${cur.z + dz}`;
+        if (!visited.has(nk) && byKey.has(nk)) {
+          visited.add(nk);
+          queue.push(byKey.get(nk));
+        }
+      }
+    }
+    let summit = comp[0];
+    for (const t of comp) {
+      if ((t.h || 0) > (summit.h || 0) || ((t.h === summit.h) && (t.elev || 0) > (summit.elev || 0))) {
+        summit = t;
+      }
+    }
+    const peaks = [];
+    for (const t of comp) {
+      let isLocalMax = true;
+      for (const [dx, dz] of dirs) {
+        const nb = byKey.get(`${t.x + dx},${t.z + dz}`);
+        if (nb && ((nb.h || 0) > (t.h || 0))) {
+          isLocalMax = false;
+          break;
+        }
+      }
+      if (isLocalMax || t === summit) {
+        const pkScale = (typeof computeMountainPeakScale === "function")
+          ? computeMountainPeakScale(t.h, t.elev)
+          : Math.max(0.95, Math.min(4.2, 0.75 + ((Number(t.h) || 0) / 26.0) + Math.max(0, (Number(t.elev) || 0) - 0.70) * 1.4));
+        peaks.push({
+          x: t.x,
+          z: t.z,
+          h: t.h || 0,
+          elev: t.elev || 0,
+          scale: pkScale,
+          isSummit: (t === summit)
+        });
+      }
+    }
+    if (peaks.length === 0) {
+      const sumScale = (typeof computeMountainPeakScale === "function")
+        ? computeMountainPeakScale(summit.h, summit.elev)
+        : Math.max(0.95, Math.min(4.2, 0.75 + ((Number(summit.h) || 0) / 26.0) + Math.max(0, (Number(summit.elev) || 0) - 0.70) * 1.4));
+      peaks.push({
+        x: summit.x,
+        z: summit.z,
+        h: summit.h || 0,
+        elev: summit.elev || 0,
+        scale: sumScale,
+        isSummit: true
+      });
+    }
+    ranges.push({
+      id: `range_${summit.x}_${summit.z}`,
+      tiles: comp,
+      summit: { x: summit.x, z: summit.z, h: summit.h || 0, elev: summit.elev || 0 },
+      peaks
+    });
+  }
+  return ranges;
+}
+
+function detectCliffCaveOpening(x, z, h, neighborHeights) {
+  const heightVal = Number(h) || 0;
+  if (heightVal < 12.0 || !Array.isArray(neighborHeights) || neighborHeights.length === 0) return null;
+  let maxDrop = 0.0;
+  for (let i = 0; i < neighborHeights.length; i++) {
+    const nh = Number(neighborHeights[i]);
+    if (Number.isFinite(nh)) {
+      const drop = heightVal - nh;
+      if (drop > maxDrop) maxDrop = drop;
+    }
+  }
+  if (maxDrop < 8.0) return null;
+  const scale = Math.min(2.6, 1.0 + (maxDrop - 6.0) / 14.0);
+  return { x, z, h: heightVal, drop: maxDrop, scale };
+}
+
 function createMountainPeakSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
   const w = 4.4 * scale;
   const ht = 4.1 * scale;
-  return createGroundedProp(propTextures.mountain, w, ht, x, z, h, w * 0.44, w * 0.40, 0.25, tintHex);
+  return createGroundedProp(propTextures.mountain, w, ht, x, z, h, w * 0.44, w * 0.40, 0.25 * scale, tintHex);
 }
 
 function createWaterfallSprite(x, z, h, tintHex = 0xffffff) {
   return createGroundedProp(propTextures.waterfall, 2.1, 2.15, x, z, h, 0.95, 0.95, 0.12, tintHex);
 }
 
-function createCaveSprite(x, z, h) {
-  const group = createGroundedProp(propTextures.cave, 3.6, 3.65, x, z, h, 1.55, 1.45, 0.16);
-  const light = new THREE.PointLight(0xff9922, 0.85, 7);
-  light.position.set(0, 1.0, 0.3);
-  group.add(light);
+function createCaveSprite(x, z, h, scale = 1.0, withLight = true, tintHex = 0xffffff) {
+  const group = createGroundedProp(propTextures.cave, 3.6 * scale, 3.65 * scale, x, z, h, 1.55 * scale, 1.45 * scale, 0.16 * scale, tintHex);
+  if (withLight) {
+    const light = new THREE.PointLight(0xff9922, 0.85, 7);
+    light.position.set(0, 1.0 * scale, 0.3);
+    group.add(light);
+  }
   return group;
 }
 
@@ -1889,20 +2027,69 @@ function updatePublicObjectsAndClearings(pn, hb) {
   }
 }
 
+const mountainRangesByContinent = { cont_a: [], cont_b: [] };
+const trailMeshesByContinent = { cont_a: null, cont_b: null };
+
+function deriveFootTrailsFromTimeline(timeline, upToHb) {
+  if (!timeline || typeof timeline !== "object") return [];
+  const maxTick = (upToHb != null && Number.isFinite(Number(upToHb))) ? Number(upToHb) : Infinity;
+  const hbKeys = Object.keys(timeline)
+    .map(k => Number(k))
+    .filter(n => Number.isFinite(n) && n <= maxTick)
+    .sort((a, b) => a - b);
+  if (hbKeys.length < 2) return [];
+
+  function resolveCoord(tid) {
+    if (!tid) return null;
+    if (typeof tilesById !== "undefined" && tilesById && tilesById.has(tid)) {
+      const t = tilesById.get(tid);
+      if (t && t.coordinates) return { x: Number(t.coordinates.x), z: Number(t.coordinates.y) };
+    }
+    const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid));
+    if (m) return { x: Number(m[1]), z: Number(m[2]) };
+    return null;
+  }
+
+  const segMap = new Map();
+  for (let i = 1; i < hbKeys.length; i++) {
+    const prevEntry = timeline[String(hbKeys[i - 1])] || {};
+    const currEntry = timeline[String(hbKeys[i])] || {};
+    for (const agKey of Object.keys(currEntry)) {
+      const prevTid = prevEntry[agKey];
+      const currTid = currEntry[agKey];
+      if (!prevTid || !currTid || prevTid === currTid) continue;
+      const cA = resolveCoord(prevTid);
+      const cB = resolveCoord(currTid);
+      if (!cA || !cB) continue;
+      if (Math.hypot(cB.x - cA.x, cB.z - cA.z) > 2.5) continue;
+      const firstIsA = (cA.x < cB.x) || (cA.x === cB.x && cA.z <= cB.z);
+      const p0 = firstIsA ? cA : cB;
+      const p1 = firstIsA ? cB : cA;
+      const key = `${p0.x},${p0.z}->${p1.x},${p1.z}`;
+      let rec = segMap.get(key);
+      if (!rec) {
+        rec = { ax: p0.x, az: p0.z, bx: p1.x, bz: p1.z, count: 0 };
+        segMap.set(key, rec);
+      }
+      rec.count += 1;
+    }
+  }
+  return Array.from(segMap.values()).sort((a, b) => b.count - a.count);
+}
+
 function populateContinentScenery(cid) {
   const sGroup = sceneryGroups[cid];
   disposeObjectGroupResources(sGroup);
+  trailMeshesByContinent[cid] = null;
 
   const tData = terrainDB ? terrainDB[cid] : null;
   const bounds = getDynamicExploredBounds(cid);
+  const mtnTiles = [];
 
   // Populate Natural Geography & Vegetation across the 200x200 Continent
   // Strictly skip canonical ocean tiles. Tag procedural flora as current-snapshot scenery.
   for (let y = -94; y <= 94; y++) {
     for (let x = -94; x <= 94; x++) {
-      const inExploredVicinity = (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY);
-      if (!inExploredVicinity && ((Math.abs(x) % 2 !== 0) || (Math.abs(y) % 2 !== 0))) continue;
-
       if (isCanonicalOcean(cid, x, y)) continue;
 
       const idx = (y + 100) * 200 + (x + 100);
@@ -1934,6 +2121,14 @@ function populateContinentScenery(cid) {
       const isKnown = isTileKnown(cid, x, y);
       const propTint = isKnown ? 0xffffff : 0x8ea69b;
 
+      // Collect contiguous high-elevation mountain tiles for connected range/ridge construction
+      if (terr === "mountain" || elev > 0.78) {
+        mtnTiles.push({ x, z: y, h, elev, isKnown, propTint });
+      }
+
+      const inExploredVicinity = (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY);
+      if (!inExploredVicinity && ((Math.abs(x) % 2 !== 0) || (Math.abs(y) % 2 !== 0))) continue;
+
       // 1. Canonical Cave Landmarks (Strictly when defined in tile.landmark_ids — lm_deep_mouth at (31,36))
       const tKnown = tileByContinentCoord.get(`${cid}:${x},${y}`);
       const hasCave = (lm.includes("cave") || lm.includes("mouth")) ||
@@ -1942,13 +2137,44 @@ function populateContinentScenery(cid) {
           return s.includes("cave") || s.includes("mouth") || s.includes("cavern");
         }));
       if (hasCave) {
-        const cave = createCaveSprite(x, y, h);
+        const cave = createCaveSprite(x, y, h, 1.15, true, 0xffffff);
         cave.userData = { wx: x, wz: y, tileX: x, tileY: y, kind: "cave", isCanonicalLandmark: true, isKnownTile: isKnown, provenance: "canonical-landmark" };
         sGroup.add(cave);
         continue;
       }
 
       const seed = (((x * 73856093) ^ (y * 19349663)) >>> 0) & 0xffff;
+
+      // 1b. Cliff-face Caves at Steep Elevation Transitions (derived from height field drop-off)
+      if (h >= 12.0 && (seed % 7 === 0)) {
+        const nbHeights = [
+          getTerrainHeight(cid, x - 2, y),
+          getTerrainHeight(cid, x + 2, y),
+          getTerrainHeight(cid, x, y - 2),
+          getTerrainHeight(cid, x, y + 2)
+        ];
+        const cliffCave = detectCliffCaveOpening(x, y, h, nbHeights);
+        if (cliffCave && !isCanonicalOcean(cid, x, y)) {
+          const caveMesh = createCaveSprite(x, y, h, cliffCave.scale, false, propTint);
+          caveMesh.userData = {
+            wx: x, wz: y, tileX: x, tileY: y,
+            kind: "cave",
+            drop: cliffCave.drop,
+            scale: cliffCave.scale,
+            isCanonicalLandmark: false,
+            isKnownTile: isKnown,
+            provenance: "current-snapshot scenery"
+          };
+          sGroup.add(caveMesh);
+          continue;
+        }
+      }
+
+      // Skip individual mountain tiles here; they are rendered below as connected mountain ranges
+      if (terr === "mountain" || elev > 0.78) {
+        continue;
+      }
+
       const jitterX = (((seed % 100) / 100 - 0.5) * 0.62);
       const jitterZ = ((((seed >> 8) % 100) / 100 - 0.5) * 0.62);
       const ox = x + jitterX;
@@ -1957,15 +2183,6 @@ function populateContinentScenery(cid) {
       if (isCanonicalOcean(cid, ox, oz)) continue;
       const oh = getTerrainHeight(cid, ox, oz);
       if (oh <= 0.08) continue;
-
-      // 2. High Mountain Peaks
-      if ((terr === "mountain" || elev > 0.78) && (seed % 10 < (inExploredVicinity ? 4 : 3))) {
-        const sc = 0.85 + (seed % 35) / 100;
-        const mtn = createMountainPeakSprite(ox, oz, oh, sc, propTint);
-        mtn.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "mountain", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
-        sGroup.add(mtn);
-        continue;
-      }
 
       // 3. Natural Freshwater Springs / Cascades on hilly river tiles
       if ((water === "river" || water === "stream") && elev > 0.38 && (seed % 12 === 0)) {
@@ -2029,6 +2246,82 @@ function populateContinentScenery(cid) {
         }
       }
     }
+  }
+
+  // 2. Connected Mountain Ranges & Summit Ridges (Phase 10LM)
+  const ranges = buildMountainRanges(mtnTiles);
+  mountainRangesByContinent[cid] = ranges;
+  for (const rng of ranges) {
+    for (const pk of rng.peaks) {
+      if (isCanonicalOcean(cid, pk.x, pk.z)) continue;
+      const ph = getTerrainHeight(cid, pk.x, pk.z);
+      if (ph <= 0.08) continue;
+      const isKnown = isTileKnown(cid, pk.x, pk.z);
+      const propTint = isKnown ? 0xffffff : 0x8ea69b;
+      const mtn = createMountainPeakSprite(pk.x, pk.z, ph, pk.scale, propTint);
+      mtn.userData = {
+        wx: pk.x, wz: pk.z, tileX: pk.x, tileY: pk.z,
+        kind: "mountain",
+        rangeId: rng.id,
+        rangeSize: rng.tiles.length,
+        isSummit: pk.isSummit,
+        peakScale: pk.scale,
+        isCanonicalLandmark: false,
+        isKnownTile: isKnown,
+        provenance: "current-snapshot scenery"
+      };
+      sGroup.add(mtn);
+    }
+  }
+
+  // 7. Foot Trails Derived from Agent position_timeline (Phase 10LM)
+  const pn = (cid === "cont_b") ? "west" : "east";
+  const pairObj = PAIRS[pn] || {};
+  const trailSegments = deriveFootTrailsFromTimeline(pairObj.position_timeline || {});
+  const validSegs = trailSegments.filter(
+    s => !isCanonicalOcean(cid, s.ax, s.az) && !isCanonicalOcean(cid, s.bx, s.bz)
+  );
+  if (validSegs.length > 0) {
+    const posArr = new Float32Array(validSegs.length * 6);
+    const colArr = new Float32Array(validSegs.length * 6);
+    for (let i = 0; i < validSegs.length; i++) {
+      const s = validSegs[i];
+      const ha = getTerrainHeight(cid, s.ax, s.az) + 0.09;
+      const hb = getTerrainHeight(cid, s.bx, s.bz) + 0.09;
+      const base = i * 6;
+      posArr[base + 0] = s.ax; posArr[base + 1] = ha; posArr[base + 2] = s.az;
+      posArr[base + 3] = s.bx; posArr[base + 4] = hb; posArr[base + 5] = s.bz;
+      const wear = Math.min(1.0, Math.log2(s.count + 1) / 6.0);
+      const r = 0.62 + wear * 0.26;
+      const g = 0.48 + wear * 0.22;
+      const bCol = 0.30 + wear * 0.14;
+      colArr[base + 0] = r; colArr[base + 1] = g; colArr[base + 2] = bCol;
+      colArr[base + 3] = r; colArr[base + 4] = g; colArr[base + 5] = bCol;
+    }
+    const tGeom = new THREE.BufferGeometry();
+    tGeom.setAttribute("position", new THREE.BufferAttribute(posArr, 3));
+    tGeom.setAttribute("color", new THREE.BufferAttribute(colArr, 3));
+    const tMat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.82
+    });
+    const trailLines = new THREE.LineSegments(tGeom, tMat);
+    trailLines.position.set(validSegs[0].ax, getTerrainHeight(cid, validSegs[0].ax, validSegs[0].az), validSegs[0].az);
+    // Offset geometry back so world coordinates remain exact while trailLines.position sits on a valid land tile
+    tGeom.translate(-validSegs[0].ax, -getTerrainHeight(cid, validSegs[0].ax, validSegs[0].az), -validSegs[0].az);
+    trailLines.userData = {
+      wx: validSegs[0].ax,
+      wz: validSegs[0].az,
+      tileX: validSegs[0].ax,
+      tileY: validSegs[0].az,
+      kind: "trail",
+      segmentCount: validSegs.length,
+      isCanonicalLandmark: true,
+      provenance: "derived-position-timeline"
+    };
+    sGroup.add(trailLines);
+    trailMeshesByContinent[cid] = trailLines;
   }
 }
 
@@ -2387,12 +2680,11 @@ function updateWeatherAtmospherics(pairName, hb) {
 // -------------------------------------------------------------
 // DOLLHOUSE INTERIOR CUTAWAY & LIVING HOMESTEAD
 // -------------------------------------------------------------
+const INTERIOR_FLOOR_OFFSET = 0.12;
 const interiorGroup = new THREE.Group();
 interiorGroup.visible = false;
 scene.add(interiorGroup);
 
-const floorGeom = new THREE.PlaneGeometry(4.8, 3.8);
-floorGeom.rotateX(-Math.PI / 2);
 const floorCanvas = document.createElement("canvas");
 floorCanvas.width = 128; floorCanvas.height = 128;
 const fctx = floorCanvas.getContext("2d");
@@ -2400,13 +2692,59 @@ fctx.fillStyle = "#4a2e18"; fctx.fillRect(0, 0, 128, 128);
 fctx.fillStyle = "#3a2210";
 for (let p = 0; p < 128; p += 16) { fctx.fillRect(0, p, 128, 2); }
 const floorTex = new THREE.CanvasTexture(floorCanvas);
-const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85 });
-const floorMesh = new THREE.Mesh(floorGeom, floorMat);
-floorMesh.position.y = 0.05;
-interiorGroup.add(floorMesh);
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, userData: { isSharedMaterial: true } });
+const sillWallMat = new THREE.MeshStandardMaterial({ color: 0x5c3c20, roughness: 0.88, userData: { isSharedMaterial: true } });
+
+const interiorVolumeGroup = new THREE.Group();
+interiorGroup.add(interiorVolumeGroup);
 
 const interiorPropsGroup = new THREE.Group();
 interiorGroup.add(interiorPropsGroup);
+
+function buildInteriorVolumeSpec(shelterWidth = 5.4, shelterDepth = 4.4) {
+  const floorOffset = (typeof INTERIOR_FLOOR_OFFSET !== "undefined") ? INTERIOR_FLOOR_OFFSET : 0.12;
+  const fw = Math.max(4.6, shelterWidth * 0.90);
+  const fd = Math.max(3.6, shelterDepth * 0.86);
+  const wallT = 0.18;
+  const wallH = 0.62;
+  const halfW = fw * 0.5;
+  const halfD = fd * 0.5;
+  const doorGap = 1.25;
+  const frontSegW = Math.max(0.8, (fw - doorGap) * 0.5);
+  return {
+    floor: { width: fw, depth: fd, thickness: 0.10, y: floorOffset },
+    walls: [
+      { id: "back",  width: fw + wallT, height: wallH, depth: wallT, x: 0, y: floorOffset + wallH * 0.5, z: -halfD },
+      { id: "left",  width: wallT, height: wallH, depth: fd, x: -halfW, y: floorOffset + wallH * 0.5, z: 0 },
+      { id: "right", width: wallT, height: wallH, depth: fd, x:  halfW, y: floorOffset + wallH * 0.5, z: 0 },
+      { id: "front_left",  width: frontSegW, height: wallH * 0.78, depth: wallT, x: -(doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + (wallH * 0.78) * 0.5, z: halfD },
+      { id: "front_right", width: frontSegW, height: wallH * 0.78, depth: wallT, x:  (doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + (wallH * 0.78) * 0.5, z: halfD }
+    ]
+  };
+}
+
+function disposeInteriorVolume() {
+  disposeObjectGroupResources(interiorVolumeGroup);
+}
+
+function rebuildInteriorVolume() {
+  disposeInteriorVolume();
+  const spec = buildInteriorVolumeSpec(5.4, 4.4);
+  const fGeom = new THREE.BoxGeometry(spec.floor.width, spec.floor.thickness, spec.floor.depth);
+  const fMesh = new THREE.Mesh(fGeom, floorMat);
+  fMesh.position.set(0, spec.floor.y - spec.floor.thickness * 0.5, 0);
+  fMesh.receiveShadow = true;
+  interiorVolumeGroup.add(fMesh);
+
+  for (const w of spec.walls) {
+    const wGeom = new THREE.BoxGeometry(w.width, w.height, w.depth);
+    const wMesh = new THREE.Mesh(wGeom, sillWallMat);
+    wMesh.position.set(w.x, w.y, w.z);
+    wMesh.castShadow = true;
+    wMesh.receiveShadow = true;
+    interiorVolumeGroup.add(wMesh);
+  }
+}
 
 function rebuildInteriorProps(tileId, pairName, hb) {
   // Clear and dispose any dynamic interior props
@@ -2524,6 +2862,7 @@ function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
   if (enable && sx != null) {
     interiorGroup.position.set(sx, sh, sz);
     activeShelterTileCoords = { x: sx, z: sz, h: sh, tileId: tileId };
+    rebuildInteriorVolume();
     rebuildInteriorProps(tileId, selectedPair, currentHb);
     const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
     const oGroup = objectGroups[cid];
@@ -2538,6 +2877,7 @@ function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
     }
   } else {
     activeShelterTileCoords = null;
+    disposeInteriorVolume();
     rebuildInteriorProps(null, selectedPair, currentHb);
   }
 }
@@ -2829,7 +3169,10 @@ function applyCameraMode(mode, immediate = true) {
     const cx = (ax + ex) * 0.5;
     const cz = (az + ez) * 0.5;
     const ch = getTerrainHeight(cid, cx, cz);
-    smoothMoveCamera(new THREE.Vector3(cx, ch + 52, cz + 4.0), new THREE.Vector3(cx, ch, cz), immediate);
+    const camZ = cz + 4.0;
+    const camGround = getTerrainHeight(cid, cx, camZ);
+    const topY = Math.max(ch + 52, camGround + 18.0);
+    smoothMoveCamera(new THREE.Vector3(cx, topY, camZ), new THREE.Vector3(cx, ch, cz), immediate);
   } else if (mode === "interior") {
     const btn = document.getElementById("cam-interior");
     if (btn) btn.classList.add("active");
@@ -3605,9 +3948,9 @@ function updateAllAgentFigures(time) {
 
       let finalH = getTerrainHeight(cid, finalX, finalZ) + strideBob;
       if (isInteriorModeActive && activeShelterTileCoords) {
-        finalH = activeShelterTileCoords.h + 0.12;
+        finalH = activeShelterTileCoords.h + INTERIOR_FLOOR_OFFSET;
       } else if (isSheltered) {
-        finalH = getTerrainHeight(cid, cx, cz) + 0.12;
+        finalH = getTerrainHeight(cid, cx, cz) + INTERIOR_FLOOR_OFFSET;
       }
       fig.position.set(finalX, finalH, finalZ);
       fig.visible = (selectedPair !== "orbit");

@@ -1210,6 +1210,7 @@ def _structural_timber_requirement_desc() -> str:
     """
     from backend.world.first_pair_runtime import (
         FirstPairRuntime as _Runtime,
+        _ADDON_STRUCTURAL_DISCOUNT_DIVISOR,
         _STRUCTURAL_TIMBER_MIN,
     )
 
@@ -1223,7 +1224,11 @@ def _structural_timber_requirement_desc() -> str:
         "- Structural types need timber declared among their materials: %s. "
         "Timber comes only from hew_timber on a tree tile, which needs an axe "
         "(stone_axe, iron_axe) or knapped blade (flint_knife); excluding timber "
-        "from the materials dict rejects the build." % parts
+        "from the materials dict rejects the build. Attaching a structural room "
+        "to an existing adjacent structure via addon_to shares walls and cuts "
+        "the required structural timber minimum and all declared structural "
+        "material costs in half (divisor %d, rounding up)."
+        % (parts, _ADDON_STRUCTURAL_DISCOUNT_DIVISOR)
     )
 
 
