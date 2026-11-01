@@ -1465,49 +1465,70 @@ function buildMountainRanges(mtnTiles) {
         }
       }
     }
+    const MAX_PEAKS_PER_RANGE = 3;
+    const MIN_PROMINENCE_M = 3.0;
+
+    // Score every mountain tile by prominence: its height above the mean of
+    // its 8 neighbours. The previous filter admitted every local maximum of
+    // its neighbourhood, which on noisy height data is most of the range --
+    // producing dozens of 4.2x spikes that read as spiny scrub. Real massifs
+    // (Rockies, Everest) are a BROAD BODY with a handful of prominence-ranked
+    // summits, so rank and keep few.
+    const scored = comp.map(t => {
+      let nbSum = 0, nbN = 0;
+      for (const [dx, dz] of dirs) {
+        const nb = byKey.get(`${t.x + dx},${t.z + dz}`);
+        if (nb) { nbSum += (Number(nb.h) || 0); nbN += 1; }
+      }
+      const nbMean = nbN > 0 ? nbSum / nbN : (Number(t.h) || 0);
+      return { t, prom: (Number(t.h) || 0) - nbMean };
+    });
+    scored.sort((a, b) => (b.prom - a.prom) || ((b.t.h || 0) - (a.t.h || 0)));
+
+    // True summit = highest tile, always present.
     let summit = comp[0];
     for (const t of comp) {
       if ((t.h || 0) > (summit.h || 0) || ((t.h === summit.h) && (t.elev || 0) > (summit.elev || 0))) {
         summit = t;
       }
     }
-    const peaks = [];
-    for (const t of comp) {
-      let isLocalMax = true;
-      for (const [dx, dz] of dirs) {
-        const nb = byKey.get(`${t.x + dx},${t.z + dz}`);
-        if (nb && ((nb.h || 0) > (t.h || 0))) {
-          isLocalMax = false;
-          break;
-        }
-      }
-      if (isLocalMax || t === summit) {
-        const pkScale = (typeof computeMountainPeakScale === "function")
-          ? computeMountainPeakScale(t.h, t.elev)
-          : Math.max(0.95, Math.min(4.2, 0.75 + ((Number(t.h) || 0) / 26.0) + Math.max(0, (Number(t.elev) || 0) - 0.70) * 1.4));
-        peaks.push({
-          x: t.x,
-          z: t.z,
-          h: t.h || 0,
-          elev: t.elev || 0,
-          scale: pkScale,
-          isSummit: (t === summit)
-        });
-      }
+
+    const chosen = [];
+    for (const s of scored) {
+      if (chosen.length >= MAX_PEAKS_PER_RANGE) break;
+      if (chosen.length > 0 && s.prom < MIN_PROMINENCE_M) break;
+      // skip peaks sitting on the same shoulder as one already chosen
+      const tooClose = chosen.some(c =>
+        Math.abs(c.t.x - s.t.x) <= 1 && Math.abs(c.t.z - s.t.z) <= 1);
+      if (tooClose) continue;
+      chosen.push(s);
     }
-    if (peaks.length === 0) {
-      const sumScale = (typeof computeMountainPeakScale === "function")
-        ? computeMountainPeakScale(summit.h, summit.elev)
-        : Math.max(0.95, Math.min(4.2, 0.75 + ((Number(summit.h) || 0) / 26.0) + Math.max(0, (Number(summit.elev) || 0) - 0.70) * 1.4));
-      peaks.push({
-        x: summit.x,
-        z: summit.z,
-        h: summit.h || 0,
-        elev: summit.elev || 0,
-        scale: sumScale,
-        isSummit: true
-      });
+    if (chosen.length > 0 && !chosen.some(c => c.t === summit)) {
+      chosen[chosen.length - 1] = { t: summit, prom: 0 };
+    } else if (chosen.length === 0) {
+      chosen.push({ t: summit, prom: 0 });
     }
+
+    // Scale follows prominence, not raw height: a broad high shoulder gets a
+    // modest crown, a true spire a large one. Bounded so no single spike
+    // dominates the range.
+    const scaleFor = (t, prom) => {
+      const base = (typeof computeMountainPeakScale === "function")
+        ? computeMountainPeakScale(t.h, t.elev)
+        : 1.0;
+      const shape = Math.max(0.0, Math.min(1.0, ((Number(prom) || 0) + 2.0) / 14.0));
+      return Math.max(1.0, Math.min(2.6, base * (0.55 + 0.45 * shape)));
+    };
+
+    const peaks = chosen.map(c => ({
+      x: c.t.x,
+      z: c.t.z,
+      h: c.t.h || 0,
+      elev: c.t.elev || 0,
+      scale: scaleFor(c.t, c.prom),
+      isSummit: (c.t === summit),
+      prominence: c.prom
+    }));
     ranges.push({
       id: `range_${summit.x}_${summit.z}`,
       tiles: comp,
