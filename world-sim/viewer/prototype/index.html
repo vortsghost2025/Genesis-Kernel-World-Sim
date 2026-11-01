@@ -852,17 +852,17 @@ const canvas = document.getElementById("webgl-canvas");
 const mapPanel = document.getElementById("map-panel");
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x6e95b8);
-scene.fog = new THREE.FogExp2(0x7ca0be, 0.0065);
+scene.background = new THREE.Color(0x458ee0);
+scene.fog = new THREE.FogExp2(0x8ec5f2, 0.0012);
 
-const camera = new THREE.PerspectiveCamera(42, mapPanel.clientWidth / mapPanel.clientHeight, 0.25, 1400);
+const camera = new THREE.PerspectiveCamera(45, mapPanel.clientWidth / mapPanel.clientHeight, 0.25, 1600);
 const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
 renderer.setSize(mapPanel.clientWidth, mapPanel.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.04;
+renderer.toneMappingExposure = 1.08;
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -871,23 +871,24 @@ controls.maxPolarAngle = Math.PI / 2 - 0.02;
 controls.minDistance = 1.5;
 controls.maxDistance = 550;
 
-// Sky Dome (Warm Horizon Gradient for Human-Eye & Landscape Views)
+// Sky Dome (Crisp Cerulean-to-Azure Alpine Sky for Val di Funes / Dolomites Horizon)
 function createSkyDome() {
   const skyCanvas = document.createElement("canvas");
-  skyCanvas.width = 32;
+  skyCanvas.width = 64;
   skyCanvas.height = 512;
   const ctx = skyCanvas.getContext("2d");
   const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0.0, "#1c3554");
-  grad.addColorStop(0.32, "#3c6894");
-  grad.addColorStop(0.48, "#7da4c4");
-  grad.addColorStop(0.54, "#c8d8dc");
-  grad.addColorStop(0.60, "#4a6c58");
-  grad.addColorStop(1.0, "#182820");
+  grad.addColorStop(0.00, "#0b3168");
+  grad.addColorStop(0.22, "#1856a8");
+  grad.addColorStop(0.38, "#3882d4");
+  grad.addColorStop(0.47, "#7eb8f0");
+  grad.addColorStop(0.51, "#cde6fa");
+  grad.addColorStop(0.55, "#426b48");
+  grad.addColorStop(1.00, "#182820");
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 32, 512);
+  ctx.fillRect(0, 0, 64, 512);
   const skyTex = new THREE.CanvasTexture(skyCanvas);
-  const skyGeom = new THREE.SphereGeometry(680, 32, 24);
+  const skyGeom = new THREE.SphereGeometry(780, 32, 24);
   const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false });
   const dome = new THREE.Mesh(skyGeom, skyMat);
   scene.add(dome);
@@ -895,24 +896,24 @@ function createSkyDome() {
 }
 const skyDome = createSkyDome();
 
-// Balanced Natural Daylight Lighting (Zero overblown clay highlights)
-const ambientLight = new THREE.AmbientLight(0xdce8f5, 0.58);
+// Golden-Hour Alpine Sunlight (Side-lit Dolomite spires with cool slate shadows)
+const ambientLight = new THREE.AmbientLight(0xd4e6fa, 0.50);
 scene.add(ambientLight);
 
-const hemiLight = new THREE.HemisphereLight(0xeaf4ff, 0x2d4228, 0.52);
+const hemiLight = new THREE.HemisphereLight(0xdff0ff, 0x2c4a22, 0.56);
 scene.add(hemiLight);
 
-const sunLight = new THREE.DirectionalLight(0xfff4df, 0.92);
-sunLight.position.set(75, 130, 65);
+const sunLight = new THREE.DirectionalLight(0xffeed2, 1.18);
+sunLight.position.set(-95, 84, 55);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
 sunLight.shadow.camera.near = 10;
-sunLight.shadow.camera.far = 380;
-sunLight.shadow.camera.left = -95;
-sunLight.shadow.camera.right = 95;
-sunLight.shadow.camera.top = 95;
-sunLight.shadow.camera.bottom = -95;
+sunLight.shadow.camera.far = 420;
+sunLight.shadow.camera.left = -110;
+sunLight.shadow.camera.right = 110;
+sunLight.shadow.camera.top = 110;
+sunLight.shadow.camera.bottom = -110;
 sunLight.shadow.bias = -0.0005;
 scene.add(sunLight);
 
@@ -1197,15 +1198,28 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
   const cleanElev = new Float32Array(200 * 200);
   const landMask = new Float32Array(200 * 200);
   const settleInput = new Float32Array(200 * 200);
+  let settleSumX = 0.0, settleSumZ = 0.0, settleCount = 0;
+
   for (let idx = 0; idx < 40000; idx++) {
     const terr = (terrArr && terrArr[idx]) ? String(terrArr[idx]) : "ocean";
     const elev = (elevArr && elevArr[idx] != null) ? Number(elevArr[idx]) : 0.0;
     cleanElev[idx] = Math.max(0.0, elev);
     landMask[idx] = (terr === "ocean") ? 0.0 : 1.0;
-    settleInput[idx] = (settlementMask && settlementMask[idx]) ? 1.0 : 0.0;
+    if (settlementMask && settlementMask[idx]) {
+      settleInput[idx] = 1.0;
+      const r = (idx / 200) | 0;
+      const c = idx % 200;
+      settleSumX += (c - 100);
+      settleSumZ += (r - 100);
+      settleCount += 1;
+    }
   }
 
-  function blurField(srcArr, rad, passes) {
+  // Settlement valley center (defaults to (-4, -1) / origin basin when no mask passed)
+  const settleCx = settleCount > 0 ? (settleSumX / settleCount) : -2.0;
+  const settleCz = settleCount > 0 ? (settleSumZ / settleCount) : 0.0;
+
+  function blurFieldHV(srcArr, radX, radZ, passes) {
     let cur = new Float32Array(srcArr);
     const tmp = new Float32Array(40000);
     const nxt = new Float32Array(40000);
@@ -1213,8 +1227,8 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
       for (let r = 0; r < 200; r++) {
         const rowOff = r * 200;
         for (let c = 0; c < 200; c++) {
-          const c0 = Math.max(0, c - rad);
-          const c1 = Math.min(199, c + rad);
+          const c0 = Math.max(0, c - radX);
+          const c1 = Math.min(199, c + radX);
           let s = 0.0;
           for (let cc = c0; cc <= c1; cc++) s += cur[rowOff + cc];
           tmp[rowOff + c] = s / (c1 - c0 + 1);
@@ -1222,8 +1236,8 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
       }
       for (let c = 0; c < 200; c++) {
         for (let r = 0; r < 200; r++) {
-          const r0 = Math.max(0, r - rad);
-          const r1 = Math.min(199, r + rad);
+          const r0 = Math.max(0, r - radZ);
+          const r1 = Math.min(199, r + radZ);
           let s = 0.0;
           for (let rr = r0; rr <= r1; rr++) s += tmp[rr * 200 + c];
           nxt[r * 200 + c] = s / (r1 - r0 + 1);
@@ -1234,60 +1248,171 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
     return cur;
   }
 
-  // Multi-scale Alpine Massif + Ridged Multifractal Synthesis:
-  // 1. coastRamp: 15-tile coastal taper so mountains rise inland from coastal foothills
-  // 2. settleBlur: wide valley meadow basin around explored/settled tiles so huts sit on level valley turf
-  // 3. macroE: 36-tile regional massif envelope (suppresses isolated 3-tile spikes into gentle hills)
-  // 4. mesoE: 12-tile connected mountain range spine
-  // 5. microE: 2-tile alpine crag & couloir detail
-  const coastRamp = blurField(landMask, 7, 2);
+  const coastRamp = blurFieldHV(landMask, 6, 6, 2);
   let settleExpand = settleInput;
   if (settlementMask) {
-    settleExpand = blurField(settleInput, 6, 1);
+    settleExpand = blurFieldHV(settleInput, 4, 4, 1);
     for (let i = 0; i < 40000; i++) settleExpand[i] = settleExpand[i] > 0.002 ? 1.0 : 0.0;
   }
-  const settleBlur = settlementMask ? blurField(settleExpand, 8, 2) : null;
-  const macroE = blurField(cleanElev, 9, 2);
-  const mesoE = blurField(cleanElev, 3, 2);
-  const microE = blurField(cleanElev, 1, 1);
+  const settleBlur = settlementMask ? blurFieldHV(settleExpand, 5, 5, 2) : null;
+  const macroChain = blurFieldHV(cleanElev, 16, 4, 2);
+  const mesoChain = blurFieldHV(cleanElev, 6, 2, 2);
+  const microE = blurFieldHV(cleanElev, 1, 1, 1);
+
+  const baseHills = new Float32Array(40000);
+  const mtnLift = new Float32Array(40000);
 
   for (let row = 0; row < 200; row++) {
     for (let col = 0; col < 200; col++) {
       const idx = row * 200 + col;
       const terr = (terrArr && terrArr[idx]) ? String(terrArr[idx]) : "ocean";
-      if (terr === "ocean") {
-        dstOut[idx] = -0.35;
-      } else {
-        const x = col - 100;
-        const z = row - 100;
-        const cFactor = Math.min(1.0, Math.max(0.0, (coastRamp[idx] - 0.12) / 0.72));
+      if (terr === "ocean") continue;
 
-        // Valley Basin Envelope: keep the central starting river valley and any settled valley meadow
-        // gently rolling so settlement huts sit on a pleasant meadow floor framed by surrounding Alpine massifs
-        const distFromOrigin = Math.hypot(x * 0.85, z * 1.10);
-        const originBasin = Math.min(1.0, Math.max(0.0, (distFromOrigin - 13.0) / 14.0));
-        const settleFactor = settleBlur ? Math.max(0.0, 1.0 - Math.min(1.0, settleBlur[idx] * 2.2)) : 1.0;
-        const valleyBasin = Math.min(originBasin, settleFactor);
-        const basinSmooth = valleyBasin * valleyBasin * (3.0 - 2.0 * valleyBasin);
+      const x = col - 100;
+      const z = row - 100;
+      const cFactor = Math.min(1.0, Math.max(0.0, (coastRamp[idx] - 0.10) / 0.68));
 
-        const mRaw = Math.max(0.0, (macroE[idx] - 0.45) / 0.21);
-        const mEnv = Math.min(1.50, Math.pow(mRaw, 1.45)) * basinSmooth;
+      // Val di Funes / Santa Maddalena Glacial Amphitheater Staging around (settleCx, settleCz):
+      // - Zone 1 (0..14 tiles): Gently rolling sunlit green pasture (1.0 - 2.8m)
+      // - Zone 2 (14..25 tiles & flanking V-valley spurs): Forested conifer foothills (4.5 - 15.5m)
+      // - Zone 3 (26..48 tiles north): Serrated Odle / Dolomite limestone spire wall (32 - 56m)
+      const dxS = x - settleCx;
+      const dzS = z - settleCz;
+      const distSettle = Math.hypot(dxS * 0.72, dzS * 1.05);
+      const settleProtect = settleBlur ? Math.max(0.0, 1.0 - Math.min(1.0, settleBlur[idx] * 2.4)) : 1.0;
+      const meadowClearance = Math.min(1.0, Math.max(0.0, (distSettle - 12.5) / 11.0)) * settleProtect;
+      const basinSmooth = meadowClearance * meadowClearance * (3.0 - 2.0 * meadowClearance);
 
-        // Deterministic Alpine Ridge & Couloir Folding (breaks round cones into sharp Dolomite/Alps ridges & gullies)
-        const foldA = 1.0 - Math.abs(Math.sin(x * 0.21 + z * 0.14 + mesoE[idx] * 5.2));
-        const foldB = 1.0 - Math.abs(Math.cos(x * 0.13 - z * 0.24 + microE[idx] * 4.5));
-        const couloir = Math.sin(x * 0.48 - z * 0.36) * Math.cos(x * 0.33 + z * 0.52);
-        const ridgeSculpt = (foldA * 0.58 + foldB * 0.42);
+      // Serrated Dolomite Pinnacle & Couloir Synthesis (2D domain-warped ridged multifractal — no 1D comb/organ-pipe stripes!)
+      const warpX = x + Math.sin(z * 0.11) * 4.5 + Math.cos(z * 0.05 + x * 0.04) * 3.2;
+      const warpZ = z + Math.sin(x * 0.09) * 4.2 - Math.cos(x * 0.06 - z * 0.05) * 3.0;
 
-        const dome = Math.pow(mEnv, 1.25) * 19.5 * (0.76 + 0.38 * ridgeSculpt);
-        const ridgeBase = Math.pow(Math.max(0.0, mesoE[idx] - 0.49), 1.38) * 84.0 * (0.12 + 0.88 * mEnv) * basinSmooth;
-        const ridgeFolded = ridgeBase * (0.70 + 0.52 * ridgeSculpt + 0.18 * couloir);
-        const crag = Math.max(0.0, microE[idx] - mesoE[idx]) * 38.0 * mEnv * (0.72 + 0.55 * foldA);
-        const hills = 0.22 + microE[idx] * 0.95 + Math.pow(Math.max(0.0, mesoE[idx] - 0.36), 1.35) * (1.2 + 4.2 * basinSmooth);
+      // Multi-directional branching tectonic ridges (E-W main spine + NW-SE and NE-SW diagonal aretes)
+      const r1 = 1.0 - Math.abs(Math.sin(warpZ * 0.14 + mesoChain[idx] * 2.5));
+      const r2 = 1.0 - Math.abs(Math.sin((warpX * 0.11 + warpZ * 0.13) + microE[idx] * 2.2));
+      const r3 = 1.0 - Math.abs(Math.sin((warpX * 0.13 - warpZ * 0.11) - mesoChain[idx] * 1.9));
+      const r4 = 1.0 - Math.abs(Math.sin(warpX * 0.26 + warpZ * 0.21 + r2 * 1.6));
+      const areteWave = Math.pow(r1, 1.75) * 0.50 + Math.pow(r2, 1.90) * 0.28 + Math.pow(r3, 1.90) * 0.22;
+      const spireTeeth = Math.pow(r2 * r3, 0.45) * 0.62 + Math.pow(r4, 1.65) * 0.38;
+      const couloirCut = 0.55 + 0.45 * Math.pow(Math.max(0.0, r2 * r3), 0.40);
 
-        const h = hills + (dome + ridgeFolded + crag) * cFactor;
-        dstOut[idx] = Math.max(0.12, h);
+      const mRaw = Math.max(0.0, (macroChain[idx] - 0.45) / 0.18);
+      const mEnv = Math.min(1.50, Math.pow(mRaw, 1.55)) * basinSmooth;
+
+      const baseMassif = Math.pow(mEnv, 1.20) * 15.0 * (0.50 + 0.50 * areteWave);
+      const serratedRidge = Math.pow(Math.max(0.0, mesoChain[idx] - 0.48), 1.30) * 84.0 * (0.15 + 0.85 * mEnv) * areteWave * (0.55 + 0.68 * spireTeeth) * couloirCut;
+      const needleCrag = Math.max(0.0, cleanElev[idx] - mesoChain[idx]) * 38.0 * mEnv * spireTeeth;
+
+      // Principal Odle / Dolomite Amphitheater Range rising 24..46 tiles north of the village
+      // Continuous high-relief serrated wall (base wall ~24m + 6-8 chiseled limestone towers rising to 33-38m)
+      // Uses a true knife-edge triangular arete cross-section (1 - |v|/W)^1.42 with concave glacial flanks
+      let odleWall = 0.0;
+      let flankingSpurs = 0.0;
+      const ridgeCenterZ = settleCz - 33.0 + Math.sin(dxS * 0.06) * 2.8 - Math.cos(dxS * 0.035) * 1.8;
+      const acrossOdle = z - ridgeCenterZ;
+      if (Math.abs(dxS) < 76.0 && acrossOdle > -21.0 && acrossOdle < 21.0) {
+        const alongWindow = Math.pow(Math.max(0.0, 1.0 - Math.pow(dxS / 74.0, 2.0)), 0.65);
+        // Warp across-ridge coordinate with diagonal buttress ribs so spurs and couloirs slice organically into the cliff face
+        const buttressShift = Math.sin(dxS * 0.22 + z * 0.12) * 2.2 + Math.cos(dxS * 0.39 - z * 0.16) * 1.4;
+        const vWarped = acrossOdle + buttressShift * 0.50;
+        // Knife-edge cusp at vWarped = 0 with concave talus apron on the valley side
+        const normDist = (vWarped >= 0.0) ? (vWarped / 11.8) : (-vWarped / 14.0);
+        const crossProfile = Math.pow(Math.max(0.0, 1.0 - normDist), 1.42);
+
+        // Multi-scale jagged Dolomite towers, gendarmes, and V-notches along the crest (continuous high-crowned wall, never dipping below trees!)
+        const pMajor = 1.0 - Math.abs(Math.sin(dxS * 0.16 + Math.sin(z * 0.08) * 0.7 + 0.35));
+        const pSub   = 1.0 - Math.abs(Math.sin(dxS * 0.29 - 0.85));
+        const pDiagA = 1.0 - Math.abs(Math.sin(dxS * 0.25 + acrossOdle * 0.19 - 0.65));
+        const pDiagB = 1.0 - Math.abs(Math.sin(dxS * 0.34 - acrossOdle * 0.23 + 1.15));
+        const pCrag  = 1.0 - Math.abs(Math.sin(dxS * 0.62 + acrossOdle * 0.44 + pDiagA * 1.6));
+        const pNeedle = 1.0 - Math.abs(Math.cos(dxS * 0.96 - acrossOdle * 0.55));
+
+        const crestSerration = Math.max(Math.pow(pMajor, 1.15), Math.pow(pSub, 1.20) * 0.88) * 0.48
+          + Math.pow(pDiagA * pDiagB, 0.50) * 0.26
+          + Math.pow(pCrag, 1.40) * 0.16
+          + Math.pow(pNeedle, 1.65) * 0.10;
+        const rawTowerH = 35.5 * alongWindow * crossProfile * (0.62 + 0.46 * crestSerration) * basinSmooth;
+        const ledgeStep = Math.sin(rawTowerH * 0.72 + pDiagA * 2.5) * 0.95;
+        odleWall = Math.max(0.0, rawTowerH + (rawTowerH > 14.5 ? ledgeStep : 0.0));
       }
+
+      // V-shaped forested foothill spurs framing left (dxS in -52..-11) and right (dxS in +11..+52) of the valley
+      if (dzS < 8.0 && dzS > -33.0) {
+        const zSpurEnv = Math.exp(-Math.pow((dzS + 15.5) / 11.5, 2.0));
+        const leftSpur = Math.exp(-Math.pow((dxS + 22.0) / 12.5, 2.0));
+        const rightSpur = Math.exp(-Math.pow((dxS - 22.0) / 12.5, 2.0));
+        const midBench = Math.exp(-Math.pow((dzS + 19.5) / 6.5, 2.0)) * Math.exp(-Math.pow(dxS / 48.0, 2.0));
+        flankingSpurs = (9.6 * (leftSpur + rightSpur) * zSpurEnv + 5.8 * midBench) * (0.84 + 0.20 * spireTeeth) * meadowClearance;
+      }
+
+      // Rolling sunlit pasture swells in the valley floor (1.0 - 2.6m)
+      const meadowRoll = (Math.sin(x * 0.18 + z * 0.12) * 0.35 + Math.cos(x * 0.11 - z * 0.21) * 0.28 + 0.65) * (1.0 - 0.68 * settleProtect);
+      baseHills[idx] = 0.35 + microE[idx] * 0.90 + meadowRoll * 0.60 + flankingSpurs + Math.pow(Math.max(0.0, mesoChain[idx] - 0.36), 1.35) * (1.1 + 2.6 * basinSmooth);
+
+      // In the settlement amphitheater sightline (|dxS| < 56, dzS in -52..12), let the sculpted Odle range govern peak heights (~28-38m)
+      // so the continuous serrated skyline frames cleanly below a wide band of blue sky on both East and West
+      const inSightline = (settlementMask && Math.abs(dxS) < 56.0 && dzS > -52.0 && dzS < 12.0);
+      const rawRegional = (baseMassif + serratedRidge + needleCrag) * cFactor;
+      mtnLift[idx] = inSightline ? Math.max(odleWall * cFactor, Math.min(28.5, rawRegional * 0.68)) : Math.max(odleWall * cFactor, rawRegional);
+    }
+  }
+
+  // Prominence-rank connected high-mountain chains and retain the top 4 elongated cordilleras per continent
+  // (Always preserve the principal Odle amphitheater range around the settlement!)
+  const visited = new Uint8Array(40000);
+  const chains = [];
+  for (let i = 0; i < 40000; i++) {
+    if (visited[i] || (baseHills[i] + mtnLift[i]) < 17.5) continue;
+    const comp = [];
+    const queue = [i];
+    visited[i] = 1;
+    let score = 0.0;
+    while (queue.length > 0) {
+      const cur = queue.pop();
+      comp.push(cur);
+      const cr = (cur / 200) | 0;
+      const cc = cur % 200;
+      const dxC = (cc - 100) - settleCx;
+      const dzC = (cr - 100) - settleCz;
+      const amphitheaterBonus = (Math.abs(dxC) < 68.0 && dzC > -55.0 && dzC < -12.0) ? 3.5 : 1.0;
+      score += mtnLift[cur] * amphitheaterBonus;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = cr + dr;
+          const nc = cc + dc;
+          if (nr >= 0 && nr < 200 && nc >= 0 && nc < 200) {
+            const ni = nr * 200 + nc;
+            if (!visited[ni] && (baseHills[ni] + mtnLift[ni]) >= 17.5) {
+              visited[ni] = 1;
+              queue.push(ni);
+            }
+          }
+        }
+      }
+    }
+    chains.push({ comp, score });
+  }
+  chains.sort((a, b) => b.score - a.score);
+
+  const keepMask = new Float32Array(40000);
+  const maxChains = Math.min(4, chains.length);
+  for (let k = 0; k < maxChains; k++) {
+    const comp = chains[k].comp;
+    for (let j = 0; j < comp.length; j++) keepMask[comp[j]] = 1.0;
+  }
+  const keepExp = blurFieldHV(keepMask, 5, 3, 1);
+  for (let i = 0; i < 40000; i++) keepExp[i] = keepExp[i] > 0.001 ? 1.0 : 0.0;
+  const keepEnvelope = blurFieldHV(keepExp, 4, 3, 1);
+
+  for (let idx = 0; idx < 40000; idx++) {
+    const terr = (terrArr && terrArr[idx]) ? String(terrArr[idx]) : "ocean";
+    if (terr === "ocean") {
+      dstOut[idx] = -0.35;
+    } else {
+      const env = Math.min(1.0, keepEnvelope[idx] * 2.1);
+      const h = baseHills[idx] + mtnLift[idx] * (0.18 + 0.82 * env);
+      dstOut[idx] = Math.max(0.12, Math.min(58.5, h));
     }
   }
   return dstOut;
@@ -1297,8 +1422,9 @@ function buildContinentMesh(cid) {
   const group = continentGroups[cid];
   const tData = terrainDB ? terrainDB[cid] : null;
 
-  // 200 x 200 grid spanning [-100, 99]
-  const geom = new THREE.PlaneGeometry(200, 200, 199, 199);
+  // High-resolution 259 x 259 subdivided mesh (sub-tile resolution for razor-sharp Dolomite spires & couloirs)
+  const SEG = 259;
+  const geom = new THREE.PlaneGeometry(200, 200, SEG, SEG);
   geom.rotateX(-Math.PI / 2);
 
   const pos = geom.attributes.position;
@@ -1326,9 +1452,6 @@ function buildContinentMesh(cid) {
   }
   const curPos = (PAIRS[pn] && PAIRS[pn].current_positions) ? Object.values(PAIRS[pn].current_positions) : [];
   for (const tid of curPos) addCoordFromTid(tid);
-  if (kset) {
-    for (const k of kset) objCoordSet.add(k);
-  }
   for (let row = 0; row < 200; row++) {
     for (let col = 0; col < 200; col++) {
       const idx = row * 200 + col;
@@ -1351,16 +1474,8 @@ function buildContinentMesh(cid) {
     }
   }
 
-  // 2. Ridge-Preserving Elevation Smoothing (Canonical Ocean Remains <= -0.18m; Land Remains >= 0.10m)
+  // 2. Serrated Dolomite & Glacial Valley Height Field (Canonical Ocean Remains <= -0.18m; Land Remains >= 0.10m)
   computeContinentHeightField(elevInput, rawTerr, heightLookup[cid], settleMask);
-  for (let idx = 0; idx < 40000; idx++) {
-    pos.setY(idx, heightLookup[cid][idx]);
-  }
-
-  geom.computeVertexNormals();
-
-  // Populate vertex colors from the macro biome/elevation palette + slope cliff shading + Fog-of-War darkening
-  const vColors = new Float32Array(200 * 200 * 3);
   const hArr = heightLookup[cid];
 
   for (let row = 0; row < 200; row++) {
@@ -1368,91 +1483,243 @@ function buildContinentMesh(cid) {
       const idx = row * 200 + col;
       const x = col - 100;
       const y = row - 100;
-      const terr = rawTerr[idx];
-      const elev = elevInput[idx] || 0.25;
-      const h = hArr[idx] || 0.0;
-      const b = String((tData && tData.biome && tData.biome[idx]) || "");
-      const w = String((tData && tData.water && tData.water[idx]) || "");
-
-      let maxNeighborDiff = 0.0;
-      let laplacian = 0.0;
-      if (terr !== "ocean") {
-        const hL = (col > 0) ? hArr[idx - 1] : h;
-        const hR = (col < 199) ? hArr[idx + 1] : h;
-        const hU = (row > 0) ? hArr[idx - 200] : h;
-        const hD = (row < 199) ? hArr[idx + 200] : h;
-        maxNeighborDiff = Math.max(Math.abs(h - hL), Math.abs(h - hR), Math.abs(h - hU), Math.abs(h - hD));
-        laplacian = h - 0.25 * (hL + hR + hU + hD);
-      }
-
-      const c = new THREE.Color();
-      if (terr === "ocean") {
-        c.setHex(0x0f2d4a);
-      } else if (terr === "coast" || elev < 0.16) {
-        c.setHex(0xb8ad82);
-      } else if (h > 23.0) {
-        // High Alpine snow & glacier cap above 23m, with exposed dark granite on very steep faces
-        const snowBlend = Math.min(1.0, (h - 23.0) / 7.5);
-        c.setHex(0x78828c).lerp(new THREE.Color(0xf4f8fc), snowBlend);
-        if (maxNeighborDiff > 2.6) {
-          c.lerp(new THREE.Color(0x525a64), Math.min(0.75, (maxNeighborDiff - 2.6) / 2.2));
-        }
-      } else if (h > 11.5) {
-        // Alpine granite & dolomite massif (11.5m to 23m)
-        const rockBlend = Math.min(1.0, (h - 11.5) / 11.5);
-        c.setHex(0x4b6b43).lerp(new THREE.Color(0x7c858e), rockBlend);
-      } else if (h > 5.2) {
-        // Sub-alpine timberline & foothill apron (5.2m to 11.5m)
-        const subBlend = Math.min(1.0, (h - 5.2) / 6.3);
-        c.setHex(0x427339).lerp(new THREE.Color(0x4b6b43), subBlend);
-      } else if (terr === "forest" || b.includes("forest") || b.includes("woodland")) {
-        c.setHex(0x3a6b34);
-      } else if (terr === "hill" || b.includes("hill") || b.includes("highland")) {
-        c.setHex(0x588242);
-      } else {
-        c.setHex(0x4c7e3c);
-      }
-
-      if (terr !== "ocean" && maxNeighborDiff > 1.4) {
-        const cliffFactor = Math.min(0.78, (maxNeighborDiff - 1.4) / 2.6);
-        c.lerp(new THREE.Color(0x585f67), cliffFactor);
-      }
-      if (terr !== "ocean" && h > 9.0) {
-        // Highlight sharp ridge crests and darken deep couloir gullies
-        if (laplacian > 0.18) {
-          c.lerp(new THREE.Color(0xdce4ec), Math.min(0.45, (laplacian - 0.18) * 0.55));
-        } else if (laplacian < -0.18) {
-          c.lerp(new THREE.Color(0x2e353d), Math.min(0.48, (-laplacian - 0.18) * 0.60));
-        }
-      }
-
-      if ((w === "river" || w === "stream" || w === "freshwater") && terr !== "ocean") {
-        c.lerp(new THREE.Color(0x2d688a), 0.45);
-      }
-
-      const isKnown = kset ? kset.has(`${x},${y}`) : false;
-      knownLookup[cid][idx] = isKnown ? 1 : 0;
-      if (!isKnown && terr !== "ocean" && kset && kset.size > 0) {
-        // Fog-of-war / unknown-terrain shading: darken and cool unexplored wilderness tiles
-        c.lerp(new THREE.Color(0x1f312b), 0.36);
-      }
-
-      vColors[idx * 3 + 0] = c.r;
-      vColors[idx * 3 + 1] = c.g;
-      vColors[idx * 3 + 2] = c.b;
+      knownLookup[cid][idx] = (kset && kset.has(`${x},${y}`)) ? 1 : 0;
     }
   }
+
+  // Populate 400 x 400 subdivided vertices and vertex attributes (encoding concavity/couloir + biome flags for the GLSL shader)
+  const vCount = (SEG + 1) * (SEG + 1);
+  const vColors = new Float32Array(vCount * 3);
+
+  for (let r = 0; r <= SEG; r++) {
+    const fz = (r / SEG) * 199.0;
+    const wz = fz - 100.0;
+    const tileRow = Math.min(199, Math.max(0, Math.round(fz)));
+    for (let c = 0; c <= SEG; c++) {
+      const vIdx = r * (SEG + 1) + c;
+      const fx = (c / SEG) * 199.0;
+      const wx = fx - 100.0;
+      const tileCol = Math.min(199, Math.max(0, Math.round(fx)));
+      const tileIdx = tileRow * 200 + tileCol;
+
+      // Exact world X/Z alignment with [col - 100, row - 100] coordinate grid
+      pos.setX(vIdx, wx);
+      pos.setZ(vIdx, wz);
+
+      const c0 = Math.floor(fx), r0 = Math.floor(fz);
+      const c1 = Math.min(199, c0 + 1), r1 = Math.min(199, r0 + 1);
+      const anyOcean = (
+        rawTerr[r0 * 200 + c0] === "ocean" ||
+        rawTerr[r0 * 200 + c1] === "ocean" ||
+        rawTerr[r1 * 200 + c0] === "ocean" ||
+        rawTerr[r1 * 200 + c1] === "ocean"
+      );
+
+      let h = -0.35;
+      if (!anyOcean) {
+        h = getTerrainHeight(cid, wx, wz);
+        // Add 2D domain-warped sub-tile Dolomite crag facets on high rock walls (h > 15.5m)
+        if (h > 15.5) {
+          const rockWeight = Math.min(1.0, (h - 15.5) / 11.0);
+          const wA = wx * 0.95 + wz * 0.85 + Math.sin(wz * 0.45) * 1.4;
+          const wB = wx * 0.85 - wz * 0.95 + Math.cos(wx * 0.45) * 1.4;
+          const cragFacet = (1.0 - Math.abs(Math.sin(wA))) * (1.0 - Math.abs(Math.sin(wB))) - 0.35;
+          const microStep = Math.sin(wx * 2.1 + wz * 1.7) * Math.cos(wx * 1.6 - wz * 2.3);
+          h += (cragFacet * 2.1 + microStep * 0.65) * rockWeight;
+        }
+      }
+      pos.setY(vIdx, h);
+
+      // Compute local concavity (couloirs vs sharp rock ribs) for snow-in-gullies shader
+      const hL = getTerrainHeight(cid, Math.max(-100, wx - 1.0), wz);
+      const hR = getTerrainHeight(cid, Math.min(99, wx + 1.0), wz);
+      const hU = getTerrainHeight(cid, wx, Math.max(-100, wz - 1.0));
+      const hD = getTerrainHeight(cid, wx, Math.min(99, wz + 1.0));
+      const laplacian = h - 0.25 * (hL + hR + hU + hD);
+
+      const terr = rawTerr[tileIdx];
+      const w = String((tData && tData.water && tData.water[tileIdx]) || "");
+      const b = String((tData && tData.biome && tData.biome[tileIdx]) || "");
+      const isRiver = (w === "river" || w === "stream" || w === "freshwater") ? 1.0 : 0.0;
+      const isForest = (terr === "forest" || b.includes("forest") || b.includes("woodland")) ? 1.0 : 0.0;
+
+      // Pack shader control channels into vertex color:
+      // R = concavity / couloir factor (0 = sharp protruding rock rib, 0.5 = flat, 1.0 = deep snow gully/couloir)
+      // G = forest / river biome weight (0..0.5 forest weight, >0.6 river channel)
+      // B = ocean / coast flag (0.0 = ocean, 0.25 = coast, 1.0 = inland)
+      const couloirFactor = Math.min(1.0, Math.max(0.0, 0.5 - laplacian * 0.28));
+      const biomeChannel = isRiver > 0.5 ? 0.85 : (isForest > 0.5 ? 0.42 : 0.12);
+      const landChannel = anyOcean ? 0.0 : (terr === "coast" ? 0.25 : 1.0);
+
+      vColors[vIdx * 3 + 0] = couloirFactor;
+      vColors[vIdx * 3 + 1] = biomeChannel;
+      vColors[vIdx * 3 + 2] = landChannel;
+    }
+  }
+
+  geom.computeVertexNormals();
   geom.setAttribute("color", new THREE.BufferAttribute(vColors, 3));
 
   const mat = new THREE.MeshStandardMaterial({
-    map: groundDetailTex,
-    bumpMap: groundBumpTex,
-    bumpScale: 0.035,
     vertexColors: true,
-    roughness: 0.90,
-    metalness: 0.02,
+    roughness: 0.86,
+    metalness: 0.03,
     flatShading: false
   });
+
+  // Custom Per-Pixel GLSL Dolomites / Val di Funes Procedural Terrain Shader
+  mat.onBeforeCompile = function(shader) {
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <common>",
+      `#include <common>
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNorm;`
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <begin_vertex>",
+      `#include <begin_vertex>
+      vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+      vWorldNorm = normalize(mat3(modelMatrix) * objectNormal);`
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <common>",
+      `#include <common>
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNorm;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+      float noise2(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash21(i);
+        float b = hash21(i + vec2(1.0, 0.0));
+        float c = hash21(i + vec2(0.0, 1.0));
+        float d = hash21(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      float fbm2(vec2 p) {
+        float v = 0.0;
+        float amp = 0.5;
+        for (int i = 0; i < 4; i++) {
+          v += amp * noise2(p);
+          p = p * 2.06 + vec2(19.1, 37.4);
+          amp *= 0.5;
+        }
+        return v;
+      }`
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <color_fragment>",
+      `#include <color_fragment>
+      {
+        float h = vWorldPos.y;
+        vec3 n = normalize(vWorldNorm);
+        float couloir = clamp(diffuseColor.r, 0.0, 1.0);
+        float biomeFlag = diffuseColor.g;
+        float landFlag = diffuseColor.b;
+
+        if (landFlag < 0.08 || h < -0.05) {
+          // Deep Alpine Sea / Great Ocean
+          diffuseColor.rgb = vec3(0.05, 0.18, 0.32);
+        } else {
+          vec2 wp = vWorldPos.xz;
+          float nMacro = fbm2(wp * 0.065);
+          float nMeso  = fbm2(wp * 0.28);
+          float nMicro = fbm2(wp * 1.45);
+          float nFine  = noise2(wp * 5.2);
+
+          vec3 sunDir = normalize(vec3(-0.66, 0.52, 0.54));
+
+          // 1. Sunlit Val di Funes Spring Pasture (rich golden-lime to emerald rolling meadow)
+          vec3 sunlitLime = vec3(0.47, 0.75, 0.14);
+          vec3 lushEmerald = vec3(0.22, 0.52, 0.10);
+          vec3 wildflowerGold = vec3(0.62, 0.78, 0.18);
+          float contourWave = 0.5 + 0.5 * sin(wp.x * 0.24 + wp.y * 0.19 + nMacro * 4.2);
+          vec3 meadowCol = mix(lushEmerald, sunlitLime, clamp(nMacro * 0.75 + contourWave * 0.35, 0.0, 1.0));
+          meadowCol = mix(meadowCol, wildflowerGold, smoothstep(0.62, 0.88, nMeso) * 0.35);
+          meadowCol *= (0.90 + 0.20 * nFine);
+
+          // 2. Dark Evergreen Spruce / Pine Foothill Belt (3.8m right up to the 19.5m cliff base so zero bare gap exists below the rock wall)
+          vec3 darkSpruce = vec3(0.06, 0.18, 0.07);
+          vec3 sunlitPine = vec3(0.15, 0.34, 0.11);
+          vec3 forestCol = mix(darkSpruce, sunlitPine, clamp(nMeso * 0.8 + nFine * 0.3, 0.0, 1.0));
+          float forestBelt = smoothstep(3.6, 6.8, h) * (1.0 - smoothstep(17.5, 21.5, h));
+          if (biomeFlag > 0.30 && biomeFlag < 0.65 && h < 18.0) {
+            forestBelt = max(forestBelt, 0.65);
+          }
+          vec3 valleyAndForest = mix(meadowCol, forestCol, clamp(forestBelt * 0.86, 0.0, 1.0));
+
+          // River / Alpine Stream Ribbon
+          if (biomeFlag > 0.70 && h < 12.0) {
+            valleyAndForest = mix(valleyAndForest, vec3(0.16, 0.42, 0.60), 0.68);
+          }
+
+          // 3. Chiseled Dolomite Limestone Spires & Vertical Rock Faces (Odle Group)
+          // Blend smooth vertex normal in the valley with true geometric triangle facet normal (dFdx/dFdy) on high rock!
+          vec3 dpx = dFdx(vWorldPos);
+          vec3 dpy = dFdy(vWorldPos);
+          vec3 facetN = normalize(cross(dpx, dpy));
+          if (dot(facetN, n) < 0.0) facetN = -facetN;
+          float facetMix = smoothstep(14.5, 18.5, h);
+          vec3 baseRockN = normalize(mix(n, facetN, facetMix * 0.88));
+
+          vec2 rw = wp + vec2(nMacro * 14.0, nMeso * 9.0);
+          float diagCragA = 1.0 - abs(sin(rw.x * 0.95 + rw.y * 0.78 + nMicro * 3.6));
+          float diagCragB = 1.0 - abs(sin(rw.x * 0.82 - rw.y * 0.92 - nMeso * 3.8));
+          float vertChute = 1.0 - abs(sin(wp.x * 1.65 + nMeso * 4.2));
+          float warpedStrata = sin(h * 2.15 + nMacro * 10.0 + nMeso * 5.0 + nMicro * 2.6);
+          float fissure = smoothstep(0.58, 0.86, diagCragA * diagCragB);
+          float chimney = smoothstep(0.72, 0.94, vertChute);
+
+          vec3 rockNorm = normalize(baseRockN + vec3(
+            (diagCragA - 0.5) * 0.72 + (vertChute - 0.5) * 0.48 + (nMicro - 0.5) * 0.50,
+            warpedStrata * 0.22,
+            (diagCragB - 0.5) * 0.65 + (nFine - 0.5) * 0.42
+          ));
+
+          float rockSun = clamp(dot(rockNorm, sunDir), 0.0, 1.0);
+          // Rich saturated Dolomite albedo (calibrated for Three.js ACES + directional sun so rock never blows out to flat cream!)
+          vec3 dolomiteSunGold = vec3(0.58, 0.45, 0.31);
+          vec3 dolomitePaleBuff = vec3(0.39, 0.36, 0.34);
+          vec3 dolomiteSlateShadow = vec3(0.11, 0.15, 0.23);
+          vec3 dolomiteDeepCrevice = vec3(0.05, 0.07, 0.12);
+
+          vec3 litRock = mix(dolomitePaleBuff, dolomiteSunGold, smoothstep(0.28, 0.68, rockSun));
+          vec3 shadRock = mix(dolomiteDeepCrevice, dolomiteSlateShadow, smoothstep(0.0, 0.34, rockSun));
+          vec3 rockCol = mix(shadRock, litRock, smoothstep(0.16, 0.50, rockSun));
+          // Crisp horizontal bedding ledges & dark vertical Dolomite chimneys
+          rockCol *= (0.76 + 0.24 * warpedStrata);
+          float creviceDarken = clamp(smoothstep(0.54, 0.78, couloir) * 0.55 + fissure * 0.48 + chimney * 0.38, 0.0, 0.86);
+          rockCol = mix(rockCol, dolomiteDeepCrevice, creviceDarken);
+
+          // 4. Alpine Snow & Scree Aprons (tucked into concave couloir gullies & high ledges; vertical rock spires stay bare!)
+          float chuteSnow = smoothstep(17.5, 22.0, h) * smoothstep(0.55, 0.74, couloir + (nMicro - 0.5) * 0.24);
+          float highLedgeSnow = smoothstep(22.5, 27.5, h) * smoothstep(0.52, 0.74, baseRockN.y + (couloir - 0.48) * 0.65);
+          float verticalCliffBare = smoothstep(0.35, 0.58, 1.0 - baseRockN.y) * smoothstep(0.58, 0.32, couloir);
+          float snowAmount = clamp(max(chuteSnow, highLedgeSnow) * (1.0 - verticalCliffBare * 0.92), 0.0, 1.0);
+
+          vec3 snowSun = vec3(0.78, 0.82, 0.88);
+          vec3 snowShadow = vec3(0.28, 0.38, 0.54);
+          vec3 snowCol = mix(snowShadow, snowSun, smoothstep(0.15, 0.58, dot(baseRockN, sunDir)));
+          vec3 alpineMassifCol = mix(rockCol, snowCol, snowAmount);
+
+          // Transition from dark forested foothills directly into steep Dolomite rock wall at ~13.8m - 17.5m (zero green hills inside the Odle range!)
+          float rockSlopeMask = smoothstep(0.32, 0.52, 1.0 - n.y);
+          float altitudeRockMask = smoothstep(13.8 + (nMeso - 0.5) * 2.2, 17.4 + (nMacro - 0.5) * 1.8, h);
+          float massifBlend = clamp(max(altitudeRockMask, rockSlopeMask * smoothstep(11.0, 14.5, h)), 0.0, 1.0);
+
+          diffuseColor.rgb = mix(valleyAndForest, alpineMassifCol, massifBlend);
+        }
+      }`
+    );
+  };
 
   const mesh = new THREE.Mesh(geom, mat);
   mesh.receiveShadow = true;
@@ -1460,7 +1727,7 @@ function buildContinentMesh(cid) {
   group.add(mesh);
   terrainMeshes[cid] = mesh;
 
-  // Populate static natural geography & vegetation (current-snapshot scenery + canonical cave landmarks)
+  // Populate static natural geography & vegetation (current-snapshot scenery + 3D conifer forest belt + canonical cave landmarks)
   populateContinentScenery(cid);
 }
 
@@ -2233,10 +2500,181 @@ function deriveFootTrailsFromTimeline(timeline, upToHb) {
   return Array.from(segMap.values()).sort((a, b) => b.count - a.count);
 }
 
+// 3-Tier 3D Alpine Spruce / Conifer Geometry for Dense Val di Funes Foothill Forest (Single Draw Call per Continent)
+function createAlpineSpruceGeometry() {
+  const parts = [];
+  function pushCone(radius, height, yCenter, radialSegs, rCol, gCol, bCol) {
+    const cg = new THREE.ConeGeometry(radius, height, radialSegs, 1);
+    cg.translate(0, yCenter, 0);
+    const nonIdx = cg.toNonIndexed();
+    const cnt = nonIdx.attributes.position.count;
+    const cols = new Float32Array(cnt * 3);
+    const posAttr = nonIdx.attributes.position;
+    for (let i = 0; i < cnt; i++) {
+      const py = posAttr.getY(i);
+      const shade = Math.min(1.18, Math.max(0.75, 0.80 + (py / 4.2) * 0.38));
+      cols[i * 3 + 0] = rCol * shade;
+      cols[i * 3 + 1] = gCol * shade;
+      cols[i * 3 + 2] = bCol * shade;
+    }
+    nonIdx.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+    parts.push(nonIdx);
+  }
+  // Trunk + 3 tiered deep dark-spruce conical boughs (authentic dark conifer silhouette against lime pasture)
+  pushCone(0.14, 0.85, 0.42, 5, 0.18, 0.11, 0.06);
+  pushCone(0.84, 1.55, 1.25, 7, 0.03, 0.10, 0.04);
+  pushCone(0.65, 1.38, 2.05, 7, 0.05, 0.14, 0.05);
+  pushCone(0.44, 1.20, 2.78, 7, 0.08, 0.20, 0.06);
+
+  let totalVerts = 0;
+  for (const p of parts) totalVerts += p.attributes.position.count;
+  const mergedPos = new Float32Array(totalVerts * 3);
+  const mergedNorm = new Float32Array(totalVerts * 3);
+  const mergedCol = new Float32Array(totalVerts * 3);
+  let offset = 0;
+  for (const p of parts) {
+    const cnt = p.attributes.position.count;
+    mergedPos.set(p.attributes.position.array, offset * 3);
+    mergedNorm.set(p.attributes.normal.array, offset * 3);
+    mergedCol.set(p.attributes.color.array, offset * 3);
+    offset += cnt;
+    p.dispose();
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(mergedPos, 3));
+  geom.setAttribute("normal", new THREE.BufferAttribute(mergedNorm, 3));
+  geom.setAttribute("color", new THREE.BufferAttribute(mergedCol, 3));
+  geom.userData = { isSharedGeometry: true };
+  return geom;
+}
+const sharedAlpineSpruceGeom = createAlpineSpruceGeometry();
+const sharedAlpineSpruceMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.88,
+  metalness: 0.02,
+  flatShading: true,
+  userData: { isSharedMaterial: true }
+});
+const coniferForestMeshes = { cont_a: null, cont_b: null };
+
+function buildAlpineConiferForest(cid) {
+  const cGroup = continentGroups[cid];
+  if (coniferForestMeshes[cid]) {
+    cGroup.remove(coniferForestMeshes[cid]);
+    coniferForestMeshes[cid].dispose();
+    coniferForestMeshes[cid] = null;
+  }
+  const tData = terrainDB ? terrainDB[cid] : null;
+  const pn = (cid === "cont_b") ? "west" : "east";
+  const pairObjs = (PAIRS[pn] && PAIRS[pn].public_objects) ? Object.values(PAIRS[pn].public_objects) : [];
+  let sumX = 0, sumZ = 0, cnt = 0;
+  function addSettleCoord(tid) {
+    if (!tid) return;
+    const t = tilesById.get(tid);
+    if (t && t.coordinates) {
+      sumX += t.coordinates.x;
+      sumZ += t.coordinates.y;
+      cnt += 1;
+      return;
+    }
+    const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid));
+    if (m) {
+      sumX += Number(m[1]);
+      sumZ += Number(m[2]);
+      cnt += 1;
+    }
+  }
+  for (const po of pairObjs) {
+    if (po && po.tile_id) addSettleCoord(po.tile_id);
+  }
+  const curPos = (PAIRS[pn] && PAIRS[pn].current_positions) ? Object.values(PAIRS[pn].current_positions) : [];
+  for (const tid of curPos) addSettleCoord(tid);
+  const settleCx = cnt > 0 ? (sumX / cnt) : (cid === "cont_b" ? 45.5 : -4.3);
+  const settleCz = cnt > 0 ? (sumZ / cnt) : (cid === "cont_b" ? 50.6 : -1.3);
+
+  const placements = [];
+  for (let y = -92; y <= 92; y++) {
+    for (let x = -92; x <= 92; x++) {
+      if (isCanonicalOcean(cid, x, y)) continue;
+      const h = getTerrainHeight(cid, x, y);
+      if (h < 1.8 || h > 16.2) continue;
+
+      // Measure local slope so zero trees spawn on sheer Dolomite rock walls
+      const hL = getTerrainHeight(cid, Math.max(-99, x - 1), y);
+      const hR = getTerrainHeight(cid, Math.min(99, x + 1), y);
+      const hU = getTerrainHeight(cid, x, Math.max(-99, y - 1));
+      const hD = getTerrainHeight(cid, x, Math.min(99, y + 1));
+      const maxSlope = Math.max(Math.abs(h - hL), Math.abs(h - hR), Math.abs(h - hU), Math.abs(h - hD));
+      if (maxSlope > 2.25) continue;
+
+      const dxS = x - settleCx;
+      const dzS = y - settleCz;
+      const distSettle = Math.hypot(dxS * 0.78, dzS * 1.0);
+      // Keep the foreground sightline and central sunlit village pasture (dzS > -9.5 and |dxS| < 12.5) open
+      // and carpet the flanking V-valley foothill slopes right up to the Dolomite cliff base (h <= 16.5m) with zero bare green gap!
+      if (distSettle < 10.5) continue;
+      if (dzS > -9.5 && Math.abs(dxS) < 12.5) continue;
+
+      const idx = (y + 100) * 200 + (x + 100);
+      const terr = getCanonicalTerrain(cid, x, y);
+      const b = String((tData && tData.biome && tData.biome[idx]) || "");
+      const isForestBiome = (terr === "forest" || b.includes("forest") || b.includes("woodland"));
+      const inAmphitheaterFoothills = (Math.abs(dxS) < 58.0 && dzS < 6.0 && dzS > -32.0 && h >= 1.85 && h <= 16.2);
+
+      const seed = (((x * 73856093) ^ (y * 19349663)) >>> 0) & 0xffff;
+      let countOnTile = 0;
+      if (inAmphitheaterFoothills) {
+        countOnTile = (h >= 3.2 && h <= 15.8) ? (3 + (seed % 2)) : 2;
+      } else if (isForestBiome && h <= 15.8 && (seed % 10 < 6)) {
+        countOnTile = 1;
+      } else if (h >= 4.8 && h <= 15.5 && (seed % 10 < 4)) {
+        countOnTile = 1;
+      }
+
+      for (let k = 0; k < countOnTile; k++) {
+        const s2 = (((seed + k * 9973) * 1103515245 + 12345) >>> 0) & 0xffff;
+        const jx = ((s2 % 100) / 100.0 - 0.5) * 0.82;
+        const jz = (((s2 >> 8) % 100) / 100.0 - 0.5) * 0.82;
+        const tx = x + jx;
+        const tz = y + jz;
+        if (isCanonicalOcean(cid, tx, tz)) continue;
+        const th = getTerrainHeight(cid, tx, tz);
+        if (th <= 0.5 || th > 16.0) continue;
+        const sc = 0.58 + (s2 % 48) / 100.0;
+        const rotY = ((s2 % 360) * Math.PI) / 180.0;
+        placements.push({ x: tx, y: th - 0.08, z: tz, sc, rotY, shade: 0.65 + ((s2 >> 4) % 35) / 100.0 });
+      }
+    }
+  }
+
+  if (placements.length > 0) {
+    const inst = new THREE.InstancedMesh(sharedAlpineSpruceGeom, sharedAlpineSpruceMat, placements.length);
+    const dummy = new THREE.Object3D();
+    const col = new THREE.Color();
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.rotation.set(0, p.rotY, 0);
+      dummy.scale.set(p.sc, p.sc * (0.92 + (i % 5) * 0.04), p.sc);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+      col.setRGB(p.shade, p.shade * 1.04, p.shade * 0.96);
+      inst.setColorAt(i, col);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.castShadow = true;
+    inst.receiveShadow = true;
+    cGroup.add(inst);
+    coniferForestMeshes[cid] = inst;
+  }
+}
+
 function populateContinentScenery(cid) {
   const sGroup = sceneryGroups[cid];
   disposeObjectGroupResources(sGroup);
   trailMeshesByContinent[cid] = null;
+  buildAlpineConiferForest(cid);
 
   const tData = terrainDB ? terrainDB[cid] : null;
   const bounds = getDynamicExploredBounds(cid);
@@ -2301,8 +2739,8 @@ function populateContinentScenery(cid) {
 
       const seed = (((x * 73856093) ^ (y * 19349663)) >>> 0) & 0xffff;
 
-      // Skip individual mountain tiles here; they are rendered below as connected mountain ranges
-      if (terr === "mountain" || elev > 0.78) {
+      // Strictly forbid 2D billboard trees/bushes above timberline (h > 9.5m) or on mountain tiles so zero cutouts float on rock walls
+      if (terr === "mountain" || elev > 0.78 || h > 9.5) {
         continue;
       }
 
@@ -2313,7 +2751,12 @@ function populateContinentScenery(cid) {
 
       if (isCanonicalOcean(cid, ox, oz)) continue;
       const oh = getTerrainHeight(cid, ox, oz);
-      if (oh <= 0.08) continue;
+      if (oh <= 0.08 || oh > 9.5) continue;
+
+      // Measure slope at prop position and skip steep slopes
+      const ohX = getTerrainHeight(cid, Math.min(99, ox + 1), oz);
+      const ohZ = getTerrainHeight(cid, ox, Math.min(99, oz + 1));
+      if (Math.max(Math.abs(oh - ohX), Math.abs(oh - ohZ)) > 1.35) continue;
 
       // 3. Natural Freshwater Springs / Cascades on hilly river tiles
       if ((water === "river" || water === "stream") && elev > 0.38 && (seed % 12 === 0)) {
@@ -2323,27 +2766,15 @@ function populateContinentScenery(cid) {
         continue;
       }
 
-      // 4. Forest Woodlands & Valley Trees
+      // 4. Valley Meadow & Pasture Trees (strictly low-elevation valley floor oh <= 5.5m; foothills use 3D Alpine Spruce InstancedMesh)
       const isForest = (terr === "forest" || b.includes("forest") || b.includes("woodland"));
-      if (isForest && (seed % 10 < (inExploredVicinity ? 6 : 5))) {
-        const sc = 0.80 + (seed % 35) / 100;
+      if (oh <= 5.5 && isForest && (seed % 10 < (inExploredVicinity ? 4 : 3))) {
+        const sc = 0.78 + (seed % 28) / 100;
         const tr1 = createTreeSprite(ox, oz, oh, sc, propTint);
         tr1.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
         sGroup.add(tr1);
-        if (inExploredVicinity && (seed % 10 < 2)) {
-          const ox2 = x - jitterX * 0.8;
-          const oz2 = y + jitterZ * 0.7;
-          if (!isCanonicalOcean(cid, ox2, oz2)) {
-            const oh2 = getTerrainHeight(cid, ox2, oz2);
-            if (oh2 > 0.08) {
-              const tr2 = createTreeSprite(ox2, oz2, oh2, sc * 0.85, propTint);
-              tr2.userData = { wx: ox2, wz: oz2, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
-              sGroup.add(tr2);
-            }
-          }
-        }
-      } else if ((terr === "hill" || terr === "grassland") && inExploredVicinity && (seed % 26 === 0)) {
-        const sc = 0.75 + (seed % 25) / 100;
+      } else if (oh <= 4.5 && (terr === "hill" || terr === "grassland") && inExploredVicinity && (seed % 32 === 0)) {
+        const sc = 0.72 + (seed % 22) / 100;
         const tr = createTreeSprite(ox, oz, oh, sc, propTint);
         tr.userData = { wx: ox, wz: oz, tileX: x, tileY: y, kind: "tree", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
         sGroup.add(tr);
@@ -2770,21 +3201,21 @@ function updateWeatherAtmospherics(pairName, hb) {
 
   rainLines.visible = isRaining;
   if (isRaining) {
-    rainMat.opacity = (wtype === "storm") ? 0.65 : 0.38;
-    scene.fog.density = (wtype === "storm") ? 0.016 : 0.010;
-    scene.fog.color.setHex((wtype === "storm") ? 0x3a4855 : 0x607080);
-    sunLight.intensity = (wtype === "storm") ? 0.22 : 0.45;
-    ambientLight.intensity = (wtype === "storm") ? 0.32 : 0.45;
+    rainMat.opacity = (wtype === "storm") ? 0.42 : 0.24;
+    scene.fog.density = (wtype === "storm") ? 0.0024 : 0.0018;
+    scene.fog.color.setHex((wtype === "storm") ? 0x6c88a8 : 0x7ea4c8);
+    sunLight.intensity = (wtype === "storm") ? 0.78 : 0.96;
+    ambientLight.intensity = (wtype === "storm") ? 0.46 : 0.50;
   } else if (wtype === "overcast") {
-    scene.fog.density = 0.008;
-    scene.fog.color.setHex(0x8fa0b0);
-    sunLight.intensity = 0.65;
-    ambientLight.intensity = 0.52;
+    scene.fog.density = 0.0015;
+    scene.fog.color.setHex(0x88b0d8);
+    sunLight.intensity = 1.05;
+    ambientLight.intensity = 0.50;
   } else {
-    scene.fog.density = 0.0065;
-    scene.fog.color.setHex(0x7ca0be);
-    sunLight.intensity = 0.92;
-    ambientLight.intensity = 0.58;
+    scene.fog.density = 0.0012;
+    scene.fog.color.setHex(0x8ec5f2);
+    sunLight.intensity = 1.18;
+    ambientLight.intensity = 0.50;
   }
 }
 
@@ -3210,45 +3641,67 @@ function applyCameraMode(mode, immediate = true) {
   }
 
   skyDome.visible = true;
-  scene.background.setHex(0x7ca0be);
-  scene.fog.color.setHex(0x88aac4);
+  scene.background.setHex(0x3882d4);
+  scene.fog.color.setHex(0x8ec5f2);
 
   if (mode === "human") {
     document.getElementById("cam-human").classList.add("active");
-    scene.fog.density = 0.0045;
-    camera.fov = 44;
+    scene.fog.density = 0.0014;
+    camera.fov = 45;
     camera.updateProjectionMatrix();
 
-    // Dynamic sightline vector from Adam toward Eve (or north-west toward the Alpine ridge when co-located)
+    // Dynamic sightline vector from Adam toward Eve (or north toward the Dolomite massif when co-located)
     const dx = ex - ax;
     const dz = ez - az;
     const dist = Math.hypot(dx, dz);
-    const ux = (dist > 0.5) ? (dx / dist) : -0.35;
-    const uz = (dist > 0.5) ? (dz / dist) : -0.936;
+    const ux = (dist > 0.5) ? (dx / dist) : -0.25;
+    const uz = (dist > 0.5) ? (dz / dist) : -0.968;
     const rx = -uz;
     const rz = ux;
 
     const camX = ax - ux * 4.2 - rx * 0.25;
     const camZ = az - uz * 4.2 - rz * 0.25;
     const groundH = getTerrainHeight(cid, camX, camZ);
-    const lookX = ax + ux * 12.0;
-    const lookZ = az + uz * 12.0;
-    const lookH = Math.max(getTerrainHeight(cid, ax, az) + 1.85, getTerrainHeight(cid, lookX, lookZ) * 0.55 + 1.4);
+    const lookX = ax + ux * 14.0;
+    const lookZ = az + uz * 14.0;
+    const lookH = Math.max(getTerrainHeight(cid, ax, az) + 2.4, getTerrainHeight(cid, lookX, lookZ) * 0.55 + 2.2);
     smoothMoveCamera(new THREE.Vector3(camX, groundH + 1.85, camZ), new THREE.Vector3(lookX, lookH, lookZ), immediate);
   } else if (mode === "landscape") {
     document.getElementById("cam-cinematic").classList.add("active");
-    scene.fog.density = 0.0038;
-    camera.fov = 44;
+    scene.fog.density = 0.0012;
+    camera.fov = 50;
     camera.updateProjectionMatrix();
 
-    const cx = (ax + ex) * 0.5;
-    const cz = (az + ez) * 0.5;
-    const span = Math.hypot(ex - ax, ez - az);
-    const pullZ = Math.max(24.0, Math.min(44.0, span * 0.90 + 14.0));
-    const elevOffset = Math.max(7.5, Math.min(18.0, span * 0.35 + 4.5));
+    // Anchor valley framing on built settlement structures blended with active agent positions
+    const pobjs = (PAIRS[pairName] && PAIRS[pairName].public_objects) ? Object.values(PAIRS[pairName].public_objects) : [];
+    let sSumX = 0, sSumZ = 0, sCnt = 0;
+    function addCamSettleCoord(tid) {
+      if (!tid) return;
+      const t = tilesById.get(tid);
+      if (t && t.coordinates) {
+        sSumX += t.coordinates.x;
+        sSumZ += t.coordinates.y;
+        sCnt += 1;
+        return;
+      }
+      const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid));
+      if (m) {
+        sSumX += Number(m[1]);
+        sSumZ += Number(m[2]);
+        sCnt += 1;
+      }
+    }
+    for (const po of pobjs) {
+      if (po && po.tile_id) addCamSettleCoord(po.tile_id);
+    }
+    const agentCx = (ax + ex) * 0.5;
+    const agentCz = (az + ez) * 0.5;
+    const cx = (sCnt > 0) ? ((sSumX / sCnt) * 0.78 + agentCx * 0.22) : agentCx;
+    const cz = (sCnt > 0) ? ((sSumZ / sCnt) * 0.78 + agentCz * 0.22) : agentCz;
+
     const ch = getTerrainHeight(cid, cx, cz);
-    const camX = cx - 5.5;
-    const camZ = cz + pullZ;
+    const camX = cx - 2.0;
+    const camZ = cz + 27.5;
 
     // Ensure full line-of-sight clearance across every terrain sample between camera and valley target
     let maxPathH = ch;
@@ -3258,9 +3711,9 @@ function applyCameraMode(mode, immediate = true) {
       const sz = cz + (camZ - cz) * t;
       maxPathH = Math.max(maxPathH, getTerrainHeight(cid, sx, sz));
     }
-    const eyeY = Math.max(ch + elevOffset, maxPathH + 5.8);
-    // Aim across the settlement valley toward the northern Alpine massif horizon
-    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx - 1.5, ch + 3.2, cz - 14.0), immediate);
+    const eyeY = Math.max(ch + 7.2, maxPathH + 4.0);
+    // Val di Funes / Dolomites framing: village in foreground sunlit pasture (22-38% up, clear of bottom HUD), dark spruce foothills in middle (38-58%), jagged spires + blue sky in upper frame
+    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx - 0.5, eyeY - 0.4, cz - 18.0), immediate);
   } else if (mode === "adam") {
     document.getElementById("cam-focus-adam").classList.add("active");
     scene.fog.density = 0.007;
