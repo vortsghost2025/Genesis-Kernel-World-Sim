@@ -26,5 +26,11 @@ dist/
 # Generated viewer data (too large for git)
 world-sim/viewer/viewer_data.js
 
+# Static deploy artifact (built by scripts/build_viewer_deploy.py, ~20MB of
+# re-encoded textures + a fresh snapshot). Never commit it: it is a build
+# output, it lands straight on Netlify/Vercel, and sweeping it in would bloat
+# every clone.
+world-sim/viewer/viewer-dist/
+
 # Epistemic viewer test screenshots
 world-sim/viewer/prototype/*.png
