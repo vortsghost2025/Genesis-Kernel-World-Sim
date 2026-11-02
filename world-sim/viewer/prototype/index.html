@@ -1060,11 +1060,128 @@ const continentGroups = {
 scene.add(continentGroups.cont_a);
 scene.add(continentGroups.cont_b);
 
-// Build Continents Meshes
+// Build Continents Meshes & Hydrology / Island Layers
 const terrainMeshes = {};
+const waterMeshes = { cont_a: null, cont_b: null };
+const islandGroups = { cont_a: new THREE.Group(), cont_b: new THREE.Group() };
 const heightLookup = { cont_a: new Float32Array(200 * 200), cont_b: new Float32Array(200 * 200) };
+const waterMaskLookup = { cont_a: new Uint8Array(200 * 200), cont_b: new Uint8Array(200 * 200) };
 const knownLookup = { cont_a: new Uint8Array(200 * 200), cont_b: new Uint8Array(200 * 200) };
 const knownCoordsByContinent = { cont_a: new Set(), cont_b: new Set() };
+
+// Seasonal Uniforms shared across both continent terrain shaders
+const terrainSeasonUniforms = {
+  uSeasonMeadowSunlit: { value: new THREE.Vector3(0.47, 0.75, 0.14) },
+  uSeasonMeadowLush:   { value: new THREE.Vector3(0.22, 0.52, 0.10) },
+  uSeasonMeadowAccent: { value: new THREE.Vector3(0.62, 0.78, 0.18) },
+  uSeasonForestDark:   { value: new THREE.Vector3(0.06, 0.18, 0.07) },
+  uSeasonForestLit:    { value: new THREE.Vector3(0.15, 0.34, 0.11) },
+  uSeasonSnowOffset:   { value: 0.0 }
+};
+
+function computeSeasonAtHb(hb, fallbackSeason = "Spring") {
+  if (hb !== null && hb !== undefined && Number.isFinite(Number(hb)) && Number(hb) >= 0) {
+    const DAY_LENGTH = 72;
+    const SEASON_DAYS = 12;
+    const SEASON_LENGTH = DAY_LENGTH * SEASON_DAYS; // 864 heartbeats per season (matches survival.py)
+    const SEASONS = ["Spring", "Summer", "Autumn", "Winter"];
+    const idx = Math.floor(Number(hb) / SEASON_LENGTH) % 4;
+    return SEASONS[idx];
+  }
+  const s = String(fallbackSeason || "Spring").toLowerCase();
+  if (s.includes("sum")) return "Summer";
+  if (s.includes("aut") || s.includes("fall")) return "Autumn";
+  if (s.includes("win")) return "Winter";
+  return "Spring";
+}
+
+function getSeasonPalette(seasonName) {
+  const s = String(seasonName || "Spring").toLowerCase();
+  if (s.includes("sum")) {
+    return {
+      name: "Summer",
+      meadowSunlit: [0.34, 0.68, 0.12],
+      meadowLush:   [0.15, 0.44, 0.08],
+      meadowAccent: [0.52, 0.74, 0.16],
+      coniferDark:  [0.05, 0.16, 0.06],
+      coniferLit:   [0.13, 0.31, 0.10],
+      coniferTintHex: 0xeaf5e4,
+      deciduousTintHex: 0xd8f5c8,
+      snowlineOffset: 3.5
+    };
+  }
+  if (s.includes("aut") || s.includes("fall")) {
+    return {
+      name: "Autumn",
+      meadowSunlit: [0.68, 0.56, 0.16],
+      meadowLush:   [0.42, 0.36, 0.11],
+      meadowAccent: [0.84, 0.44, 0.12],
+      coniferDark:  [0.08, 0.17, 0.06],
+      coniferLit:   [0.22, 0.32, 0.10],
+      coniferTintHex: 0xf5ecd8,
+      deciduousTintHex: 0xf29b38,
+      snowlineOffset: 0.5
+    };
+  }
+  if (s.includes("win")) {
+    return {
+      name: "Winter",
+      meadowSunlit: [0.66, 0.73, 0.78],
+      meadowLush:   [0.38, 0.47, 0.44],
+      meadowAccent: [0.82, 0.87, 0.92],
+      coniferDark:  [0.08, 0.18, 0.14],
+      coniferLit:   [0.28, 0.40, 0.38],
+      coniferTintHex: 0xdcebf7,
+      deciduousTintHex: 0xc8dced,
+      snowlineOffset: -5.5
+    };
+  }
+  return {
+    name: "Spring",
+    meadowSunlit: [0.47, 0.75, 0.14],
+    meadowLush:   [0.22, 0.52, 0.10],
+    meadowAccent: [0.62, 0.78, 0.18],
+    coniferDark:  [0.06, 0.18, 0.07],
+    coniferLit:   [0.15, 0.34, 0.11],
+    coniferTintHex: 0xffffff,
+    deciduousTintHex: 0xffffff,
+    snowlineOffset: 0.0
+  };
+}
+
+let activeSeasonApplied = "";
+function updateSeasonalFoliage(seasonName) {
+  const pal = getSeasonPalette(seasonName);
+  if (activeSeasonApplied === pal.name) return pal;
+  activeSeasonApplied = pal.name;
+
+  terrainSeasonUniforms.uSeasonMeadowSunlit.value.set(pal.meadowSunlit[0], pal.meadowSunlit[1], pal.meadowSunlit[2]);
+  terrainSeasonUniforms.uSeasonMeadowLush.value.set(pal.meadowLush[0], pal.meadowLush[1], pal.meadowLush[2]);
+  terrainSeasonUniforms.uSeasonMeadowAccent.value.set(pal.meadowAccent[0], pal.meadowAccent[1], pal.meadowAccent[2]);
+  terrainSeasonUniforms.uSeasonForestDark.value.set(pal.coniferDark[0], pal.coniferDark[1], pal.coniferDark[2]);
+  terrainSeasonUniforms.uSeasonForestLit.value.set(pal.coniferLit[0], pal.coniferLit[1], pal.coniferLit[2]);
+  terrainSeasonUniforms.uSeasonSnowOffset.value = pal.snowlineOffset;
+
+  if (typeof sharedAlpineSpruceMat !== "undefined" && sharedAlpineSpruceMat) {
+    sharedAlpineSpruceMat.color.setHex(pal.coniferTintHex);
+  }
+
+  for (const cid of ["cont_a", "cont_b"]) {
+    const sGroup = (typeof sceneryGroups !== "undefined") ? sceneryGroups[cid] : null;
+    if (!sGroup) continue;
+    for (const ch of sGroup.children) {
+      if (ch.userData && (ch.userData.kind === "tree" || ch.userData.kind === "berry")) {
+        const isKnown = ch.userData.isKnownTile !== false;
+        const baseHex = isKnown ? pal.deciduousTintHex : 0x8ea69b;
+        const sp = ch.children && ch.children[0];
+        if (sp && sp.material && sp.material.color) {
+          sp.material.color.setHex(baseHex);
+        }
+      }
+    }
+  }
+  return pal;
+}
 
 function rebuildKnownSets() {
   for (const [pn, cid] of [["east", "cont_a"], ["west", "cont_b"]]) {
@@ -1193,7 +1310,202 @@ const continentTextures = {
 continentTextures.cont_a.anisotropy = 8;
 continentTextures.cont_b.anisotropy = 8;
 
-function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
+function computeContinentWaterMask(cid, tData, settleMask) {
+  const mask = new Uint8Array(40000);
+  const wArr = (tData && tData.water) ? tData.water : [];
+  for (let idx = 0; idx < 40000; idx++) {
+    const w = wArr[idx];
+    if (w === "lake") mask[idx] = 2;
+    else if (w === "river") mask[idx] = 1;
+  }
+
+  // Determine settlement centroid to ensure a valley river reach is within <= 8 tiles
+  let sSumX = 0, sSumZ = 0, sCnt = 0;
+  if (settleMask) {
+    for (let idx = 0; idx < 40000; idx++) {
+      if (settleMask[idx]) {
+        sSumX += (idx % 200) - 100;
+        sSumZ += ((idx / 200) | 0) - 100;
+        sCnt++;
+      }
+    }
+  }
+  const cx = sCnt > 0 ? (sSumX / sCnt) : (cid === "cont_b" ? 45.5 : -4.3);
+  const cz = sCnt > 0 ? (sSumZ / sCnt) : (cid === "cont_b" ? 50.6 : -1.3);
+
+  // Valley reach synthesis:
+  // For cont_a (East): connect canonical river at (0, 0) through valley curve (x: 0..14, z: 0..8)
+  // For cont_b (West): connect canonical river at (36, 59) along z: 57..58, x: 36..47 so it passes at ~6.4 tiles from settlement (45.5, 50.6)
+  if (cid === "cont_b") {
+    // West valley river meander
+    for (let x = 34; x <= 47; x++) {
+      const zOffset = Math.sin((x - 34) * 0.45) * 1.2;
+      const rz = Math.round(57.5 + zOffset);
+      if (rz >= -100 && rz < 100 && x >= -100 && x < 100) {
+        const idx = (rz + 100) * 200 + (x + 100);
+        mask[idx] = 1;
+        if (rz + 1 < 100) mask[(rz + 1 + 100) * 200 + (x + 100)] = 1;
+      }
+    }
+    for (let z = 57; z <= 60; z++) {
+      const idx = (z + 100) * 200 + (35 + 100);
+      mask[idx] = 1;
+    }
+  } else {
+    // East valley river meander passing (-3, 0) -> (0, 0) -> (4, 4) -> (8, 6) -> (14, 8)
+    for (let t = 0; t <= 20; t++) {
+      const frac = t / 20.0;
+      const rx = Math.round(-3.0 + frac * 17.0 + Math.sin(frac * Math.PI) * 2.0);
+      const rz = Math.round(0.0 + frac * 8.0 - Math.sin(frac * Math.PI) * 1.5);
+      if (rx >= -100 && rx < 100 && rz >= -100 && rz < 100) {
+        const idx = (rz + 100) * 200 + (rx + 100);
+        mask[idx] = 1;
+        if (rz + 1 < 100) mask[(rz + 1 + 100) * 200 + (rx + 100)] = 1;
+      }
+    }
+  }
+
+  // Strictly enforce that water never overlaps any settlement structure tile
+  if (settleMask) {
+    for (let idx = 0; idx < 40000; idx++) {
+      if (settleMask[idx]) {
+        mask[idx] = 0;
+      }
+    }
+  }
+  return mask;
+}
+
+function computeContinentIslands(cid, tData) {
+  // Deterministic island landforms inside lake basins and coastal sea waters
+  const islands = [];
+  if (cid === "cont_a") {
+    // Lake eyots
+    islands.push({ id: "cont_a_lake_west", kind: "lake", x: -53, z: -4, radius: 1.8, crownHeight: 1.85 });
+    islands.push({ id: "cont_a_lake_east", kind: "lake", x: 63, z: -3, radius: 1.8, crownHeight: 1.75 });
+    // Coastal archipelago islands
+    islands.push({ id: "cont_a_coast_nw", kind: "coastal", x: -88, z: -75, radius: 3.2, crownHeight: 3.4 });
+    islands.push({ id: "cont_a_coast_se", kind: "coastal", x: 86, z: 65, radius: 2.8, crownHeight: 2.9 });
+    islands.push({ id: "cont_a_coast_sw", kind: "coastal", x: -82, z: 72, radius: 2.5, crownHeight: 2.5 });
+  } else {
+    // cont_b
+    islands.push({ id: "cont_b_lake_west", kind: "lake", x: -53, z: -4, radius: 1.8, crownHeight: 1.85 });
+    islands.push({ id: "cont_b_lake_east", kind: "lake", x: 63, z: -3, radius: 1.8, crownHeight: 1.75 });
+    // Coastal archipelago islands (visible near West and in Orbit view)
+    islands.push({ id: "cont_b_coast_east", kind: "coastal", x: 58, z: 52, radius: 2.6, crownHeight: 2.8 });
+    islands.push({ id: "cont_b_coast_se", kind: "coastal", x: 68, z: 76, radius: 3.0, crownHeight: 3.2 });
+    islands.push({ id: "cont_b_coast_ne", kind: "coastal", x: 82, z: -62, radius: 2.5, crownHeight: 2.7 });
+  }
+  return islands;
+}
+
+function buildContinentIslands(cid) {
+  const iGroup = islandGroups[cid];
+  disposeObjectGroupResources(iGroup);
+  const tData = terrainDB ? terrainDB[cid] : null;
+  const islands = computeContinentIslands(cid, tData);
+
+  for (const isl of islands) {
+    const subGroup = new THREE.Group();
+    subGroup.position.set(isl.x, 0, isl.z);
+
+    // 1. Sandy/rocky shoreline beach ring
+    const beachGeom = new THREE.CylinderGeometry(isl.radius * 0.95, isl.radius * 1.35, 0.45, 14);
+    const beachMat = new THREE.MeshStandardMaterial({ color: 0xc8b896, roughness: 0.88, flatShading: true });
+    const beach = new THREE.Mesh(beachGeom, beachMat);
+    beach.position.y = 0.12;
+    subGroup.add(beach);
+
+    // 2. Vegetated crown
+    const crownGeom = new THREE.ConeGeometry(isl.radius * 0.82, isl.crownHeight, 12);
+    const crownMat = new THREE.MeshStandardMaterial({ color: 0x3d7025, roughness: 0.82, flatShading: true });
+    const crown = new THREE.Mesh(crownGeom, crownMat);
+    crown.position.y = 0.35 + isl.crownHeight * 0.5;
+    subGroup.add(crown);
+
+    iGroup.add(subGroup);
+  }
+}
+
+function buildContinentWaterMesh(cid, waterMask) {
+  const cGroup = continentGroups[cid];
+  if (waterMeshes[cid]) {
+    cGroup.remove(waterMeshes[cid]);
+    if (waterMeshes[cid].geometry) waterMeshes[cid].geometry.dispose();
+    if (waterMeshes[cid].material) waterMeshes[cid].material.dispose();
+    waterMeshes[cid] = null;
+  }
+
+  const mask = waterMask || waterMaskLookup[cid];
+  if (!mask) return null;
+
+  const verts = [];
+  const norms = [];
+  const cols = [];
+
+  for (let r = 0; r < 200; r++) {
+    for (let c = 0; c < 200; c++) {
+      const idx = r * 200 + c;
+      const wtype = mask[idx];
+      if (wtype === 0) continue;
+
+      const wx = c - 100;
+      const wz = r - 100;
+      const bedH = getTerrainHeight(cid, wx, wz);
+      // Water surface sits slightly above the carved bed (+0.33m) so it fills the channel
+      const wy = bedH + 0.33;
+
+      const x0 = wx - 0.55, x1 = wx + 0.55;
+      const z0 = wz - 0.55, z1 = wz + 0.55;
+
+      verts.push(
+        x0, wy, z0,
+        x0, wy, z1,
+        x1, wy, z1,
+        x0, wy, z0,
+        x1, wy, z1,
+        x1, wy, z0
+      );
+
+      for (let k = 0; k < 6; k++) {
+        norms.push(0, 1, 0);
+        if (wtype === 2) {
+          cols.push(0.12, 0.48, 0.72);
+        } else {
+          cols.push(0.18, 0.62, 0.88);
+        }
+      }
+    }
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(verts), 3));
+  geom.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(norms), 3));
+  geom.setAttribute("color", new THREE.BufferAttribute(new Float32Array(cols), 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.15,
+    metalness: 0.18,
+    transparent: true,
+    opacity: 0.82,
+    side: THREE.DoubleSide,
+    depthWrite: true
+  });
+
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.userData = {
+    sampleWaterY(wx, wz) {
+      return getTerrainHeight(cid, wx, wz) + 0.33;
+    }
+  };
+
+  cGroup.add(mesh);
+  waterMeshes[cid] = mesh;
+  return mesh;
+}
+
+function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask, waterMask) {
   const dstOut = outArr || new Float32Array(200 * 200);
   const cleanElev = new Float32Array(200 * 200);
   const landMask = new Float32Array(200 * 200);
@@ -1299,9 +1611,9 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
       const mRaw = Math.max(0.0, (macroChain[idx] - 0.45) / 0.18);
       const mEnv = Math.min(1.50, Math.pow(mRaw, 1.55)) * basinSmooth;
 
-      const baseMassif = Math.pow(mEnv, 1.20) * 15.0 * (0.50 + 0.50 * areteWave);
-      const serratedRidge = Math.pow(Math.max(0.0, mesoChain[idx] - 0.48), 1.30) * 84.0 * (0.15 + 0.85 * mEnv) * areteWave * (0.55 + 0.68 * spireTeeth) * couloirCut;
-      const needleCrag = Math.max(0.0, cleanElev[idx] - mesoChain[idx]) * 38.0 * mEnv * spireTeeth;
+      const baseMassif = Math.pow(mEnv, 1.15) * 16.0 * (0.45 + 0.55 * areteWave);
+      const serratedRidge = Math.pow(Math.max(0.0, mesoChain[idx] - 0.32), 1.25) * 58.0 * (0.20 + 0.80 * mEnv) * areteWave * (0.55 + 0.68 * spireTeeth) * couloirCut;
+      const needleCrag = Math.max(0.0, cleanElev[idx] - mesoChain[idx]) * 34.0 * (0.25 + 0.75 * mEnv) * spireTeeth;
 
       // Principal Odle / Dolomite Amphitheater Range rising 24..46 tiles north of the village
       // Continuous high-relief serrated wall (base wall ~24m + 6-8 chiseled limestone towers rising to 33-38m)
@@ -1362,7 +1674,7 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
   const visited = new Uint8Array(40000);
   const chains = [];
   for (let i = 0; i < 40000; i++) {
-    if (visited[i] || (baseHills[i] + mtnLift[i]) < 17.5) continue;
+    if (visited[i] || (baseHills[i] + mtnLift[i]) < 15.0) continue;
     const comp = [];
     const queue = [i];
     visited[i] = 1;
@@ -1383,7 +1695,7 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
           const nc = cc + dc;
           if (nr >= 0 && nr < 200 && nc >= 0 && nc < 200) {
             const ni = nr * 200 + nc;
-            if (!visited[ni] && (baseHills[ni] + mtnLift[ni]) >= 17.5) {
+            if (!visited[ni] && (baseHills[ni] + mtnLift[ni]) >= 15.0) {
               visited[ni] = 1;
               queue.push(ni);
             }
@@ -1396,7 +1708,7 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
   chains.sort((a, b) => b.score - a.score);
 
   const keepMask = new Float32Array(40000);
-  const maxChains = Math.min(4, chains.length);
+  const maxChains = Math.min(12, chains.length);
   for (let k = 0; k < maxChains; k++) {
     const comp = chains[k].comp;
     for (let j = 0; j < comp.length; j++) keepMask[comp[j]] = 1.0;
@@ -1411,8 +1723,13 @@ function computeContinentHeightField(elevArr, terrArr, outArr, settlementMask) {
       dstOut[idx] = -0.35;
     } else {
       const env = Math.min(1.0, keepEnvelope[idx] * 2.1);
-      const h = baseHills[idx] + mtnLift[idx] * (0.18 + 0.82 * env);
-      dstOut[idx] = Math.max(0.12, Math.min(58.5, h));
+      const h = baseHills[idx] + mtnLift[idx] * (0.32 + 0.68 * env);
+      let finalH = Math.max(0.12, Math.min(58.5, h));
+      if (waterMask && waterMask[idx] > 0) {
+        const depth = (waterMask[idx] === 2) ? 0.65 : 0.45;
+        finalH = Math.max(0.12, finalH - depth);
+      }
+      dstOut[idx] = finalH;
     }
   }
   return dstOut;
@@ -1474,8 +1791,11 @@ function buildContinentMesh(cid) {
     }
   }
 
+  // 1.5 Compute water mask for hydrology and river carving
+  waterMaskLookup[cid] = computeContinentWaterMask(cid, tData, settleMask);
+
   // 2. Serrated Dolomite & Glacial Valley Height Field (Canonical Ocean Remains <= -0.18m; Land Remains >= 0.10m)
-  computeContinentHeightField(elevInput, rawTerr, heightLookup[cid], settleMask);
+  computeContinentHeightField(elevInput, rawTerr, heightLookup[cid], settleMask, waterMaskLookup[cid]);
   const hArr = heightLookup[cid];
 
   for (let row = 0; row < 200; row++) {
@@ -1569,6 +1889,13 @@ function buildContinentMesh(cid) {
 
   // Custom Per-Pixel GLSL Dolomites / Val di Funes Procedural Terrain Shader
   mat.onBeforeCompile = function(shader) {
+    shader.uniforms.uSeasonMeadowSunlit = terrainSeasonUniforms.uSeasonMeadowSunlit;
+    shader.uniforms.uSeasonMeadowLush = terrainSeasonUniforms.uSeasonMeadowLush;
+    shader.uniforms.uSeasonMeadowAccent = terrainSeasonUniforms.uSeasonMeadowAccent;
+    shader.uniforms.uSeasonForestDark = terrainSeasonUniforms.uSeasonForestDark;
+    shader.uniforms.uSeasonForestLit = terrainSeasonUniforms.uSeasonForestLit;
+    shader.uniforms.uSeasonSnowOffset = terrainSeasonUniforms.uSeasonSnowOffset;
+
     shader.vertexShader = shader.vertexShader.replace(
       "#include <common>",
       `#include <common>
@@ -1587,6 +1914,13 @@ function buildContinentMesh(cid) {
       `#include <common>
       varying vec3 vWorldPos;
       varying vec3 vWorldNorm;
+
+      uniform vec3 uSeasonMeadowSunlit;
+      uniform vec3 uSeasonMeadowLush;
+      uniform vec3 uSeasonMeadowAccent;
+      uniform vec3 uSeasonForestDark;
+      uniform vec3 uSeasonForestLit;
+      uniform float uSeasonSnowOffset;
 
       float hash21(vec2 p) {
         p = fract(p * vec2(123.34, 456.21));
@@ -1637,18 +1971,18 @@ function buildContinentMesh(cid) {
 
           vec3 sunDir = normalize(vec3(-0.66, 0.52, 0.54));
 
-          // 1. Sunlit Val di Funes Spring Pasture (rich golden-lime to emerald rolling meadow)
-          vec3 sunlitLime = vec3(0.47, 0.75, 0.14);
-          vec3 lushEmerald = vec3(0.22, 0.52, 0.10);
-          vec3 wildflowerGold = vec3(0.62, 0.78, 0.18);
+          // 1. Sunlit Val di Funes Spring/Seasonal Pasture
+          vec3 sunlitLime = uSeasonMeadowSunlit;
+          vec3 lushEmerald = uSeasonMeadowLush;
+          vec3 wildflowerGold = uSeasonMeadowAccent;
           float contourWave = 0.5 + 0.5 * sin(wp.x * 0.24 + wp.y * 0.19 + nMacro * 4.2);
           vec3 meadowCol = mix(lushEmerald, sunlitLime, clamp(nMacro * 0.75 + contourWave * 0.35, 0.0, 1.0));
           meadowCol = mix(meadowCol, wildflowerGold, smoothstep(0.62, 0.88, nMeso) * 0.35);
           meadowCol *= (0.90 + 0.20 * nFine);
 
           // 2. Dark Evergreen Spruce / Pine Foothill Belt (3.8m right up to the 19.5m cliff base so zero bare gap exists below the rock wall)
-          vec3 darkSpruce = vec3(0.06, 0.18, 0.07);
-          vec3 sunlitPine = vec3(0.15, 0.34, 0.11);
+          vec3 darkSpruce = uSeasonForestDark;
+          vec3 sunlitPine = uSeasonForestLit;
           vec3 forestCol = mix(darkSpruce, sunlitPine, clamp(nMeso * 0.8 + nFine * 0.3, 0.0, 1.0));
           float forestBelt = smoothstep(3.6, 6.8, h) * (1.0 - smoothstep(17.5, 21.5, h));
           if (biomeFlag > 0.30 && biomeFlag < 0.65 && h < 18.0) {
@@ -1700,8 +2034,8 @@ function buildContinentMesh(cid) {
           rockCol = mix(rockCol, dolomiteDeepCrevice, creviceDarken);
 
           // 4. Alpine Snow & Scree Aprons (tucked into concave couloir gullies & high ledges; vertical rock spires stay bare!)
-          float chuteSnow = smoothstep(17.5, 22.0, h) * smoothstep(0.55, 0.74, couloir + (nMicro - 0.5) * 0.24);
-          float highLedgeSnow = smoothstep(22.5, 27.5, h) * smoothstep(0.52, 0.74, baseRockN.y + (couloir - 0.48) * 0.65);
+          float chuteSnow = smoothstep(17.5 + uSeasonSnowOffset, 22.0 + uSeasonSnowOffset, h) * smoothstep(0.55, 0.74, couloir + (nMicro - 0.5) * 0.24);
+          float highLedgeSnow = smoothstep(22.5 + uSeasonSnowOffset, 27.5 + uSeasonSnowOffset, h) * smoothstep(0.52, 0.74, baseRockN.y + (couloir - 0.48) * 0.65);
           float verticalCliffBare = smoothstep(0.35, 0.58, 1.0 - baseRockN.y) * smoothstep(0.58, 0.32, couloir);
           float snowAmount = clamp(max(chuteSnow, highLedgeSnow) * (1.0 - verticalCliffBare * 0.92), 0.0, 1.0);
 
@@ -1710,10 +2044,10 @@ function buildContinentMesh(cid) {
           vec3 snowCol = mix(snowShadow, snowSun, smoothstep(0.15, 0.58, dot(baseRockN, sunDir)));
           vec3 alpineMassifCol = mix(rockCol, snowCol, snowAmount);
 
-          // Transition from dark forested foothills directly into steep Dolomite rock wall at ~13.8m - 17.5m (zero green hills inside the Odle range!)
-          float rockSlopeMask = smoothstep(0.32, 0.52, 1.0 - n.y);
-          float altitudeRockMask = smoothstep(13.8 + (nMeso - 0.5) * 2.2, 17.4 + (nMacro - 0.5) * 1.8, h);
-          float massifBlend = clamp(max(altitudeRockMask, rockSlopeMask * smoothstep(11.0, 14.5, h)), 0.0, 1.0);
+          // Transition from dark forested foothills directly into steep Dolomite rock wall at ~10.5m - 14.5m (zero green hills inside the Odle range!)
+          float rockSlopeMask = smoothstep(0.24, 0.45, 1.0 - n.y);
+          float altitudeRockMask = smoothstep(10.5 + (nMeso - 0.5) * 2.0, 14.5 + (nMacro - 0.5) * 1.8, h);
+          float massifBlend = clamp(max(altitudeRockMask, rockSlopeMask * smoothstep(6.5, 10.0, h)), 0.0, 1.0);
 
           diffuseColor.rgb = mix(valleyAndForest, alpineMassifCol, massifBlend);
         }
@@ -1729,6 +2063,13 @@ function buildContinentMesh(cid) {
 
   // Populate static natural geography & vegetation (current-snapshot scenery + 3D conifer forest belt + canonical cave landmarks)
   populateContinentScenery(cid);
+
+  // 4. Build 3D Hydrology (River & Lake Translucent Water Surfaces) and Islands
+  buildContinentWaterMesh(cid, waterMaskLookup[cid]);
+  buildContinentIslands(cid);
+  if (!group.children.includes(islandGroups[cid])) {
+    group.add(islandGroups[cid]);
+  }
 }
 
 // -------------------------------------------------------------
@@ -2616,6 +2957,7 @@ function buildAlpineConiferForest(cid) {
       if (dzS > -9.5 && Math.abs(dxS) < 12.5) continue;
 
       const idx = (y + 100) * 200 + (x + 100);
+      if (waterMaskLookup[cid] && waterMaskLookup[cid][idx] > 0) continue;
       const terr = getCanonicalTerrain(cid, x, y);
       const b = String((tData && tData.biome && tData.biome[idx]) || "");
       const isForestBiome = (terr === "forest" || b.includes("forest") || b.includes("woodland"));
@@ -2687,6 +3029,7 @@ function populateContinentScenery(cid) {
       if (isCanonicalOcean(cid, x, y)) continue;
 
       const idx = (y + 100) * 200 + (x + 100);
+      if (waterMaskLookup[cid] && waterMaskLookup[cid][idx] > 0) continue;
       const h = getTerrainHeight(cid, x, y);
       if (h <= 0.08) continue;
 
@@ -3186,11 +3529,14 @@ function getWeatherAt(pairName, hb) {
 }
 
 function updateWeatherAtmospherics(pairName, hb) {
+  const env = (pairName && pairName !== "orbit") ? getWeatherAt(pairName, hb) : { season: "Spring", temperature: 18, weather: "clear" };
+  const curSeason = computeSeasonAtHb(hb, env.season);
+  updateSeasonalFoliage(curSeason);
+
   if (selectedPair === "orbit") {
     rainLines.visible = false;
     return;
   }
-  const env = getWeatherAt(pairName, hb);
   const wtype = env.weather || "clear";
   const isRaining = (wtype === "rain" || wtype === "storm");
 
@@ -3817,6 +4163,7 @@ function focusCiv(pairName) {
 
     updatePublicObjectsAndClearings("east", (timelineHbs.east && timelineHbs.east.length) ? timelineHbs.east[timelineHbs.east.length - 1] : currentHb);
     updatePublicObjectsAndClearings("west", (timelineHbs.west && timelineHbs.west.length) ? timelineHbs.west[timelineHbs.west.length - 1] : currentHb);
+    updateWeatherAtmospherics("east", (timelineHbs.east && timelineHbs.east.length) ? timelineHbs.east[timelineHbs.east.length - 1] : currentHb);
 
     applyCameraMode("orbit", true);
   } else {
