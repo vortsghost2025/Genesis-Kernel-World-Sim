@@ -1296,6 +1296,26 @@ const globalOcean = new THREE.Mesh(globalOceanGeom, globalOceanMat);
 globalOcean.position.set(0, 0.0, 0);
 scene.add(globalOcean);
 
+// Phase 10NE: the ocean has two forms. Local views keep the original flat
+// plane (continents sit at 1 unit = 1 metre on it). Orbit views need the ocean
+// to be the SPHERE surface the continents are projected onto, otherwise the
+// spherical continents hover over a flat disc that cuts through the globe.
+const globalOceanGlobeGeom = new THREE.SphereGeometry(
+  GLOBE_RADIUS - 0.6, 64, 48
+);
+const globalOceanGlobe = new THREE.Mesh(
+  globalOceanGlobeGeom,
+  new THREE.MeshBasicMaterial({ color: 0x0f2d4a })
+);
+globalOceanGlobe.visible = false;
+scene.add(globalOceanGlobe);
+
+function setOceanProjection(useGlobe) {
+  globalOcean.visible = !useGlobe;
+  globalOceanGlobe.visible = useGlobe;
+}
+
+
 // ---------------------------------------------------------------------------
 // Phase 10NE: Planetary Globe Rendering & Continental Scale
 // ---------------------------------------------------------------------------
@@ -2163,6 +2183,7 @@ function setContinentProjection(cid, useGlobe) {
   mesh.geometry.computeVertexNormals();
   mesh.geometry.computeBoundingSphere();
   globeProjectionActive[cid] = useGlobe;
+  setOceanProjection(useGlobe);
   return true;
 }
 
@@ -4251,6 +4272,7 @@ function focusCiv(pairName) {
     // World Atlas reads as a globe with real ocean between them.
     setContinentProjection("cont_a", true);
     setContinentProjection("cont_b", true);
+    setOceanProjection(true);
     // Show both continents side-by-side across the Great Ocean (centers 250 units apart, 50 units ocean gap)
     continentGroups.cont_a.visible = true;
     continentGroups.cont_b.visible = true;
@@ -4279,6 +4301,7 @@ function focusCiv(pairName) {
     objectGroups.cont_b.visible = (cid === "cont_b");
     // Phase 10NE: local views keep the flat 1 unit = 1 metre mapping.
     if (globeProjectionActive[cid]) setContinentProjection(cid, false);
+    if (globalOceanGlobe.visible) setOceanProjection(false);
     continentGroups[cid].position.set(0, 0, 0);
     sceneryGroups[cid].position.set(0, 0, 0);
     objectGroups[cid].position.set(0, 0, 0);

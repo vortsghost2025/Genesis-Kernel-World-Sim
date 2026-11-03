@@ -177,7 +177,9 @@ def test_projection_toggle_round_trips_losslessly():
         " this.x = x || 0; this.y = y || 0; this.z = z || 0; } };\n",
         "var terrainMeshes = {};\n",
         "var terrainFlatPositions = {};\n",
-        "var globeProjectionActive = { cont_a: false, cont_b: false };\n",
+        "var globeProjectionActive = { cont_a: false, cont_b: false };\n"
+        "var globalOceanGlobe = { visible: false };\n"
+        "var setOceanProjection = function (u) { globalOceanGlobe.visible = u; };\n",
     ])
     fake = "".join([
         "var flat = [0,2,0, 10,3,-5, -7,1,9];\n",
@@ -215,3 +217,34 @@ def test_projection_toggle_round_trips_losslessly():
     assert d["moved"], "orbit must move vertices off the flat plane"
     assert abs(d["r0"] - (900.0 + 2.0)) < 1e-6, "vertex radius must be R + elevation"
     assert d["restored"], "local mode must reproduce flat coordinates exactly"
+
+
+def test_orbit_switches_ocean_to_sphere_and_back():
+    """The ocean must become spherical in orbit mode and flat in local mode.
+
+    Without this, the spherical continents hover over a flat disc that cuts
+    through the globe -- the loose end left by projecting only the land.
+    """
+    script = _get_prototype_script()
+    stubs = "".join([
+        "var globalOcean = { visible: true };\n",
+        "var globalOceanGlobe = { visible: false };\n",
+        "function setOceanProjection(u) {",
+        " globalOcean.visible = !u;",
+        " globalOceanGlobe.visible = u; }\n",
+    ])
+    js = (
+        stubs
+        + _extract_js_function(script, "setOceanProjection")
+        + "\n"
+        + "setOceanProjection(true);\n"
+        + "var orbit = { flat: globalOcean.visible, globe: globalOceanGlobe.visible };\n"
+        + "setOceanProjection(false);\n"
+        + "var local = { flat: globalOcean.visible, globe: globalOceanGlobe.visible };\n"
+        + "console.log(JSON.stringify({ orbit: orbit, local: local }));\n"
+    )
+    d = _run_node(js)
+    assert d["orbit"]["flat"] is False, "orbit mode must hide the flat ocean plane"
+    assert d["orbit"]["globe"] is True, "orbit mode must show the spherical ocean"
+    assert d["local"]["flat"] is True, "local mode must restore the flat ocean plane"
+    assert d["local"]["globe"] is False, "local mode must hide the spherical ocean"
