@@ -1062,6 +1062,8 @@ scene.add(continentGroups.cont_b);
 
 // Build Continents Meshes & Hydrology / Island Layers
 const terrainMeshes = {};
+const globeProjectionActive = { cont_a: false, cont_b: false };
+const terrainFlatPositions = {};
 const waterMeshes = { cont_a: null, cont_b: null };
 const islandGroups = { cont_a: new THREE.Group(), cont_b: new THREE.Group() };
 const heightLookup = { cont_a: new Float32Array(200 * 200), cont_b: new Float32Array(200 * 200) };
@@ -1293,6 +1295,58 @@ const globalOceanMat = new THREE.MeshBasicMaterial({
 const globalOcean = new THREE.Mesh(globalOceanGeom, globalOceanMat);
 globalOcean.position.set(0, 0.0, 0);
 scene.add(globalOcean);
+
+// ---------------------------------------------------------------------------
+// Phase 10NE: Planetary Globe Rendering & Continental Scale
+// ---------------------------------------------------------------------------
+// Local modes render at 1 unit = 1 metre (a continent is 200x200 units), which
+// is what makes Adam at 1.44 units sit correctly beside a 5.4 x 4.4 hut.
+// Orbit mode instead projects the SAME tile grid onto a planetary sphere so
+// the World Atlas reads as a globe and distances read as continental.
+// The two scales are deliberately separate: switching modes re-derives every
+// position from tile coordinates using the active scale, so nothing pops and
+// no local-view coordinate ever changes.
+const LOCAL_WORLD_SCALE = 1.0;
+const GLOBE_RADIUS = 900.0;
+
+// Each continent becomes a patch on the sphere. lon/lat are the patch centre
+// in radians; SPAN is the angular width of one 200-tile edge, derived so the
+// continent's arc length on the globe equals its 200-unit flat extent.
+const GLOBE_CONTINENT_SPAN = 200.0 / GLOBE_RADIUS;
+const GLOBE_PATCHES = {
+  cont_a: { lon: -0.85, lat: 0.30 },
+  cont_b: { lon: 0.85, lat: -0.30 }
+};
+
+// Local (flat) rendering: the identity mapping. Kept as an explicit function
+// so every per-heartbeat position update goes through one code path and the
+// local and globe views cannot drift apart.
+function computeLocalPosition(x, y, h) {
+  return { x: x * LOCAL_WORLD_SCALE, y: h * LOCAL_WORLD_SCALE, z: y * LOCAL_WORLD_SCALE };
+}
+
+// Globe rendering: project a tile onto its continent's spherical patch and
+// displace radially by elevation so mountains stay mountains on the curve.
+// Pure function of (cid, x, y, h) - no RNG, so it is fully deterministic.
+function computeGlobePosition(cid, x, y, h) {
+  const patch = GLOBE_PATCHES[cid] || GLOBE_PATCHES.cont_a;
+  const t = (x + 100) / 200.0;          // 0..1 across the continent
+  const v = (y + 100) / 200.0;
+  const lon = patch.lon + (t - 0.5) * GLOBE_CONTINENT_SPAN;
+  const lat = patch.lat + (v - 0.5) * GLOBE_CONTINENT_SPAN;
+  const r = GLOBE_RADIUS + h;
+  const cosLat = Math.cos(lat);
+  return { x: r * cosLat * Math.cos(lon), y: r * Math.sin(lat), z: r * cosLat * Math.sin(lon) };
+}
+
+// Single entry point used by terrain, scenery, objects, fauna, water and
+// islands: same tile coordinates, correct scale for the active view.
+function computeWorldPosition(cid, x, y, h, mode) {
+  const useGlobe = (mode === "orbit" || (mode == null && selectedPair === "orbit"));
+  const p = useGlobe ? computeGlobePosition(cid, x, y, h) : computeLocalPosition(x, y, h);
+  return new THREE.Vector3(p.x, p.y, p.z);
+}
+
 
 const textureLoader = new THREE.TextureLoader();
 
@@ -2060,6 +2114,12 @@ function buildContinentMesh(cid) {
   mesh.castShadow = false;
   group.add(mesh);
   terrainMeshes[cid] = mesh;
+  // Phase 10NE: remember the flat vertex layout so the globe can be toggled
+  // without rebuilding geometry, and so local views always restore exactly.
+  if (!terrainFlatPositions) terrainFlatPositions = {};
+  terrainFlatPositions[cid] = Float32Array.from(geom.attributes.position.array);
+
+
 
   // Populate static natural geography & vegetation (current-snapshot scenery + 3D conifer forest belt + canonical cave landmarks)
   populateContinentScenery(cid);
@@ -2070,6 +2130,40 @@ function buildContinentMesh(cid) {
   if (!group.children.includes(islandGroups[cid])) {
     group.add(islandGroups[cid]);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10NE: switch the terrain mesh between flat (local) and globe (orbit)
+// ---------------------------------------------------------------------------
+// Rewrites the cached geometry in place. Pure: the projection is a function of
+// the stored flat coordinates, so toggling back and forth is lossless.
+function setContinentProjection(cid, useGlobe) {
+  const mesh = terrainMeshes[cid];
+  const flat = terrainFlatPositions[cid];
+  if (!mesh || !flat) return false;
+
+  const pos = mesh.geometry.attributes.position;
+  const arr = pos.array;
+
+  // Always read from the cached flat layout. Reading the live array would
+  // destroy the flat coordinates the first time we project, making the
+  // restore lossy (caught by test_projection_toggle_round_trips_losslessly).
+  for (let vIdx = 0; vIdx < arr.length; vIdx += 3) {
+    const lx = flat[vIdx + 0];
+    const lz = flat[vIdx + 2];
+    const ly = flat[vIdx + 1];
+    const p = useGlobe
+      ? computeGlobePosition(cid, lx, lz, ly)
+      : computeLocalPosition(lx, lz, ly);
+    arr[vIdx + 0] = p.x;
+    arr[vIdx + 1] = p.y;
+    arr[vIdx + 2] = p.z;
+  }
+  pos.needsUpdate = true;
+  mesh.geometry.computeVertexNormals();
+  mesh.geometry.computeBoundingSphere();
+  globeProjectionActive[cid] = useGlobe;
+  return true;
 }
 
 // -------------------------------------------------------------
@@ -3976,13 +4070,19 @@ function applyCameraMode(mode, immediate = true) {
   const ez = (tEve && tEve.coordinates) ? tEve.coordinates.y : az;
 
   if (mode === "orbit" || selectedPair === "orbit") {
-    scene.background.setHex(0x0f2d4a);
-    scene.fog.color.setHex(0x0f2d4a);
-    scene.fog.density = 0.0005;
-    skyDome.visible = false;
-    camera.fov = 44;
+    // Phase 10NE: the globe needs sky, horizon haze and a much wider framing.
+    // Fog density is derived from the globe radius so distant continents haze
+    // rather than clipping against the near plane.
+    const globeFogDensity = 0.32 / (GLOBE_RADIUS * 3.0);
+    scene.background.setHex(0x0a2a4a);
+    scene.fog.color.setHex(0x0a2a4a);
+    scene.fog.density = globeFogDensity;
+    skyDome.visible = true;
+    camera.fov = 46;
     camera.updateProjectionMatrix();
-    smoothMoveCamera(new THREE.Vector3(0, 195, 235), new THREE.Vector3(0, 0, 0), immediate);
+    // Stand far enough back that the whole planet sits in frame.
+    const dist = GLOBE_RADIUS * 3.1;
+    smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist), new THREE.Vector3(0, 0, 0), immediate);
     return;
   }
 
@@ -4147,6 +4247,10 @@ function focusCiv(pairName) {
   const cid = (pairName === "west") ? "cont_b" : "cont_a";
 
   if (pairName === "orbit") {
+    // Phase 10NE: project both continents onto the planetary sphere so the
+    // World Atlas reads as a globe with real ocean between them.
+    setContinentProjection("cont_a", true);
+    setContinentProjection("cont_b", true);
     // Show both continents side-by-side across the Great Ocean (centers 250 units apart, 50 units ocean gap)
     continentGroups.cont_a.visible = true;
     continentGroups.cont_b.visible = true;
@@ -4173,6 +4277,8 @@ function focusCiv(pairName) {
     sceneryGroups.cont_b.visible = (cid === "cont_b");
     objectGroups.cont_a.visible = (cid === "cont_a");
     objectGroups.cont_b.visible = (cid === "cont_b");
+    // Phase 10NE: local views keep the flat 1 unit = 1 metre mapping.
+    if (globeProjectionActive[cid]) setContinentProjection(cid, false);
     continentGroups[cid].position.set(0, 0, 0);
     sceneryGroups[cid].position.set(0, 0, 0);
     objectGroups[cid].position.set(0, 0, 0);
