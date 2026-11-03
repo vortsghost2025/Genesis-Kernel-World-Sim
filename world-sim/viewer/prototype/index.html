@@ -869,6 +869,10 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI / 2 - 0.02;
 controls.minDistance = 1.5;
+// Local views are framed for the 1 unit = 1 metre flat layout (a continent is
+// 200x200 units), so 550 units clears both. The orbit view projects the same
+// grid onto a GLOBE_RADIUS sphere and stands ~3.1 radii back, which needs a
+// much larger ceiling -- see applyCameraMode, which raises this and restores it.
 controls.maxDistance = 550;
 
 // Sky Dome (Crisp Cerulean-to-Azure Alpine Sky for Val di Funes / Dolomites Horizon)
@@ -4100,6 +4104,24 @@ function applyCameraMode(mode, immediate = true) {
     scene.fog.color.setHex(0x0a2a4a);
     scene.fog.density = globeFogDensity;
     skyDome.visible = true;
+    // Phase 10NM: planet-scale framing. OrbitControls clamps its own radius to
+    // maxDistance on every update(), so the default 550 (sized for the flat
+    // 200x200 layout) was dragging the globe camera back to ~550 units and
+    // making each continent read as a flat rectangle. Raise the ceiling for
+    // orbit mode and restore it when we drop back to local views.
+    controls.maxDistance = GLOBE_RADIUS * 5.0;
+    // The camera was constructed with a 1600-unit far plane, which clips the
+    // entire planet away once we stand 3.1 radii out. Push it past the framing
+    // distance so nothing is cut off.
+    if (camera.far < GLOBE_RADIUS * 8.0) {
+      camera.far = GLOBE_RADIUS * 8.0;
+    }
+    // The sky dome was built at radius 780 for the flat layout; at planet
+    // distance the camera would sit outside it. Scale it to enclose the framing.
+    const domeScale = (GLOBE_RADIUS * 4.2) / 780.0;
+    if (Math.abs(skyDome.scale.x - domeScale) > 1e-6) {
+      skyDome.scale.set(domeScale, domeScale, domeScale);
+    }
     camera.fov = 46;
     camera.updateProjectionMatrix();
     // Stand far enough back that the whole planet sits in frame.
@@ -4107,6 +4129,15 @@ function applyCameraMode(mode, immediate = true) {
     smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist), new THREE.Vector3(0, 0, 0), immediate);
     return;
   }
+
+  // Local views: undo the planet-scale overrides so the flat 1 unit = 1 metre
+  // framing behaves exactly as before (Phase 10NM).
+  skyDome.visible = true;
+  controls.maxDistance = 550;
+  if (camera.far !== 1600) camera.far = 1600;
+  if (Math.abs(skyDome.scale.x - 1.0) > 1e-6) skyDome.scale.set(1, 1, 1);
+  camera.fov = 45;
+  camera.updateProjectionMatrix();
 
   skyDome.visible = true;
   scene.background.setHex(0x3882d4);

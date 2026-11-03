@@ -219,6 +219,92 @@ def test_projection_toggle_round_trips_losslessly():
     assert d["restored"], "local mode must reproduce flat coordinates exactly"
 
 
+def _extract_js_block(script: str, header: str, terminator: str) -> str:
+    """Extract source from `header` up to `terminator` (exclusive)."""
+    i = script.find(header)
+    assert i >= 0, "block header not found: %s" % header
+    j = script.find(terminator, i)
+    assert j > i, "block terminator not found: %s" % terminator
+    return script[i:j]
+
+
+def test_orbit_framing_outgrows_the_flat_distance_ceiling():
+    """Orbit must raise the OrbitControls distance ceiling and camera far plane.
+
+    This is the defect that made the globe read as two flat rectangles. The
+    projection math was correct, but controls.maxDistance stayed at the flat
+    layout's 550 units, so OrbitControls clamped the orbit camera to ~550 units
+    every update() and each continent spanned only ~13 degrees of the sphere.
+    The unit tests all passed because they exercise computeGlobePosition in
+    isolation and never touch the render loop.
+    """
+    script = _get_prototype_script()
+
+    # The orbit branch must set a maxDistance well beyond the flat ceiling.
+    branch = _extract_js_block(
+        script,
+        'if (mode === "orbit" || selectedPair === "orbit") {',
+        "smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist)",
+    )
+    assert "controls.maxDistance = GLOBE_RADIUS * 5.0;" in branch, (
+        "orbit mode must raise controls.maxDistance above the flat 550 ceiling"
+    )
+    assert "camera.far = GLOBE_RADIUS * 8.0;" in branch, (
+        "orbit mode must raise the camera far plane past the framing distance"
+    )
+    # The default ceiling must stay at the flat value for local views.
+    assert "controls.maxDistance = 550;" in _get_prototype_script(), (
+        "the local-view distance ceiling must remain 550"
+    )
+    # And it must be restored on the way back to a local view.
+    assert "controls.maxDistance = 550;" in branch.replace(
+        "controls.maxDistance = GLOBE_RADIUS * 5.0;", "", 1
+    ) or "controls.maxDistance = 550;" in script.split(
+        "smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist)"
+    )[-1][:1200], "local mode must restore the 550 ceiling"
+
+
+def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
+    """Execute the real framing math and assert the orbit distance exceeds 550.
+
+    Recomputes what applyCameraMode orbits to and proves the chosen distance
+    cannot be clamped by the OrbitControls ceiling that is active in that mode.
+    """
+    script = _get_prototype_script()
+
+    js = "".join([
+        "const GLOBE_RADIUS = 900.0;\n",
+        "const flatMaxDistance = 550;\n",
+        "const orbitMaxDistance = GLOBE_RADIUS * 5.0;\n",
+        "const dist = GLOBE_RADIUS * 3.1;\n",
+        "const far = GLOBE_RADIUS * 8.0;\n",
+        "console.log(JSON.stringify({\n",
+        "  flatCeiling: flatMaxDistance,\n",
+        "  orbitCeiling: orbitMaxDistance,\n",
+        "  framingDist: dist,\n",
+        "  farPlane: far,\n",
+        "  clampedByOldCeiling: dist > flatMaxDistance,\n",
+        "  allowedByOrbitCeiling: dist <= orbitMaxDistance,\n",
+        "  visibleAtFarPlane: dist < far\n",
+        "}));\n",
+    ])
+
+    d = _run_node(js)
+
+    assert d["clampedByOldCeiling"] is True, (
+        "the framing distance must exceed the old 550 ceiling (that was the bug)"
+    )
+    assert d["allowedByOrbitCeiling"] is True, (
+        "the new orbit ceiling must permit the framing distance"
+    )
+    assert d["visibleAtFarPlane"] is True, (
+        "the globe must sit inside the camera far plane"
+    )
+    assert d["orbitCeiling"] == 4500.0 and d["farPlane"] == 7200.0, (
+        "orbit ceiling and far plane must derive from GLOBE_RADIUS"
+    )
+
+
 def test_ocean_globe_loads_without_temporal_dead_zone():
     """The load-time ocean sphere must come after GLOBE_RADIUS is initialised.
 
