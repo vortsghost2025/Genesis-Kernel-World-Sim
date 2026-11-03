@@ -1296,26 +1296,6 @@ const globalOcean = new THREE.Mesh(globalOceanGeom, globalOceanMat);
 globalOcean.position.set(0, 0.0, 0);
 scene.add(globalOcean);
 
-// Phase 10NE: the ocean has two forms. Local views keep the original flat
-// plane (continents sit at 1 unit = 1 metre on it). Orbit views need the ocean
-// to be the SPHERE surface the continents are projected onto, otherwise the
-// spherical continents hover over a flat disc that cuts through the globe.
-const globalOceanGlobeGeom = new THREE.SphereGeometry(
-  GLOBE_RADIUS - 0.6, 64, 48
-);
-const globalOceanGlobe = new THREE.Mesh(
-  globalOceanGlobeGeom,
-  new THREE.MeshBasicMaterial({ color: 0x0f2d4a })
-);
-globalOceanGlobe.visible = false;
-scene.add(globalOceanGlobe);
-
-function setOceanProjection(useGlobe) {
-  globalOcean.visible = !useGlobe;
-  globalOceanGlobe.visible = useGlobe;
-}
-
-
 // ---------------------------------------------------------------------------
 // Phase 10NE: Planetary Globe Rendering & Continental Scale
 // ---------------------------------------------------------------------------
@@ -1337,6 +1317,27 @@ const GLOBE_PATCHES = {
   cont_a: { lon: -0.85, lat: 0.30 },
   cont_b: { lon: 0.85, lat: -0.30 }
 };
+
+// Phase 10NG: the ocean has two forms. Local views keep the original flat
+// plane (continents sit at 1 unit = 1 metre on it). Orbit views need the ocean
+// to be the SPHERE surface the continents are projected onto, otherwise the
+// spherical continents hover over a flat disc that cuts through the globe.
+// This block must come AFTER GLOBE_RADIUS: it builds geometry at load time and
+// would otherwise throw a temporal-dead-zone error that kills the whole script.
+const globalOceanGlobeGeom = new THREE.SphereGeometry(
+  GLOBE_RADIUS - 0.6, 64, 48
+);
+const globalOceanGlobe = new THREE.Mesh(
+  globalOceanGlobeGeom,
+  new THREE.MeshBasicMaterial({ color: 0x0f2d4a })
+);
+globalOceanGlobe.visible = false;
+scene.add(globalOceanGlobe);
+
+function setOceanProjection(useGlobe) {
+  globalOcean.visible = !useGlobe;
+  globalOceanGlobe.visible = useGlobe;
+}
 
 // Local (flat) rendering: the identity mapping. Kept as an explicit function
 // so every per-heartbeat position update goes through one code path and the

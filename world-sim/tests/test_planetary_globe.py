@@ -219,6 +219,90 @@ def test_projection_toggle_round_trips_losslessly():
     assert d["restored"], "local mode must reproduce flat coordinates exactly"
 
 
+def test_ocean_globe_loads_without_temporal_dead_zone():
+    """The load-time ocean sphere must come after GLOBE_RADIUS is initialised.
+
+    Regression test for a real defect: the spherical-ocean block built
+    SphereGeometry(GLOBE_RADIUS - 0.6) above the `const GLOBE_RADIUS = 900.0`
+    declaration. `const` is hoisted into a temporal dead zone, so the block
+    threw "Cannot access 'GLOBE_RADIUS' before initialization" at page load and
+    killed the ENTIRE viewer script -- focusCiv and every other function went
+    undefined and the page was dead. The existing function-extraction tests
+    passed because they never execute the load-time ordering.
+
+    This test reproduces the browser's initialisation order and asserts the
+    constants plus the load-time geometry block execute cleanly.
+    """
+    script = _get_prototype_script()
+
+    # Everything that runs at load time, in source order.
+    stubs = "".join([
+        "var THREE = {\n",
+        " SphereGeometry: function (r, s, h) { this.r = r; },\n",
+        " MeshBasicMaterial: function (o) { this.o = o; },\n",
+        " Mesh: function (g, m) { this.geometry = g; this.material = m; this.visible = false; }\n",
+        "};\n",
+        "var scene = { added: [], add: function (m) { this.added.push(m); } };\n",
+    ])
+
+    load_time = "".join([
+        "const LOCAL_WORLD_SCALE = 1.0;\n",
+        "const GLOBE_RADIUS = 900.0;\n",
+    ])
+
+    m = re.search(r"const\s+GLOBE_PATCHES\s*=\s*\{[^}]*\{[^}]*\}[^}]*\{[^}]*\}[^}]*\};",
+                  script, re.DOTALL)
+    assert m, "GLOBE_PATCHES must be declared as a const block"
+
+    ocean = re.search(
+        r"const\s+globalOceanGlobeGeom\s*=\s*new THREE\.SphereGeometry\("
+        r".*?\)\s*;.*?scene\.add\(globalOceanGlobe\);",
+        script, re.DOTALL,
+    )
+    assert ocean, "the load-time spherical ocean block must exist"
+    toggle = _extract_js_function(script, "setOceanProjection")
+
+    js = (
+        stubs
+        + load_time
+        + "\n"
+        + m.group(0)
+        + "\n"
+        + ocean.group(0)
+        + "\n"
+        + toggle
+        + "\n"
+        + "globalOceanGlobe.visible = false;\n"
+        + "globalOcean = { visible: true };\n"
+        + "setOceanProjection(true);\n"
+        + "var orbit = globalOceanGlobe.visible;\n"
+        + "setOceanProjection(false);\n"
+        + "var local = globalOcean.visible;\n"
+        + "console.log(JSON.stringify({ orbit: orbit, local: local,"
+        " r: globalOceanGlobeGeom.r }));\n"
+    )
+
+    d = _run_node(js)
+
+    # radius must be GLOBE_RADIUS - 0.6, i.e. the constant was readable
+    assert abs(d["r"] - (900.0 - 0.6)) < 1e-9, "SphereGeometry radius must come from GLOBE_RADIUS"
+    assert d["orbit"] is True, "orbit must show the spherical ocean"
+    assert d["local"] is True, "local must show the flat ocean"
+
+
+def test_globe_constants_precede_their_load_time_uses():
+    """Source-order guard: GLOBE_RADIUS must be declared before any load-time use."""
+    script = _get_prototype_script()
+    decl = script.find("const GLOBE_RADIUS")
+    assert decl > 0, "GLOBE_RADIUS must be declared"
+    use = script.find("globalOceanGlobeGeom")
+    assert use > 0, "the spherical ocean block must exist"
+    assert decl < use, (
+        "GLOBE_RADIUS must be declared BEFORE the load-time SphereGeometry block "
+        "that consumes it, otherwise the script throws a temporal-dead-zone error"
+    )
+
+
 def test_orbit_switches_ocean_to_sphere_and_back():
     """The ocean must become spherical in orbit mode and flat in local mode.
 
