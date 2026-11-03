@@ -908,7 +908,10 @@ const hemiLight = new THREE.HemisphereLight(0xdff0ff, 0x2c4a22, 0.56);
 scene.add(hemiLight);
 
 const sunLight = new THREE.DirectionalLight(0xffeed2, 1.18);
-sunLight.position.set(-95, 84, 55);
+// The valley-side sun direction. Orbit mode repositions this to light the
+// visible hemisphere of the planet and restores it on the way back.
+const LOCAL_SUN_POSITION = { x: -95, y: 84, z: 55 };
+sunLight.position.set(LOCAL_SUN_POSITION.x, LOCAL_SUN_POSITION.y, LOCAL_SUN_POSITION.z);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
@@ -1322,6 +1325,181 @@ const GLOBE_PATCHES = {
   cont_b: { lon: 0.85, lat: -0.30 }
 };
 
+// ---------------------------------------------------------------------------
+// Phase 10NS: Planetary Surface Synthesis
+//
+// The globe used to be an ocean shell plus the two projected continent patches,
+// so ~99.7% of the sphere carried no land at all. This adds a real planet: one
+// dense sphere at radius GLOBE_RADIUS + signed height, driven by three-octave
+// 3D lattice noise sampled on the sphere DIRECTION rather than on the
+// equirectangular grid. Sampling the direction is what makes the field seamless
+// across the antimeridian and non-degenerate at the poles, where longitude
+// collapses to a single point and planar noise pinches.
+// ---------------------------------------------------------------------------
+
+// Signed displacement applied to GLOBE_RADIUS. Negative is ocean floor.
+const PLANET_SEA_LEVEL = 0.33;      // field threshold: above this is land
+const PLANET_HEIGHT_SCALE = 118.0;  // world units of relief per unit of field
+const PLANET_DEEP_OCEAN = -150.0;   // floor of the bathymetry banding
+const PLANET_PATCH_PLAIN_H = 0.5;   // forced ground under the agents' continents
+
+// Fixed landmarks so the atlas has a describable geography rather than a blob.
+// lon/lat in radians about the patch frame, r is an angular falloff radius in
+// radians, h is the ground height the landmark adds at its centre.
+const PLANET_LANDMARKS = [
+  // South polar ice cap.
+  { lon: 0.0000, lat: -1.4800, r: 0.3400, h: 62.0 },
+  // Ring coast around the canonical supercontinent.
+  { lon: -0.8500, lat: 0.3000, r: 0.2600, h: 34.0 },
+  { lon: 0.8500, lat: -0.3000, r: 0.2600, h: 30.0 },
+  // Two mid-latitude continents, roughly antipodal in longitude.
+  { lon: 2.9000, lat: 0.6400, r: 0.3300, h: 78.0 },
+  { lon: -2.6000, lat: -0.5600, r: 0.3100, h: 64.0 },
+  // Equatorial archipelago belt.
+  { lon: 1.4500, lat: -0.0200, r: 0.1700, h: 26.0 },
+  { lon: 1.9000, lat: 0.1100, r: 0.1400, h: 22.0 },
+  // Southern island continent.
+  { lon: -1.1000, lat: -1.1000, r: 0.2400, h: 44.0 },
+  // Deliberately isolated pair: a real long-range exploration target.
+  { lon: 4.0500, lat: 0.5200, r: 0.0750, h: 20.0 },
+  { lon: 4.2600, lat: 0.4600, r: 0.0600, h: 16.0 }
+];
+
+// Lattice hash: integer cell + seed -> deterministic value in [-1, 1].
+function planetHash3(ix, iy, iz, seed) {
+  let h = seed | 0;
+  h = Math.imul(h ^ (ix | 0), 374761393) | 0;
+  h = Math.imul(h ^ (iy | 0), 668265263) | 0;
+  h = Math.imul(h ^ (iz | 0), 1274126177) | 0;
+  h = (h ^ (h >>> 13)) | 0;
+  h = Math.imul(h, 1274126177) | 0;
+  return (((h ^ (h >>> 16)) >>> 0) / 2147483647.0) - 1.0;
+}
+
+// Trilinearly interpolated value noise over a 3D direction.
+function planetValueNoise(x, y, z, freq, seed) {
+  const fx = x * freq, fy = y * freq, fz = z * freq;
+  const ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz);
+  const tx = fx - ix, ty = fy - iy, tz = fz - iz;
+  // smootherstep: zero first AND second derivative at the cell edges, which is
+  // what keeps the octaves from producing visible lattice ringing.
+  const ux = tx * tx * tx * (tx * (tx * 6.0 - 15.0) + 10.0);
+  const uy = ty * ty * ty * (ty * (ty * 6.0 - 15.0) + 10.0);
+  const uz = tz * tz * tz * (tz * (tz * 6.0 - 15.0) + 10.0);
+  const c000 = planetHash3(ix, iy, iz, seed);
+  const c100 = planetHash3(ix + 1, iy, iz, seed);
+  const c010 = planetHash3(ix, iy + 1, iz, seed);
+  const c110 = planetHash3(ix + 1, iy + 1, iz, seed);
+  const c001 = planetHash3(ix, iy, iz + 1, seed);
+  const c101 = planetHash3(ix + 1, iy, iz + 1, seed);
+  const c011 = planetHash3(ix, iy + 1, iz + 1, seed);
+  const c111 = planetHash3(ix + 1, iy + 1, iz + 1, seed);
+  const x00 = c000 + (c100 - c000) * ux;
+  const x10 = c010 + (c110 - c010) * ux;
+  const x01 = c001 + (c101 - c001) * ux;
+  const x11 = c011 + (c111 - c011) * ux;
+  const y0 = x00 + (x10 - x00) * uy;
+  const y1 = x01 + (x11 - x01) * uy;
+  return y0 + (y1 - y0) * uz;
+}
+
+// Three octaves: major continents, regional coastlines, island detail.
+function planetBaseField(dx, dy, dz) {
+  const n1 = planetValueNoise(dx, dy, dz, 2.5, 11);
+  const n2 = planetValueNoise(dx, dy, dz, 7.0, 29);
+  const n3 = planetValueNoise(dx, dy, dz, 19.0, 47);
+  return n1 * 1.0 + n2 * 0.42 + n3 * 0.16;
+}
+
+// Signed ground height in world units at a longitude / latitude in radians.
+function computePlanetHeight(lon, lat) {
+  // The two canonical continents are projected as flat meshes at
+  // GLOBE_RADIUS + h. Procedural terrain inside their bounding box would tear
+  // them, so those boxes are forced to a plain.
+  const cLat = Math.cos(lat);
+  for (let i = 0; i < 2; i++) {
+    const keys = i === 0 ? "cont_a" : "cont_b";
+    const p = GLOBE_PATCHES[keys];
+    if (!p) continue;
+    const half = GLOBE_CONTINENT_SPAN / 2.0;
+    // Longitude wraps; compare the shortest way round.
+    let dLon = lon - p.lon;
+    while (dLon > Math.PI) dLon -= 6.283185307179586;
+    while (dLon < -Math.PI) dLon += 6.283185307179586;
+    if (Math.abs(dLon) <= half && Math.abs(lat - p.lat) <= half) {
+      return PLANET_PATCH_PLAIN_H;
+    }
+  }
+
+  const dx = cLat * Math.cos(lon);
+  const dy = Math.sin(lat);
+  const dz = cLat * Math.sin(lon);
+
+  let h = (planetBaseField(dx, dy, dz) - PLANET_SEA_LEVEL) * PLANET_HEIGHT_SCALE;
+
+  // Fixed landmarks add ground where they land, regardless of noise.
+  for (let i = 0; i < PLANET_LANDMARKS.length; i++) {
+    const lm = PLANET_LANDMARKS[i];
+    const cl = Math.cos(lat) * Math.cos(lm.lat)
+      + Math.sin(lat) * Math.sin(lm.lat);
+    // Angular cosine between the sample and the landmark centre.
+    const cosD = Math.max(-1.0, Math.min(1.0,
+      dx * Math.cos(lm.lat) * Math.cos(lm.lon)
+      + dy * Math.sin(lm.lat)
+      + dz * Math.cos(lm.lat) * Math.sin(lm.lon)));
+    const ang = Math.acos(cosD);
+    if (ang < lm.r) {
+      const t = 1.0 - ang / lm.r;
+      h = Math.max(h, lm.h * t * t * (3.0 - 2.0 * t));
+    }
+  }
+
+  // Polar caps: ice over both octaves, so they always read as frozen.
+  const polar = (Math.abs(lat) - 1.24) / 0.30;
+  if (polar > 0.0) {
+    h = Math.max(h, 66.0 * polar);
+    // Ice sheets should not look like noise hills.
+    return h;
+  }
+
+  return h;
+}
+
+// Ocean colour for the bathymetry bands, as an RGB triplet.
+function planetOceanColor(h) {
+  const t = Math.max(0.0, Math.min(1.0, -h / 150.0));
+  const r = 6 + t * 8, g = 32 + t * 34, b = 74 + t * 88;
+  return [r / 255, g / 255, b / 255];
+}
+
+// Land colour by altitude and latitude: boreal -> temperate -> desert bands,
+// greying to rock with height, snow above a latitude-adjusted snowline.
+function planetLandColor(h, lat) {
+  const absLat = Math.abs(lat);
+  let r, g, b;
+  if (absLat > 1.24) {
+    r = 214; g = 226; b = 238;                    // polar ice
+  } else if (absLat > 0.83) {
+    r = 92; g = 104; b = 88;                      // boreal taiga
+  } else if (absLat > 0.52) {
+    r = 118; g = 128; b = 78;                     // temperate green
+  } else if (absLat > 0.26) {
+    r = 168; g = 150; b = 92;                     // arid belt
+  } else {
+    r = 96; g = 122; b = 74;                      // equatorial
+  }
+  if (h > 34) {                                   // highland rock
+    const t = Math.min(1.0, (h - 34) / 90.0);
+    r += (128 - r) * t; g += (132 - g) * t; b += (136 - b) * t;
+  }
+  const snowline = 118 - Math.abs(lat) * 46.0;
+  if (h > snowline) {                             // summit snow
+    const t = Math.min(1.0, (h - snowline) / 26.0);
+    r += (238 - r) * t; g += (242 - g) * t; b += (248 - b) * t;
+  }
+  return [r / 255, g / 255, b / 255];
+}
+
 // Phase 10NG: the ocean has two forms. Local views keep the original flat
 // plane (continents sit at 1 unit = 1 metre on it). Orbit views need the ocean
 // to be the SPHERE surface the continents are projected onto, otherwise the
@@ -1338,9 +1516,83 @@ const globalOceanGlobe = new THREE.Mesh(
 globalOceanGlobe.visible = false;
 scene.add(globalOceanGlobe);
 
+// Phase 10NS: the planet itself. One dense equirectangular grid pushed onto the
+// sphere at GLOBE_RADIUS + computed height. Built once; nothing per frame.
+const PLANET_LON_STEPS = 360;
+const PLANET_LAT_STEPS = 180;
+
+function buildPlanetSurface() {
+  const cols = PLANET_LON_STEPS + 1;   // +1 closes the seam with duplicate verts
+  const rows = PLANET_LAT_STEPS + 1;   // +1 carries the poles
+  const positions = new Float32Array(cols * rows * 3);
+  const colors = new Float32Array(cols * rows * 3);
+  let p = 0, c = 0;
+
+  for (let iy = 0; iy < rows; iy++) {
+    const lat = -1.5707963267948966 + (iy / PLANET_LAT_STEPS) * Math.PI;
+    for (let ix = 0; ix < cols; ix++) {
+      // The last column repeats longitude 0 so the texture/gradient wraps exactly.
+      const lon = (ix / PLANET_LON_STEPS) * 6.283185307179586;
+      const h = computePlanetHeight(lon, lat);
+      const r = GLOBE_RADIUS + h;
+      const cLat = Math.cos(lat);
+      positions[p++] = r * cLat * Math.cos(lon);
+      positions[p++] = r * Math.sin(lat);
+      positions[p++] = r * cLat * Math.sin(lon);
+
+      const col = (h > 0.0)
+        ? planetLandColor(h, lat)
+        : planetOceanColor(h);
+      colors[c++] = col[0];
+      colors[c++] = col[1];
+      colors[c++] = col[2];
+    }
+  }
+
+  const indices = new Uint32Array(PLANET_LON_STEPS * PLANET_LAT_STEPS * 6);
+  let q = 0;
+  for (let iy = 0; iy < PLANET_LAT_STEPS; iy++) {
+    for (let ix = 0; ix < PLANET_LON_STEPS; ix++) {
+      const a = iy * cols + ix;
+      const b = a + 1;
+      const cc = a + cols;
+      const dd = cc + 1;
+      // Keep the winding consistent with the inside-out convention used for the
+      // ocean shell so neither back-faces when viewed from outside.
+      indices[q++] = a; indices[q++] = cc; indices[q++] = b;
+      indices[q++] = b; indices[q++] = cc; indices[q++] = dd;
+    }
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geom.setIndex(new THREE.BufferAttribute(indices, 1));
+  geom.computeVertexNormals();
+  geom.computeBoundingSphere();
+
+  const mesh = new THREE.Mesh(
+    geom,
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.92,
+      metalness: 0.0,
+      side: THREE.DoubleSide
+    })
+  );
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+const globalPlanetMesh = buildPlanetSurface();
+
+// Three exclusive projection states so the planet sphere can never overlap the
+// flat ocean plane or the legacy coloured shell.
 function setOceanProjection(useGlobe) {
-  globalOcean.visible = !useGlobe;
-  globalOceanGlobe.visible = useGlobe;
+  globalOcean.visible = (useGlobe === false);
+  globalOceanGlobe.visible = (useGlobe === "shell");
+  if (globalPlanetMesh) globalPlanetMesh.visible = (useGlobe === true);
 }
 
 // Local (flat) rendering: the identity mapping. Kept as an explicit function
@@ -4128,9 +4380,24 @@ function applyCameraMode(mode, immediate = true) {
     // (mirrored in y and z), so a camera looking down +z puts one of them on the
     // far side of the globe and only one reads. Standing off along +x puts both
     // patches on the visible hemisphere, straddling the centre of the disc.
-    // 2.4 radii keeps the curvature legible while leaving room for the timeline.
-    const dist = GLOBE_RADIUS * 2.4;
-    const orbitDir = new THREE.Vector3(0.94, 0.34, 0.16).normalize();
+    // 3.2 radii with a ~25 degree elevation frames the whole disc so the
+    // planet reads as a planet. Stand closer and the camera skims the near
+    // continent's surface and you lose the horizon entirely.
+    const dist = GLOBE_RADIUS * 3.2;
+    const orbitDir = new THREE.Vector3(0.88, 0.42, 0.22).normalize();
+    // Light the visible hemisphere. The valley sun sits at (-95, 84, 55), which
+    // from the globe camera is a hard side-light and blacks out half the disc.
+    // Put the sun roughly along the camera direction with an upper-left bias so
+    // the whole planet reads while relief still gets shaded. This must come
+    // after orbitDir/dist are declared -- referencing them earlier throws the
+    // same temporal-dead-zone error that killed the viewer in Phase 10JJ.
+    sunLight.position.set(
+      orbitDir.x * dist * 0.55 + 180.0,
+      orbitDir.y * dist * 0.55 + 300.0,
+      orbitDir.z * dist * 0.55 + 200.0
+    );
+    sunLight.target.position.set(0, 0, 0);
+    sunLight.target.updateMatrixWorld();
     smoothMoveCamera(orbitDir.multiplyScalar(dist), new THREE.Vector3(0, 0, 0), immediate);
     return;
   }
@@ -4143,6 +4410,9 @@ function applyCameraMode(mode, immediate = true) {
   if (Math.abs(skyDome.scale.x - 1.0) > 1e-6) skyDome.scale.set(1, 1, 1);
   camera.fov = 45;
   camera.updateProjectionMatrix();
+  if (Math.abs(sunLight.position.x - LOCAL_SUN_POSITION.x) > 1e-6) {
+    sunLight.position.set(LOCAL_SUN_POSITION.x, LOCAL_SUN_POSITION.y, LOCAL_SUN_POSITION.z);
+  }
 
   skyDome.visible = true;
   scene.background.setHex(0x3882d4);

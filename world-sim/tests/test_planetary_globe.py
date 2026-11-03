@@ -277,8 +277,8 @@ def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
         "const GLOBE_RADIUS = 900.0;\n",
         "const flatMaxDistance = 550;\n",
         "const orbitMaxDistance = GLOBE_RADIUS * 5.0;\n",
-        "const dist = GLOBE_RADIUS * 2.4;\n",
-        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([0.94,0.34,0.16]);\n",
+        "const dist = GLOBE_RADIUS * 3.2;\n",
+        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([0.88,0.42,0.22]);\n",
         "const cam = orbitDir.normalize().multiplyScalar(dist);\n",
         "const far = GLOBE_RADIUS * 8.0;\n",
         "console.log(JSON.stringify({\n",
@@ -330,7 +330,10 @@ def test_ocean_globe_loads_without_temporal_dead_zone():
     """
     script = _get_prototype_script()
 
-    # Everything that runs at load time, in source order.
+    # Everything that runs at load time, in source order. The ocean/planet
+    # meshes are declared CONST by the real source block below, so they are not
+    # pre-declared here -- redeclaring them would be a syntax error rather than
+    # a load-order failure, which would mask the defect this test exists to catch.
     stubs = "".join([
         "var THREE = {\n",
         " SphereGeometry: function (r, s, h) { this.r = r; },\n",
@@ -338,6 +341,8 @@ def test_ocean_globe_loads_without_temporal_dead_zone():
         " Mesh: function (g, m) { this.geometry = g; this.material = m; this.visible = false; }\n",
         "};\n",
         "var scene = { added: [], add: function (m) { this.added.push(m); } };\n",
+        "var globalOcean = { visible: true };\n",
+        "var globalPlanetMesh = { visible: false };\n",
     ])
 
     load_time = "".join([
@@ -371,17 +376,21 @@ def test_ocean_globe_loads_without_temporal_dead_zone():
         + "globalOcean = { visible: true };\n"
         + "setOceanProjection(true);\n"
         + "var orbit = globalOceanGlobe.visible;\n"
+        + "var planet = globalPlanetMesh.visible;\n"
         + "setOceanProjection(false);\n"
         + "var local = globalOcean.visible;\n"
-        + "console.log(JSON.stringify({ orbit: orbit, local: local,"
-        " r: globalOceanGlobeGeom.r }));\n"
+        + "console.log(JSON.stringify({ orbit: orbit, planet: planet,"
+        " local: local, r: globalOceanGlobeGeom.r }));\n"
     )
 
     d = _run_node(js)
 
     # radius must be GLOBE_RADIUS - 0.6, i.e. the constant was readable
     assert abs(d["r"] - (900.0 - 0.6)) < 1e-9, "SphereGeometry radius must come from GLOBE_RADIUS"
-    assert d["orbit"] is True, "orbit must show the spherical ocean"
+    # Phase 10NS made the projection three-state, so `true` now selects the
+    # planet mesh instead of the legacy shell. Both are spherical surfaces; the
+    # flat-plane restoration below is the part this test has always guarded.
+    assert d["planet"] is True, "orbit must show a spherical surface"
     assert d["local"] is True, "local must show the flat ocean"
 
 
@@ -398,6 +407,44 @@ def test_globe_constants_precede_their_load_time_uses():
     )
 
 
+def test_no_orbit_branch_identifier_is_used_before_its_declaration():
+    """Guards the whole class of defect, not one instance of it.
+
+    Phase 10JJ hit a temporal dead zone on GLOBE_RADIUS, Phase 10NS hit the same
+    class again on orbitDir, and both only showed up when the page actually ran.
+    This test walks every `const NAME =` inside the applyCameraMode orbit branch
+    and asserts no earlier line in that branch reads NAME.
+    """
+    script = _get_prototype_script()
+
+    start = script.find('if (mode === "orbit" || selectedPair === "orbit") {')
+    assert start > 0, "the orbit branch of applyCameraMode must exist"
+    end = script.find("// Local views: undo the planet-scale", start)
+    assert end > start, "the orbit branch must be terminated by the local restore"
+    branch = script[start:end]
+    branch_lines = branch.split("\n")
+
+    declared = {}
+    for n, line in enumerate(branch_lines):
+        m = re.match(r"\s*const\s+(\w+)\s*=", line)
+        if m:
+            declared.setdefault(m.group(1), n)
+
+    assert declared, "the orbit branch must declare its own locals"
+
+    for name, decl_line in declared.items():
+        for n, line in enumerate(branch_lines):
+            if n >= decl_line:
+                break
+            if re.search(r"\b%s\b" % re.escape(name), line):
+                raise AssertionError(
+                    "orbit branch uses `%s` on line %d of the branch but it is not "
+                    "declared until line %d -- that is a temporal dead zone and it "
+                    "kills the entire viewer script at page load"
+                    % (name, n + 1, decl_line + 1)
+                )
+
+
 def test_orbit_switches_ocean_to_sphere_and_back():
     """The ocean must become spherical in orbit mode and flat in local mode.
 
@@ -408,22 +455,33 @@ def test_orbit_switches_ocean_to_sphere_and_back():
     stubs = "".join([
         "var globalOcean = { visible: true };\n",
         "var globalOceanGlobe = { visible: false };\n",
-        "function setOceanProjection(u) {",
-        " globalOcean.visible = !u;",
-        " globalOceanGlobe.visible = u; }\n",
+        "var globalPlanetMesh = { visible: false };\n",
     ])
     js = (
         stubs
         + _extract_js_function(script, "setOceanProjection")
         + "\n"
         + "setOceanProjection(true);\n"
-        + "var orbit = { flat: globalOcean.visible, globe: globalOceanGlobe.visible };\n"
+        + "var orbit = { flat: globalOcean.visible, globe: globalOceanGlobe.visible,\n"
+        + "               planet: globalPlanetMesh.visible };\n"
         + "setOceanProjection(false);\n"
-        + "var local = { flat: globalOcean.visible, globe: globalOceanGlobe.visible };\n"
+        + "var local = { flat: globalOcean.visible, globe: globalOceanGlobe.visible,\n"
+        + "               planet: globalPlanetMesh.visible };\n"
         + "console.log(JSON.stringify({ orbit: orbit, local: local }));\n"
     )
     d = _run_node(js)
+    # The invariant this test has guarded since 10NG: orbit mode must never show
+    # the flat ocean plane, or the projected continents hover over a disc that
+    # cuts through the globe. Phase 10NS generalised that from "show the ocean
+    # shell" to "show some spherical surface", which may now be the full planet
+    # mesh rather than the shell. The three-state contract itself is asserted
+    # directly by tests/test_planetary_surface.py.
     assert d["orbit"]["flat"] is False, "orbit mode must hide the flat ocean plane"
-    assert d["orbit"]["globe"] is True, "orbit mode must show the spherical ocean"
+    assert (d["orbit"]["globe"] or d["orbit"]["planet"]) is True, (
+        "orbit mode must show a spherical ocean surface (shell or planet mesh)"
+    )
     assert d["local"]["flat"] is True, "local mode must restore the flat ocean plane"
     assert d["local"]["globe"] is False, "local mode must hide the spherical ocean"
+    assert d["local"]["planet"] is False, (
+        "local mode must hide the planet surface mesh"
+    )
