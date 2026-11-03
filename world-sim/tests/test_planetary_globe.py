@@ -244,7 +244,7 @@ def test_orbit_framing_outgrows_the_flat_distance_ceiling():
     branch = _extract_js_block(
         script,
         'if (mode === "orbit" || selectedPair === "orbit") {',
-        "smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist)",
+        "smoothMoveCamera(orbitDir.multiplyScalar(dist)",
     )
     assert "controls.maxDistance = GLOBE_RADIUS * 5.0;" in branch, (
         "orbit mode must raise controls.maxDistance above the flat 550 ceiling"
@@ -256,12 +256,13 @@ def test_orbit_framing_outgrows_the_flat_distance_ceiling():
     assert "controls.maxDistance = 550;" in _get_prototype_script(), (
         "the local-view distance ceiling must remain 550"
     )
-    # And it must be restored on the way back to a local view.
-    assert "controls.maxDistance = 550;" in branch.replace(
-        "controls.maxDistance = GLOBE_RADIUS * 5.0;", "", 1
-    ) or "controls.maxDistance = 550;" in script.split(
-        "smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist)"
-    )[-1][:1200], "local mode must restore the 550 ceiling"
+    # And it must be restored on the way back to a local view: the flat ceiling
+    # appears at least twice -- the initial declaration and the local restore.
+    ceiling_assignments = script.count("controls.maxDistance = 550;")
+    assert ceiling_assignments >= 2, (
+        "local mode must restore the 550-unit ceiling (found %d assignment%s)"
+        % (ceiling_assignments, "s" if ceiling_assignments != 1 else "")
+    )
 
 
 def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
@@ -276,12 +277,16 @@ def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
         "const GLOBE_RADIUS = 900.0;\n",
         "const flatMaxDistance = 550;\n",
         "const orbitMaxDistance = GLOBE_RADIUS * 5.0;\n",
-        "const dist = GLOBE_RADIUS * 3.1;\n",
+        "const dist = GLOBE_RADIUS * 2.4;\n",
+        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([0.94,0.34,0.16]);\n",
+        "const cam = orbitDir.normalize().multiplyScalar(dist);\n",
         "const far = GLOBE_RADIUS * 8.0;\n",
         "console.log(JSON.stringify({\n",
         "  flatCeiling: flatMaxDistance,\n",
         "  orbitCeiling: orbitMaxDistance,\n",
-        "  framingDist: dist,\n",
+        "  framingDist: dist,\n"
+        "  camX: cam.x,\n"
+        "  camZ: cam.z,\n",
         "  farPlane: far,\n",
         "  clampedByOldCeiling: dist > flatMaxDistance,\n",
         "  allowedByOrbitCeiling: dist <= orbitMaxDistance,\n",
@@ -296,6 +301,10 @@ def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
     )
     assert d["allowedByOrbitCeiling"] is True, (
         "the new orbit ceiling must permit the framing distance"
+    )
+    assert d["camX"] > abs(d["camZ"]), (
+        "the orbit camera must stand off the +x side so both continent patches "
+        "land on the visible hemisphere of the globe"
     )
     assert d["visibleAtFarPlane"] is True, (
         "the globe must sit inside the camera far plane"

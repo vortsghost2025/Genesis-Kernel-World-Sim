@@ -4124,9 +4124,14 @@ function applyCameraMode(mode, immediate = true) {
     }
     camera.fov = 46;
     camera.updateProjectionMatrix();
-    // Stand far enough back that the whole planet sits in frame.
-    const dist = GLOBE_RADIUS * 3.1;
-    smoothMoveCamera(new THREE.Vector3(0, dist * 0.34, dist), new THREE.Vector3(0, 0, 0), immediate);
+    // Frame the planet from the +x side. Both continent patches sit at x = +567
+    // (mirrored in y and z), so a camera looking down +z puts one of them on the
+    // far side of the globe and only one reads. Standing off along +x puts both
+    // patches on the visible hemisphere, straddling the centre of the disc.
+    // 2.4 radii keeps the curvature legible while leaving room for the timeline.
+    const dist = GLOBE_RADIUS * 2.4;
+    const orbitDir = new THREE.Vector3(0.94, 0.34, 0.16).normalize();
+    smoothMoveCamera(orbitDir.multiplyScalar(dist), new THREE.Vector3(0, 0, 0), immediate);
     return;
   }
 
