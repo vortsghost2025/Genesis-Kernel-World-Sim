@@ -131,17 +131,6 @@ STALE_GOAL_AGE_HB: int = 500
 # constant, one predicate, both sides.
 FAUNA_ACTION_REACH: int = 1
 
-# Phase 10OB: how far away an untamed animal is still worth naming. Beyond
-# ACTION reach the agent cannot offer food yet, but the sighting is what made
-# West Eve issue the first offer_food in the simulation's history (hb 9624 and
-# 9697) -- she had intent before she had adjacency. Silencing distant animals
-# wholesale would throw that away, so the affordance keeps two registers:
-# ACTION reach names the action, SIGHT reach only states the fact.
-FAUNA_SIGHT_RADIUS: int = 12
-
-# Phase 10NX legacy alias kept for readability at call sites that talk about
-# the affordance specifically.
-FAUNA_AFFORDANCE_RADIUS: int = FAUNA_SIGHT_RADIUS
 
 # Phase 10NX: leading words that restate intent without changing it. An agent's
 # goals are written in its own voice ("Continue exploring ...") and the same
@@ -1462,7 +1451,6 @@ class FirstPairRuntime:
             recent_action_failures=recent_failures,
             public_build_record=public_build_record,
             visible_public_messages=visible_msgs,
-            fauna_affordance_lines=self._fauna_affordance_lines(agent_ref),
             relevant_human_answers=human_answered,
             selected_private_memories=selected_mems,
             derived_memory_summaries=agent_summaries,
@@ -1848,67 +1836,6 @@ class FirstPairRuntime:
                         item["milk_ready"] = bool(entity.get("milk_ready", False))
                     distant.append(item)
         return {"nearby": nearby, "distant": distant}
-
-    def _fauna_affordance_lines(self, agent_ref: str) -> list[str]:
-        """Phase 10NX: factual lines about untamed animals within reach.
-
-        Both live lanes had a lifetime `offer_food` count of zero, and distance
-        did not explain it -- East's median move step is already 8.9 tiles and
-        West's horse stands 2 tiles from West Adam. What explained it is that
-        nothing in the agent's context mentioned fauna at all, so `offer_food`
-        had no pathway to be chosen.
-
-        These lines state the animal, its distance and its trust. They do NOT
-        instruct the agent to tame anything, do not promise an outcome, and do
-        not create a goal. Standing Rule 7 draws the line at never telling
-        agents what to do; this is a fact of the world in the same class as the
-        resource lines already exposed, and the choice stays the model's.
-        """
-        position = self._world_state.tile_occupancy.get(agent_ref)
-        pos = self._tile_xy(position or "")
-        if pos is None:
-            return []
-        lines: list[str] = []
-        for entity in getattr(self._world_state, "fauna", []) or []:
-            if entity.get("tamed"):
-                continue  # livestock, not an opportunity
-            kind = str(entity.get("kind") or "animal")
-            if kind not in fauna.TAMEABLE_KINDS:
-                continue  # snakes are hazards, not opportunities
-            threshold = (fauna.HORSE_TRUST_THRESHOLD if kind == "horse"
-                         else fauna.COW_TRUST_THRESHOLD)
-            trust = int(entity.get("trust", 0) or 0)
-            if trust >= threshold:
-                continue  # already tameable; not an open opportunity
-            tile = self._entity_xy(entity.get("tile"))
-            if tile is None:
-                continue
-            dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
-            if dist > FAUNA_SIGHT_RADIUS:
-                continue
-            kind = str(entity.get("kind") or "animal")
-            bearing = self._cardinal_bearing(pos, tile)
-
-            if dist <= FAUNA_ACTION_REACH:
-                # Close enough that offer_food can actually land. Say so.
-                lines.append(
-                    "FAUNA ADJACENT: %s %s (trust %d) - untamed; offer_food "
-                    "may raise trust"
-                    % (kind, "on your tile" if dist == 0
-                       else "%d tile%s %s" % (dist, "" if dist == 1 else "s", bearing),
-                       trust)
-                )
-            else:
-                # Too far to act. Name it as a sighting only: the distance is
-                # stated plainly and no action is implied, because offer_food
-                # would be rejected from here. West Eve's first offer_food
-                # attempts came from seeing the horse at range, and intent is
-                # worth keeping -- a false promise of the action is not.
-                lines.append(
-                    "FAUNA SIGHTED: %s %d tiles %s (trust %d) - untamed"
-                    % (kind, dist, bearing, trust)
-                )
-        return lines
 
     def fauna_tick(self, heartbeat_number: int) -> None:
         """One heartbeat of Phase 10JN fauna ecology."""

@@ -1806,13 +1806,6 @@ def build_system_prompt(context: AgentContext) -> str:
         # Fauna (10JN/10JR/10KH): tameable animals, distant horizon sightings, and snakes
         _lines.extend(_format_fauna_lines((context.observation or {}).get("fauna") or {}))
 
-        # Phase 10NX: untamed animals within reach, stated as fact. This exists
-        # because both live lanes had a lifetime offer_food of zero while a cow sat
-        # 9 tiles from East and a horse 2 tiles from West -- the animals were never
-        # in the brief at all, so the action had no pathway. These lines describe;
-        # they never instruct.
-        for line in (getattr(context, "fauna_affordance_lines", None) or []):
-            _lines.append(str(line))
 
         # Permanent continental scale grounding and active embodiment (Phase 10JV/10JX)
         _lines.append(
