@@ -296,9 +296,11 @@ def test_affordance_lines_are_factual_and_non_imperative():
     rt = _fake_runtime()
     rt._world_state = types.SimpleNamespace(
         tile_occupancy={"east_adam": "cont_a_gen_0_0"},
-        fauna=[{"id": "c1", "kind": "cow", "tile": [3, 4], "trust": 0, "tamed": False},
-               {"id": "h1", "kind": "horse", "tile": [-2, 1], "trust": 0, "tamed": False},
-               {"id": "s1", "kind": "snake", "tile": [1, 1], "trust": 0, "tamed": False},
+        # Adjacent-or-same tile is the real action reach; anything farther is a
+        # map fact the action would reject, so it must not be surfaced here.
+        fauna=[{"id": "c1", "kind": "cow", "tile": [1, 1], "trust": 0, "tamed": False},
+               {"id": "h1", "kind": "horse", "tile": [-1, 0], "trust": 0, "tamed": False},
+               {"id": "s1", "kind": "snake", "tile": [0, 1], "trust": 0, "tamed": False},
                {"id": "c2", "kind": "cow", "tile": [40, 40], "trust": 0, "tamed": False},
                {"id": "h2", "kind": "horse", "tile": [1, 1], "trust": 99, "tamed": True}],
     )
@@ -437,3 +439,60 @@ def test_prompt_omits_affordance_when_no_animals_near():
     assert "FAUNA NEARBY" not in prompt, (
         "with no animals in reach the affordance section must be silent"
     )
+
+
+# ---------------------------------------------------------------------------
+# the affordance and the action must agree on reach
+# ---------------------------------------------------------------------------
+
+def test_affordance_radius_matches_the_real_action_reach():
+    """The affordance must never advertise an animal the action would reject.
+
+    Measured in the live lanes: the affordance first carried a 12-tile guess while
+    offer_food requires the animal on an adjacent tile (Chebyshev <= 1), so West
+    Eve spent heartbeats 9624 and 9697 offering food to a horse three tiles away
+    and was rejected twice with "The animal is not within reach". One constant
+    now drives both sides, and this test pins that.
+    """
+    from backend.world import first_pair_runtime as rt_mod
+    import inspect
+
+    src = inspect.getsource(rt_mod)
+
+    assert rt_mod.FAUNA_ACTION_REACH == 1, (
+        "the real action predicate requires adjacency"
+    )
+    assert rt_mod.FAUNA_AFFORDANCE_RADIUS == rt_mod.FAUNA_ACTION_REACH, (
+        "the affordance radius must equal the action reach, not a separate guess"
+    )
+    # and the affordance must actually gate on it
+    assert "> FAUNA_ACTION_REACH" in src, (
+        "the reach predicate must be shared, not duplicated as a literal"
+    )
+    assert "abs(pxy[1] - exy[1])) > 1:" not in src, (
+        "no hardcoded reach check may remain -- that drift is what broke this"
+    )
+
+
+def test_affordance_only_fires_for_an_actionable_animal():
+    """An animal the agent cannot act on must not be surfaced."""
+    from backend.world.first_pair_runtime import FirstPairRuntime
+
+    rt = FirstPairRuntime.__new__(FirstPairRuntime)
+    rt._world_state = types.SimpleNamespace(
+        tile_occupancy={"east_eve": "cont_a_gen_0_0"},
+        fauna=[{"id": "h2", "kind": "horse", "tile": [1, 0], "trust": 0,
+                "tamed": False},           # adjacent: actionable
+               {"id": "h3", "kind": "horse", "tile": [2, 0], "trust": 0,
+                "tamed": False}],          # two tiles: not actionable
+    )
+    rt._tile_xy = lambda tid: (0, 0)
+    rt._entity_xy = lambda tile: (tile[0], tile[1])
+    rt._cardinal_bearing = lambda a, b: "E"
+
+    lines = rt._fauna_affordance_lines("east_eve")
+    assert len(lines) == 1, (
+        "only the adjacent animal may be surfaced; a farther one would be "
+        "rejected, and the affordance exists to produce action, not failed action"
+    )
+    assert "at 1 tiles" in lines[0], lines[0]

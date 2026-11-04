@@ -122,10 +122,18 @@ _DEFAULT_HEARTBEAT_LIMIT = 10
 MAX_ACTIVE_GOALS_EXPOSED: int = 8
 STALE_GOAL_AGE_HB: int = 500
 
-# Phase 10NX: radius (Chebyshev, matching _fauna_visible's metric) within which an
-# untamed animal is surfaced as an affordance. Beyond this the animal is a fact of
-# the map, not an opportunity the agent can act on.
-FAUNA_AFFORDANCE_RADIUS: int = 12
+# Phase 10NX: the distance within which an animal can actually be acted on.
+# offer_food, strike_animal and strike_snake all require the target on an
+# adjacent-or-same tile (Chebyshev <= 1). The fauna affordance uses this same
+# constant so it can never advertise an animal the action would reject -- which
+# is exactly what happened when the affordance carried its own, wider guess and
+# West Eve spent two heartbeats offering food to a horse three tiles away. One
+# constant, one predicate, both sides.
+FAUNA_ACTION_REACH: int = 1
+
+# Phase 10NX legacy alias kept for readability at call sites that talk about
+# the affordance specifically.
+FAUNA_AFFORDANCE_RADIUS: int = FAUNA_ACTION_REACH
 
 # Phase 10NX: leading words that restate intent without changing it. An agent's
 # goals are written in its own voice ("Continue exploring ...") and the same
@@ -2111,7 +2119,7 @@ class FirstPairRuntime:
         if not isinstance(tile, list):
             return {"status": "rejected", "reason": "Animal has no valid location"}
         exy = (int(tile[0]), int(tile[1]))
-        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > FAUNA_ACTION_REACH:
             return {"status": "rejected", "reason": "The animal is not within reach"}
 
         inventory = self._get_agent_inventory(agent_ref)
@@ -2203,7 +2211,7 @@ class FirstPairRuntime:
         if not isinstance(tile, list):
             return {"status": "rejected", "reason": "Cow has no valid location"}
         exy = (int(tile[0]), int(tile[1]))
-        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+        if pxy is None or max(abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > FAUNA_ACTION_REACH:
             return {"status": "rejected", "reason": "The cow is not within reach"}
 
         inventory = self._get_agent_inventory(agent_ref)
@@ -2279,7 +2287,7 @@ class FirstPairRuntime:
             pxy = self._tile_xy(pos)
             exy = self._entity_xy(etile)
             if pxy is None or exy is None or max(
-                    abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+                    abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > FAUNA_ACTION_REACH:
                 return {"status": "rejected",
                         "reason": "The animal is not within reach"}
 
@@ -2331,7 +2339,7 @@ class FirstPairRuntime:
         pxy = self._tile_xy(pos)
         exy = self._entity_xy(etile)
         if pxy is None or exy is None or max(
-                abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > 1:
+                abs(pxy[0] - exy[0]), abs(pxy[1] - exy[1])) > FAUNA_ACTION_REACH:
             return {"status": "rejected", "reason": "The animal is not within reach"}
 
         inventory = load_inventory(self._store).get(agent_ref, {})
