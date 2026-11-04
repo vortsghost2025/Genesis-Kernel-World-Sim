@@ -38,9 +38,14 @@ from backend.world.first_pair_runtime import (  # noqa: E402
     DEFAULT_GATHER_RETIRE_THRESHOLDS,
     MAX_ACTIVE_GOALS_EXPOSED,
     STALE_GOAL_AGE_HB,
+    FAUNA_AFFORDANCE_RADIUS,
     _goal_signature,
     _select_diverse_active_goals,
     goal_should_retire,
+)
+from backend.world.first_pair_cognition_interface import AgentContext  # noqa: E402
+from backend.world.first_pair_cognition_model import (  # noqa: E402
+    build_system_prompt,
 )
 
 
@@ -370,4 +375,65 @@ def test_agent_context_has_the_affordance_field():
     fields = {f for f in AgentContext.__dataclass_fields__}
     assert "fauna_affordance_lines" in fields, (
         "AgentContext must carry the fauna affordance lines"
+    )
+
+
+def test_fauna_affordance_actually_reaches_the_rendered_prompt():
+    """The line must appear in the prompt the model is handed, not just the context.
+
+    This test exists because the first attempt at verification built the prompt
+    with `observation={}` and the affordance was absent -- not because the wiring
+    was broken, but because the entire body/fact/fauna block of build_system_prompt
+    is gated behind `if _sb:` where `_sb = observation['self_body']`. A context
+    without that payload silently skips the whole section, so a minimal context
+    proves nothing. Assert against a context that carries it.
+    """
+    line = ("FAUNA NEARBY: cow at 5 tiles SW (trust 0) - untamed; "
+            "offer_food may raise trust")
+
+    prompt = build_system_prompt(
+        AgentContext(
+            agent_id="a", canonical_name="Eve", canonical_ref="east_eve",
+            heartbeat_number=1, position="cont_a_gen_-6_-5",
+            observation={
+                "self_body": {"vitality": 100, "hunger": 50, "warmth": 50},
+                "environment": {"season": "Spring", "weather": "clear"},
+            },
+            memory=[], goals=[], unanswered_questions=[], world_public_objects={},
+            habitat_allowed_tiles=[], habitat_movement_allowed=True,
+            previous_action=None, timestamp_utc="",
+            fauna_affordance_lines=[line],
+        )
+    )
+
+    assert "--- YOUR BODY" in prompt, (
+        "a context carrying self_body must render the body section; without it "
+        "the affordance (and every other stated fact) is silently dropped"
+    )
+    assert line in prompt, (
+        "the fauna affordance must appear in the rendered prompt, not merely in "
+        "the AgentContext dataclass"
+    )
+    low = prompt.lower()
+    assert "you should" not in low or "untamed; offer_food may raise trust" in low, (
+        "the affordance must not read as an instruction"
+    )
+
+
+def test_prompt_omits_affordance_when_no_animals_near():
+    """An empty affordance list must add nothing."""
+    prompt = build_system_prompt(
+        AgentContext(
+            agent_id="a", canonical_name="Eve", canonical_ref="east_eve",
+            heartbeat_number=1, position="cont_a_gen_-6_-5",
+            observation={"self_body": {"vitality": 100},
+                         "environment": {"season": "Spring"}},
+            memory=[], goals=[], unanswered_questions=[], world_public_objects={},
+            habitat_allowed_tiles=[], habitat_movement_allowed=True,
+            previous_action=None, timestamp_utc="",
+            fauna_affordance_lines=[],
+        )
+    )
+    assert "FAUNA NEARBY" not in prompt, (
+        "with no animals in reach the affordance section must be silent"
     )
