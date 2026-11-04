@@ -131,9 +131,17 @@ STALE_GOAL_AGE_HB: int = 500
 # constant, one predicate, both sides.
 FAUNA_ACTION_REACH: int = 1
 
+# Phase 10OB: how far away an untamed animal is still worth naming. Beyond
+# ACTION reach the agent cannot offer food yet, but the sighting is what made
+# West Eve issue the first offer_food in the simulation's history (hb 9624 and
+# 9697) -- she had intent before she had adjacency. Silencing distant animals
+# wholesale would throw that away, so the affordance keeps two registers:
+# ACTION reach names the action, SIGHT reach only states the fact.
+FAUNA_SIGHT_RADIUS: int = 12
+
 # Phase 10NX legacy alias kept for readability at call sites that talk about
 # the affordance specifically.
-FAUNA_AFFORDANCE_RADIUS: int = FAUNA_ACTION_REACH
+FAUNA_AFFORDANCE_RADIUS: int = FAUNA_SIGHT_RADIUS
 
 # Phase 10NX: leading words that restate intent without changing it. An agent's
 # goals are written in its own voice ("Continue exploring ...") and the same
@@ -1876,14 +1884,30 @@ class FirstPairRuntime:
             if tile is None:
                 continue
             dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
-            if dist > FAUNA_AFFORDANCE_RADIUS:
+            if dist > FAUNA_SIGHT_RADIUS:
                 continue
             kind = str(entity.get("kind") or "animal")
             bearing = self._cardinal_bearing(pos, tile)
-            lines.append(
-                "FAUNA NEARBY: %s at %d tiles %s (trust %d) - untamed; "
-                "offer_food may raise trust" % (kind, dist, bearing, trust)
-            )
+
+            if dist <= FAUNA_ACTION_REACH:
+                # Close enough that offer_food can actually land. Say so.
+                lines.append(
+                    "FAUNA ADJACENT: %s %s (trust %d) - untamed; offer_food "
+                    "may raise trust"
+                    % (kind, "on your tile" if dist == 0
+                       else "%d tile%s %s" % (dist, "" if dist == 1 else "s", bearing),
+                       trust)
+                )
+            else:
+                # Too far to act. Name it as a sighting only: the distance is
+                # stated plainly and no action is implied, because offer_food
+                # would be rejected from here. West Eve's first offer_food
+                # attempts came from seeing the horse at range, and intent is
+                # worth keeping -- a false promise of the action is not.
+                lines.append(
+                    "FAUNA SIGHTED: %s %d tiles %s (trust %d) - untamed"
+                    % (kind, dist, bearing, trust)
+                )
         return lines
 
     def fauna_tick(self, heartbeat_number: int) -> None:

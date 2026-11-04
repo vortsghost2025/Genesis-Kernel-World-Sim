@@ -311,10 +311,11 @@ def test_affordance_lines_are_factual_and_non_imperative():
     lines = rt._fauna_affordance_lines("east_adam")
 
     assert len(lines) == 2, (
-        "only untamed, tameable, in-radius fauna may be surfaced; got %r" % lines
+        "only untamed, tameable fauna within sight radius may be surfaced; got %r"
+        % lines
     )
     for line in lines:
-        assert line.startswith("FAUNA NEARBY: "), line
+        assert line.startswith(("FAUNA ADJACENT: ", "FAUNA SIGHTED: ")), line
         assert "trust" in line, "the line must state the animal's trust"
         low = line.lower()
         for imperative in ("you should", "must", "go to", "tame it", "approach",
@@ -462,8 +463,14 @@ def test_affordance_radius_matches_the_real_action_reach():
     assert rt_mod.FAUNA_ACTION_REACH == 1, (
         "the real action predicate requires adjacency"
     )
-    assert rt_mod.FAUNA_AFFORDANCE_RADIUS == rt_mod.FAUNA_ACTION_REACH, (
-        "the affordance radius must equal the action reach, not a separate guess"
+    assert rt_mod.FAUNA_SIGHT_RADIUS > rt_mod.FAUNA_ACTION_REACH, (
+        "the sighting radius must exceed the action reach so distant sightings "
+        "still reach the agent -- otherwise the affordance goes silent and the "
+        "intent it produced (West Eve's first-ever offer_food) is discarded"
+    )
+    assert rt_mod.FAUNA_AFFORDANCE_RADIUS == rt_mod.FAUNA_SIGHT_RADIUS, (
+        "the affordance radius is the sighting radius, and the actionable "
+        "distance is the action reach -- both derive from named constants"
     )
     # and the affordance must actually gate on it
     assert "> FAUNA_ACTION_REACH" in src, (
@@ -491,8 +498,54 @@ def test_affordance_only_fires_for_an_actionable_animal():
     rt._cardinal_bearing = lambda a, b: "E"
 
     lines = rt._fauna_affordance_lines("east_eve")
-    assert len(lines) == 1, (
-        "only the adjacent animal may be surfaced; a farther one would be "
-        "rejected, and the affordance exists to produce action, not failed action"
+    assert len(lines) == 2, lines
+    adjacent = [l for l in lines if l.startswith("FAUNA ADJACENT: ")]
+    sighted = [l for l in lines if l.startswith("FAUNA SIGHTED: ")]
+    assert len(adjacent) == 1 and len(sighted) == 1, lines
+    assert "offer_food may raise trust" in adjacent[0], (
+        "the actionable animal must state what offer_food does"
     )
-    assert "at 1 tiles" in lines[0], lines[0]
+    assert "offer_food" not in sighted[0], (
+        "the distant sighting must not claim an action the runtime will reject"
+    )
+
+
+def test_sighting_at_range_states_fact_without_implying_the_action():
+    """A distant animal is named, but never with a promise offer_food would break.
+
+    West Eve's first-ever offer_food actions came from seeing the horse at
+    range, so distant sightings must stay. What made them operationally wrong
+    was the trailing 'offer_food may raise trust' at 3 tiles, where the runtime
+    rejects it. The fix is two registers, not silence.
+    """
+    from backend.world.first_pair_runtime import FirstPairRuntime
+
+    rt = FirstPairRuntime.__new__(FirstPairRuntime)
+    rt._world_state = types.SimpleNamespace(
+        tile_occupancy={"east_eve": "cont_a_gen_0_0"},
+        fauna=[{"id": "h1", "kind": "horse", "tile": [3, 0], "trust": 0,
+                "tamed": False}],
+    )
+    rt._tile_xy = lambda tid: (0, 0)
+    rt._entity_xy = lambda tile: (tile[0], tile[1])
+    rt._cardinal_bearing = lambda a, b: "E"
+
+    lines = rt._fauna_affordance_lines("east_eve")
+    assert len(lines) == 1, lines
+    line = lines[0]
+    assert line.startswith("FAUNA SIGHTED:"), line
+    assert "3 tiles" in line, "the distance must be stated plainly"
+    assert "offer_food" not in line, (
+        "a distant sighting must not claim an action the runtime will reject"
+    )
+
+
+def test_sighting_and_action_registers_are_distinct():
+    from backend.world import first_pair_runtime as rt_mod
+
+    assert rt_mod.FAUNA_ACTION_REACH == 1
+    assert rt_mod.FAUNA_SIGHT_RADIUS == 12
+    assert rt_mod.FAUNA_SIGHT_RADIUS > rt_mod.FAUNA_ACTION_REACH, (
+        "the sighting radius must be wider than the action reach, or the "
+        "affordance goes silent and the intent it produced is lost"
+    )
