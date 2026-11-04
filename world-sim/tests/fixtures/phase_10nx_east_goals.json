@@ -1,0 +1,244 @@
+{
+ "heartbeat_number": 8112,
+ "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+ "goals": [
+  {
+   "goal_id": "explore-uncharted_hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7974,
+   "description": "Continue exploring hill terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_new-tiles",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7555,
+   "description": "Continue exploring hill and grassland terrain, moving toward public-shared-center for coordination with Eve",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted_forest",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7524,
+   "description": "Move to cont_a_north_000 to gather wood and wild_berries for shelter and continue joint exploration with Eve.",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted-hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7380,
+   "description": "Continue exploring hill and grassland terrain, gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered_hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7241,
+   "description": "Continue exploring hill terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered-hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 7048,
+   "description": "Continue joint exploration of hill and grassland terrain, moving toward public-shared-center for coordination with Eve",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted-hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6930,
+   "description": "Continue exploring hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_unchartered_hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6856,
+   "description": "Continue joint exploration of hill and grassland terrain, moving toward public-shared-center for coordination with Eve",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_unchartered-hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6817,
+   "description": "Continue exploring hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted_hill_grassland",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6806,
+   "description": "Continue exploring hill terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted-terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6726,
+   "description": "Continue exploring grassland and hill terrain, gather resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted-terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6711,
+   "description": "continue exploring grassland and gather wood and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered-terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6658,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered_terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6629,
+   "description": "Continue joint exploration of hill and grassland terrain, moving toward public-shared-center for coordination with Eve",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_unchartered_terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6624,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted_terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6620,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted_terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6619,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_unchartered-terrain",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6617,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted_forest",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 6212,
+   "description": "Continue exploring forest tile to gather wood and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted-terrains",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 5400,
+   "description": "continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted_terrains",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 5398,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_unchartered-terrains",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 5389,
+   "description": "continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered-terrains",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 5381,
+   "description": "Continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted-terrains",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 5359,
+   "description": "continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered-territories",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 4779,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-unchartered-tiles",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 4777,
+   "description": "Continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted_territories",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 4522,
+   "description": "Continue exploring uncharted hill and grassland terrain and gather stone and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore_uncharted_territories",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 4479,
+   "description": "Continue exploring uncharted terrain and gathering resources",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted-tiles",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 3929,
+   "description": "Continue exploring new terrain tiles and gathering resources, starting with grassland tile cont_a_north_001",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "goal-eve-017",
+   "agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+   "created_heartbeat": 2625,
+   "description": "continue systematic survey of western hill cluster tile by tile along the y=-5 boundary",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "goal-eve-014",
+   "agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+   "created_heartbeat": 2490,
+   "description": "Continue systematic survey of western hill cluster tile by tile along the y=-5 boundary",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "goal-eve-011",
+   "agent_id": "genesis-agent-9c37c102cc309769f5c1a4011cf45d629942d9dfd8832dc1ef4079bf593f211a",
+   "created_heartbeat": 2297,
+   "description": "Continue systematic survey of western hill cluster tile by tile along the y=-5 boundary",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-uncharted-territories",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 1025,
+   "description": "Continue exploring uncharted forest tile to gather wood and wild_berries",
+   "status": "in_progress"
+  },
+  {
+   "goal_id": "explore-new-tiles",
+   "agent_id": "genesis-agent-4327298502de9566131e81212dd3b383666b6f18bc887d8508ab3a059e73f34e",
+   "created_heartbeat": 66,
+   "description": "Continue exploring uncharted tiles and gathering resources",
+   "status": "in_progress"
+  }
+ ]
+}

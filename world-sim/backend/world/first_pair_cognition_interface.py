@@ -84,6 +84,9 @@ class AgentContext:
     # heartbeat, structurally outside the selection/summarization pipeline.
     charter_text: str = ""
     charter_heartbeat: int = 0
+    # Phase 10NX: factual lines about untamed animals within reach. States kind,
+    # distance, bearing and trust; instructs nothing and promises nothing.
+    fauna_affordance_lines: list = field(default_factory=list)
     # Continuity ("what am I in the middle of"): the agent's own piggyback
     # metadata, rendered verbatim with ages. Outside selection like the
     # charter; mid-turn will, not forever-identity.

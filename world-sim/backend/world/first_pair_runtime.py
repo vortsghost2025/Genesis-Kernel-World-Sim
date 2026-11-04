@@ -121,6 +121,199 @@ from backend.world.mystery_reveal import (
 _DEFAULT_HEARTBEAT_LIMIT = 10
 MAX_ACTIVE_GOALS_EXPOSED: int = 8
 STALE_GOAL_AGE_HB: int = 500
+
+# Phase 10NX: radius (Chebyshev, matching _fauna_visible's metric) within which an
+# untamed animal is surfaced as an affordance. Beyond this the animal is a fact of
+# the map, not an opportunity the agent can act on.
+FAUNA_AFFORDANCE_RADIUS: int = 12
+
+# Phase 10NX: leading words that restate intent without changing it. An agent's
+# goals are written in its own voice ("Continue exploring ...") and the same
+# purpose reappears as "Explore ...", "Please continue to explore ...". Stripping
+# these is what lets restatements collapse.
+def _stem_token(token: str) -> str:
+    """Reduce a content token to a comparable root (no external stemmer)."""
+    if len(token) <= 3:
+        return token
+    for suffix in ("ing", "ed", "es", "s"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            stem = token[: -len(suffix)]
+            # "gathering" -> "gather", "exploring" -> "explor", "explores" -> "explor"
+            if suffix in ("ing", "ed") and stem.endswith("i"):
+                stem = stem[:-1]
+            # "explore" and "exploring" must converge on the same root.
+            if stem.endswith("e") and len(stem) > 4:
+                stem = stem[:-1]
+            return stem
+    if token.endswith("e") and len(token) > 4:
+        return token[:-1]
+    return token
+
+
+def _goal_created(g) -> int:
+    """created_heartbeat from a GoalRecord or a plain dict."""
+    v = getattr(g, "created_heartbeat", None)
+    if v is None and isinstance(g, dict):
+        v = g.get("created_heartbeat")
+    return v or 0
+
+
+def _goal_description(g) -> str:
+    """description from a GoalRecord or a plain dict."""
+    d = getattr(g, "description", None)
+    if d is None and isinstance(g, dict):
+        d = g.get("description")
+    return d or ""
+
+
+_RESTATEMENT_PREFIXES = (
+    "please",
+    "continue",
+    "continues",
+    "continuing",
+    "keep",
+    "keeps",
+    "keeping",
+    "begin",
+    "begins",
+    "beginning",
+    "start",
+    "starts",
+    "starting",
+    "proceed",
+    "proceeds",
+    "proceeding",
+    "resume",
+    "resumes",
+    "resuming",
+    "restart",
+    "restarts",
+    "restarting",
+    "attempt",
+    "attempts",
+    "attempting",
+)
+
+
+def _goal_signature(description: str) -> frozenset[str]:
+    """Order-insensitive content signature for restatement detection.
+
+    Phase 10NX. The live East lane carried 34 in_progress goals, several of which
+    were the same purpose written slightly differently ("Continue exploring hill
+    and grassland terrain, gather stone" vs "Continue exploring hill terrain and
+    gather stone and wild_berries"). Exact-string dedup could not collapse them,
+    so they accumulated and filled the model's 8-slot context window with eight
+    copies of one intent.
+
+    The signature is a frozenset of content tokens, so word order, punctuation,
+    leading imperative verbs and connector filler all stop mattering.
+    """
+    text = (description or "").strip().lower()
+    # Punctuation becomes spaces: "exploring, and gathering" == "exploring and gathering".
+    text = re.sub(r"[^a-z0-9\s]+", " ", text)
+    tokens = text.split()
+
+    # Strip leading restatement prefixes on the RAW tokens. This must happen
+    # before stemming: stemming turns "continue" into "continu", which no longer
+    # matches the prefix table and would survive as a bogus content token.
+    changed = True
+    while changed:
+        changed = False
+        if tokens and tokens[0] in _RESTATEMENT_PREFIXES:
+            tokens = tokens[1:]
+            changed = True
+        if tokens and tokens[0] in ("to", "for", "with", "the", "a", "an", "and"):
+            tokens = tokens[1:]
+            changed = True
+
+    tokens = [_stem_token(t) for t in tokens]
+
+    stop = {"the", "and", "for", "with", "from", "into", "that", "this", "then",
+            "our", "all", "near", "area", "towards", "toward"}
+    kept = [t for t in tokens if t not in stop and len(t) > 2]
+    return frozenset(kept)
+
+
+def _is_tile_scoped_goal(description: str) -> bool:
+    """True when a goal names specific tiles, which makes it precise."""
+    return bool(re.findall(r"cont_[a-z0-9_\-]+", description or ""))
+
+
+def _is_operator_standby_goal(description: str) -> bool:
+    """True when a goal is waiting on the operator rather than on the world."""
+    d = (description or "").lower()
+    return any(k in d for k in ("await operator", "awaiting operator",
+                                "waiting for operator", "await final confirmation"))
+
+
+def goal_should_retire(
+    goal,
+    sibling_goals: list,
+    heartbeat_number: int,
+    known_tiles: set,
+    inventory: dict,
+    has_pending_question: bool,
+) -> bool:
+    """Phase 10NX Rule 4: retire aged restatements and dead operator standbys.
+
+    Retires only when ALL hold:
+      * age exceeds STALE_GOAL_AGE_HB (young goals are never touched);
+      * the goal is a restatement -- an earlier sibling shares its signature;
+      * it is NOT the newest goal of that signature, so the live intent survives;
+      * it names no specific tiles (Rule 1 still owns those);
+    or:
+      * it is an unmatched operator-standby goal, aged past STALE_GOAL_AGE_HB,
+        with no open question pending (a pending question is the legitimate path
+        to the operator and must not be closed by goal retirement).
+
+    The newest-restatement rule is what preserves the compound-goal case that Rule
+    2's own documentation warns about: "explore and gather stone" cannot lose its
+    exploration half, because the newest statement of that purpose always stays.
+    """
+    desc = _goal_description(goal)
+    created = _goal_created(goal)
+    age = heartbeat_number - created
+
+    if age <= STALE_GOAL_AGE_HB:
+        return False
+
+    if _is_operator_standby_goal(desc):
+        return not has_pending_question
+
+    if _is_tile_scoped_goal(desc):
+        return False
+
+    mine = _goal_signature(desc)
+    peers = [g for g in sibling_goals if _goal_signature(_goal_description(g)) == mine]
+    if len(peers) <= 1:
+        # A unique goal is not a restatement.
+        return False
+
+    # Retire only when a NEWER peer exists: this goal is a stale restatement of
+    # an intent the agent has stated more recently, so it has been superseded.
+    return any(_goal_created(g) > created for g in peers)
+
+
+def _select_diverse_active_goals(active_goals: list, now_hb: int | None = None) -> list:
+    """Phase 10NX: expose one goal per signature instead of the last MAX.
+
+    The old slice took the last MAX_ACTIVE_GOALS_EXPOSED goals verbatim. Because
+    accumulation is chronological and dominated by restatements, that window was
+    always eight copies of the newest intent, so the model read a menu with one
+    item. This takes the newest goal of each signature, preserving chronological
+    order, so the window shows up to MAX distinct intents at the same budget.
+    """
+    newest_by_signature: dict[frozenset[str], object] = {}
+    for g in active_goals:
+        sig = _goal_signature(_goal_description(g))
+        prev = newest_by_signature.get(sig)
+        if prev is None or _goal_created(g) > _goal_created(prev):
+            newest_by_signature[sig] = g
+
+    chosen = sorted(newest_by_signature.values(), key=_goal_created)
+    return chosen[-MAX_ACTIVE_GOALS_EXPOSED:]
+
+
 DEFAULT_GATHER_RETIRE_THRESHOLDS: dict[str, int] = {
     "stone": 20,
     "wild_berries": 20,
@@ -621,6 +814,31 @@ class FirstPairRuntime:
                 if heartbeat_number - created_hb >= STALE_GOAL_AGE_HB:
                     should_retire = True
 
+            # Rule 4 (Phase 10NX): aged restatements and dead operator standbys.
+            #
+            # Rules 1-3 could not touch the live East population: Rule 1 needs a
+            # cont_ tile id (33 of 34 goals had none), Rule 2 is deliberately
+            # blind to compound goals, and Rule 3 only matches "test whether".
+            # The result was a goal older than the first shelter in the world,
+            # still in_progress. Rule 4 retires aged goals that merely restate a
+            # newer live goal, always keeping the newest of each signature.
+            if not should_retire:
+                try:
+                    if goal_should_retire(
+                        g,
+                        [x for x in self._goals
+                         if x.agent_id == agent_id
+                         and getattr(x, "status", "") in ("active", "in_progress")],
+                        heartbeat_number,
+                        known_tiles,
+                        inv,
+                        False,
+                    ):
+                        should_retire = True
+                except Exception:
+                    # Goal hygiene must never block the heartbeat.
+                    pass
+
             if should_retire:
                 g.status = "retired"
                 retired.append(g)
@@ -703,7 +921,17 @@ class FirstPairRuntime:
             if desc_norm not in seen_descs:
                 seen_descs.add(desc_norm)
                 deduped_rev.append(g)
-        agent_goals = list(reversed(deduped_rev))[-MAX_ACTIVE_GOALS_EXPOSED:]
+        # Phase 10NX: dedup by intent signature, not by exact string.
+        #
+        # The recency slice below used to be fed a list that was only
+        # exact-string deduped, so restatements survived and the last eight EXPOSED
+        # goals were eight copies of one intent -- the live East agent was handed
+        # "continue systematic survey ... along the y=-5 boundary" every heartbeat
+        # and logged 435 moves in 250 heartbeats. One goal per signature keeps the
+        # same 8-slot budget while showing up to eight distinct intents.
+        agent_goals = _select_diverse_active_goals(
+            list(reversed(deduped_rev)), heartbeat_number
+        )
         agent_pending_questions = [
             q
             for q in self._questions
@@ -1218,6 +1446,7 @@ class FirstPairRuntime:
             recent_action_failures=recent_failures,
             public_build_record=public_build_record,
             visible_public_messages=visible_msgs,
+            fauna_affordance_lines=self._fauna_affordance_lines(agent_ref),
             relevant_human_answers=human_answered,
             selected_private_memories=selected_mems,
             derived_memory_summaries=agent_summaries,
@@ -1603,6 +1832,51 @@ class FirstPairRuntime:
                         item["milk_ready"] = bool(entity.get("milk_ready", False))
                     distant.append(item)
         return {"nearby": nearby, "distant": distant}
+
+    def _fauna_affordance_lines(self, agent_ref: str) -> list[str]:
+        """Phase 10NX: factual lines about untamed animals within reach.
+
+        Both live lanes had a lifetime `offer_food` count of zero, and distance
+        did not explain it -- East's median move step is already 8.9 tiles and
+        West's horse stands 2 tiles from West Adam. What explained it is that
+        nothing in the agent's context mentioned fauna at all, so `offer_food`
+        had no pathway to be chosen.
+
+        These lines state the animal, its distance and its trust. They do NOT
+        instruct the agent to tame anything, do not promise an outcome, and do
+        not create a goal. Standing Rule 7 draws the line at never telling
+        agents what to do; this is a fact of the world in the same class as the
+        resource lines already exposed, and the choice stays the model's.
+        """
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        pos = self._tile_xy(position or "")
+        if pos is None:
+            return []
+        lines: list[str] = []
+        for entity in getattr(self._world_state, "fauna", []) or []:
+            if entity.get("tamed"):
+                continue  # livestock, not an opportunity
+            kind = str(entity.get("kind") or "animal")
+            if kind not in fauna.TAMEABLE_KINDS:
+                continue  # snakes are hazards, not opportunities
+            threshold = (fauna.HORSE_TRUST_THRESHOLD if kind == "horse"
+                         else fauna.COW_TRUST_THRESHOLD)
+            trust = int(entity.get("trust", 0) or 0)
+            if trust >= threshold:
+                continue  # already tameable; not an open opportunity
+            tile = self._entity_xy(entity.get("tile"))
+            if tile is None:
+                continue
+            dist = max(abs(tile[0] - pos[0]), abs(tile[1] - pos[1]))
+            if dist > FAUNA_AFFORDANCE_RADIUS:
+                continue
+            kind = str(entity.get("kind") or "animal")
+            bearing = self._cardinal_bearing(pos, tile)
+            lines.append(
+                "FAUNA NEARBY: %s at %d tiles %s (trust %d) - untamed; "
+                "offer_food may raise trust" % (kind, dist, bearing, trust)
+            )
+        return lines
 
     def fauna_tick(self, heartbeat_number: int) -> None:
         """One heartbeat of Phase 10JN fauna ecology."""
