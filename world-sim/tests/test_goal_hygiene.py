@@ -1,8 +1,13 @@
-"""Phase 10JR: Cognitive Goal Hygiene tests.
+"""Phase 10JR goal-hygiene tests, updated to the Phase 10NX contract.
 
-Verifies that FirstPairRuntime._build_context() filters goals by status
-in ("active", "in_progress"), caps exposed active goals to MAX_ACTIVE_GOALS_EXPOSED (8),
-and that active_goal_ids recognizes in_progress goals.
+10JR verified that FirstPairRuntime._build_context() filters goals by status
+in ("active", "in_progress") and caps exposed active goals to
+MAX_ACTIVE_GOALS_EXPOSED (8). 10NX changed the cap semantics on purpose:
+the window is now one goal per intent SIGNATURE (newest of each), so eight
+restatements of one intent no longer fill all eight slots. These tests keep
+the 10JR intent (status filtering, 8-slot cap, in_progress recognition)
+with genuinely distinct goal descriptions, and add the 10NX restatement
+collapse case that the old verbatim-slice tests could not express.
 """
 
 from __future__ import annotations
@@ -22,6 +27,23 @@ from backend.world.first_pair_runtime import (
     FirstPairRuntime,
     MAX_ACTIVE_GOALS_EXPOSED,
 )
+
+# Distinct intents: different content tokens survive _goal_signature's
+# stopword/stem filter, so each of these is its own signature.
+DISTINCT_INTENTS = [
+    "Gather stone from the ridge",
+    "Gather wood near the creek",
+    "Survey the northern hills",
+    "Build a stone cache",
+    "Milk the goat at dawn",
+    "Explore the eastern valley",
+    "Craft a stone axe",
+    "Cook wild berries over the fire",
+    "Map the river bend",
+    "Sharpen flint tools",
+    "Repair the hut roof",
+    "Stockpile clay for pottery",
+]
 
 
 def _runtime_with_goals(tmp_path: Path, goals: list[GoalRecord]) -> tuple[FirstPairRuntime, str]:
@@ -43,16 +65,16 @@ def _runtime_with_goals(tmp_path: Path, goals: list[GoalRecord]) -> tuple[FirstP
 
 def test_build_context_filters_inactive_goals(tmp_path: Path):
     goals = [
-        GoalRecord("g-act-1", "", "Active goal 1", "active", 1),
-        GoalRecord("g-inp-1", "", "In progress goal 1", "in_progress", 2),
-        GoalRecord("g-act-2", "", "Active goal 2", "active", 3),
-        GoalRecord("g-inp-2", "", "In progress goal 2", "in_progress", 4),
-        GoalRecord("g-comp-1", "", "Completed goal 1", "completed", 5),
-        GoalRecord("g-comp-2", "", "Completed goal 2", "completed", 6),
-        GoalRecord("g-comp-3", "", "Completed goal 3", "completed", 7),
-        GoalRecord("g-ret-1", "", "Retired goal 1", "retired", 8),
-        GoalRecord("g-ret-2", "", "Retired goal 2", "retired", 9),
-        GoalRecord("g-ab-1", "", "Abandoned goal 1", "abandoned", 10),
+        GoalRecord("g-act-1", "", DISTINCT_INTENTS[0], "active", 1),
+        GoalRecord("g-inp-1", "", DISTINCT_INTENTS[1], "in_progress", 2),
+        GoalRecord("g-act-2", "", DISTINCT_INTENTS[2], "active", 3),
+        GoalRecord("g-inp-2", "", DISTINCT_INTENTS[3], "in_progress", 4),
+        GoalRecord("g-comp-1", "", "Completed goal one", "completed", 5),
+        GoalRecord("g-comp-2", "", "Completed goal two", "completed", 6),
+        GoalRecord("g-comp-3", "", "Completed goal three", "completed", 7),
+        GoalRecord("g-ret-1", "", "Retired goal one", "retired", 8),
+        GoalRecord("g-ret-2", "", "Retired goal two", "retired", 9),
+        GoalRecord("g-ab-1", "", "Abandoned goal one", "abandoned", 10),
     ]
     runtime, agent_id = _runtime_with_goals(tmp_path, goals)
     ctx = runtime._build_context("east_adam", 11)
@@ -67,7 +89,7 @@ def test_build_context_filters_inactive_goals(tmp_path: Path):
 def test_build_context_preserves_most_recent_active_goals(tmp_path: Path):
     assert MAX_ACTIVE_GOALS_EXPOSED == 8
     goals = [
-        GoalRecord(f"g-{i:02d}", "", f"Goal {i}", "in_progress", i)
+        GoalRecord(f"g-{i:02d}", "", DISTINCT_INTENTS[i - 1], "in_progress", i)
         for i in range(1, 13)
     ]
     runtime, agent_id = _runtime_with_goals(tmp_path, goals)
@@ -81,7 +103,7 @@ def test_build_context_preserves_most_recent_active_goals(tmp_path: Path):
 
 def test_active_goal_ids_recognizes_in_progress_status(tmp_path: Path):
     goals = [
-        GoalRecord(f"g-inp-{i}", "", f"In progress {i}", "in_progress", i)
+        GoalRecord(f"g-inp-{i}", "", DISTINCT_INTENTS[i - 1], "in_progress", i)
         for i in range(1, 6)
     ]
     runtime, agent_id = _runtime_with_goals(tmp_path, goals)
@@ -90,3 +112,19 @@ def test_active_goal_ids_recognizes_in_progress_status(tmp_path: Path):
     # All 5 in-progress goals must be exposed in ctx.goals
     exposed_ids = {g["goal_id"] for g in ctx.goals}
     assert exposed_ids == {f"g-inp-{i}" for i in range(1, 6)}
+
+
+def test_build_context_collapses_restatements_to_newest_per_signature(tmp_path: Path):
+    """Phase 10NX: same intent written differently fills ONE slot, not eight."""
+    goals = [
+        GoalRecord("g-old-1", "", "Continue exploring hill and grassland terrain", "in_progress", 1),
+        GoalRecord("g-old-2", "", "Keep exploring hill terrain and grassland", "in_progress", 2),
+        GoalRecord("g-new", "", "Continuing exploring hill terrain and grassland", "in_progress", 3),
+        GoalRecord("g-other", "", "Gather wood near the creek", "active", 4),
+    ]
+    runtime, agent_id = _runtime_with_goals(tmp_path, goals)
+    ctx = runtime._build_context("east_adam", 5)
+
+    exposed_ids = {g["goal_id"] for g in ctx.goals}
+    # The three restatements share one signature; only the newest survives.
+    assert exposed_ids == {"g-new", "g-other"}
