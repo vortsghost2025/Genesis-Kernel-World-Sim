@@ -277,8 +277,8 @@ def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
         "const GLOBE_RADIUS = 900.0;\n",
         "const flatMaxDistance = 550;\n",
         "const orbitMaxDistance = GLOBE_RADIUS * 5.0;\n",
-        "const dist = GLOBE_RADIUS * 3.2;\n",
-        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([0.88,0.42,0.22]);\n",
+        "const dist = GLOBE_RADIUS * 4.5;\n",
+        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([1.0,0.15,0.0]);\n",
         "const cam = orbitDir.normalize().multiplyScalar(dist);\n",
         "const far = GLOBE_RADIUS * 8.0;\n",
         "console.log(JSON.stringify({\n",
@@ -312,6 +312,70 @@ def test_orbit_framing_reaches_beyond_the_flat_ceiling_at_runtime():
     assert d["orbitCeiling"] == 4500.0 and d["farPlane"] == 7200.0, (
         "orbit ceiling and far plane must derive from GLOBE_RADIUS"
     )
+
+
+def test_orbit_framing_keeps_both_continents_on_screen_at_narrow_aspect():
+    """Phase 10OO: both canonical patches must stay inside the viewport.
+
+    Regression test for the defect where the default orbit framing
+    (orbitDir [0.88,0.42,0.22] at 3.2 radii) put cont_a ~59 deg off the camera
+    axis. NDC x scales with 1/aspect, so on any canvas narrower than ~1000 px
+    cont_a slid past the right screen edge and the globe read as ONE continent.
+    This projects both patch centres with the real constants at the narrow
+    aspect of a 900x800 window and asserts both land well inside the disc.
+    """
+    script = _get_prototype_script()
+
+    js = "".join([
+        "const GLOBE_RADIUS = 900.0;\n",
+        "const GLOBE_PATCHES = { cont_a: { lon: -0.85, lat: 0.30 }, cont_b: { lon: 0.85, lat: -0.30 } };\n",
+        "const dist = GLOBE_RADIUS * 4.5;\n",
+        "const orbitDir = new (function(v){this.x=v[0];this.y=v[1];this.z=v[2];var m=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);this.multiplyScalar=function(s){this.x*=s;this.y*=s;this.z*=s;return this;};this.normalize=function(){var m2=Math.sqrt(this.x*this.x+this.y*this.y+this.z*this.z);this.x/=m2;this.y/=m2;this.z/=m2;return this;};})([1.0,0.15,0.0]).normalize();\n",
+        "const cam = orbitDir.multiplyScalar(dist);\n",
+        "const fov = 46;\n",
+        "function project(lon, lat, aspect) {\n",
+        "  const r = GLOBE_RADIUS + 10;\n",
+        "  const cLat = Math.cos(lat);\n",
+        "  const p = [r * cLat * Math.cos(lon), r * Math.sin(lat), r * cLat * Math.sin(lon)];\n",
+        "  const f = [-cam.x, -cam.y, -cam.z];\n",
+        "  const fl = Math.hypot(f[0], f[1], f[2]);\n",
+        "  const fwd = [f[0]/fl, f[1]/fl, f[2]/fl];\n",
+        "  let right = [fwd[1]*0 - fwd[2]*1, fwd[2]*0 - fwd[0]*0, fwd[0]*1 - fwd[1]*0];\n",
+        "  const rl = Math.hypot(right[0], right[1], right[2]);\n",
+        "  right = [right[0]/rl, right[1]/rl, right[2]/rl];\n",
+        "  const up = [right[1]*fwd[2]-right[2]*fwd[1], right[2]*fwd[0]-right[0]*fwd[2], right[0]*fwd[1]-right[1]*fwd[0]];\n",
+        "  const d = [p[0]-cam.x, p[1]-cam.y, p[2]-cam.z];\n",
+        "  const x = d[0]*right[0]+d[1]*right[1]+d[2]*right[2];\n",
+        "  const y = d[0]*up[0]+d[1]*up[1]+d[2]*up[2];\n",
+        "  const z = d[0]*fwd[0]+d[1]*fwd[1]+d[2]*fwd[2];\n",
+        "  const tanH = Math.tan(fov * Math.PI / 360);\n",
+        "  return { ndcX: x/(z*tanH*aspect), ndcY: y/(z*tanH), inFront: z > 0 };\n",
+        "}\n",
+        "const out = {};\n",
+        "for (const aspect of [1.442, 0.969, 0.779, 0.697]) {\n",
+        "  out['a_' + aspect] = project(GLOBE_PATCHES.cont_a.lon, GLOBE_PATCHES.cont_a.lat, aspect);\n",
+        "  out['b_' + aspect] = project(GLOBE_PATCHES.cont_b.lon, GLOBE_PATCHES.cont_b.lat, aspect);\n",
+        "}\n",
+        "console.log(JSON.stringify(out));\n",
+    ])
+
+    d = _run_node(js)
+
+    # The constants above must mirror the real source, not drift from it.
+    assert "const dist = GLOBE_RADIUS * 4.5;" in script
+    assert "new THREE.Vector3(1.0, 0.15, 0.0).normalize()" in script
+
+    for aspect in (1.442, 0.969, 0.779, 0.697):
+        for cid in ("a", "b"):
+            p = d[f"{cid}_{aspect}"]
+            assert p["inFront"] is True, (
+                f"patch {cid} must be on the visible hemisphere at aspect {aspect}"
+            )
+            assert abs(p["ndcX"]) < 0.9 and abs(p["ndcY"]) < 0.9, (
+                f"patch {cid} at aspect {aspect} projects to ndc "
+                f"({p['ndcX']:.3f}, {p['ndcY']:.3f}) -- outside the safe disc; "
+                "on a narrow window it would fall off the canvas edge"
+            )
 
 
 def test_ocean_globe_loads_without_temporal_dead_zone():

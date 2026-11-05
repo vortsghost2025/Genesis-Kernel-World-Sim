@@ -4420,7 +4420,7 @@ function applyCameraMode(mode, immediate = true) {
     }
     // The sky dome was built at radius 780 for the flat layout; at planet
     // distance the camera would sit outside it. Scale it to enclose the framing.
-    const domeScale = (GLOBE_RADIUS * 4.2) / 780.0;
+    const domeScale = (GLOBE_RADIUS * 5.0) / 780.0;
     if (Math.abs(skyDome.scale.x - domeScale) > 1e-6) {
       skyDome.scale.set(domeScale, domeScale, domeScale);
     }
@@ -4428,13 +4428,15 @@ function applyCameraMode(mode, immediate = true) {
     camera.updateProjectionMatrix();
     // Frame the planet from the +x side. Both continent patches sit at x = +567
     // (mirrored in y and z), so a camera looking down +z puts one of them on the
-    // far side of the globe and only one reads. Standing off along +x puts both
-    // patches on the visible hemisphere, straddling the centre of the disc.
-    // 3.2 radii with a ~25 degree elevation frames the whole disc so the
-    // planet reads as a planet. Stand closer and the camera skims the near
-    // continent's surface and you lose the horizon entirely.
-    const dist = GLOBE_RADIUS * 3.2;
-    const orbitDir = new THREE.Vector3(0.88, 0.42, 0.22).normalize();
+    // far side of the globe and only one reads. Phase 10OO: aim along the exact
+    // bisector of the two patch centres -- +x with a slight elevation -- and
+    // stand off 4.5 radii. The old (0.88, 0.42, 0.22) at 3.2 radii put cont_a
+    // ~59 deg and cont_b ~54 deg off the camera axis; the NDC x of the farther
+    // patch scales with 1/aspect, so on any canvas narrower than ~1000 px that
+    // patch slid past the screen edge and the globe read as ONE continent.
+    // At 4.5 radii both centres sit at ndc |x| < 0.65 even at aspect 0.7.
+    const dist = GLOBE_RADIUS * 4.5;
+    const orbitDir = new THREE.Vector3(1.0, 0.15, 0.0).normalize();
     // Light the visible hemisphere. The valley sun sits at (-95, 84, 55), which
     // from the globe camera is a hard side-light and blacks out half the disc.
     // Put the sun roughly along the camera direction with an upper-left bias so
