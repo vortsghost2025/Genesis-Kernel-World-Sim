@@ -1337,11 +1337,17 @@ const GLOBE_PATCHES = {
 // collapses to a single point and planar noise pinches.
 // ---------------------------------------------------------------------------
 
+// Phase 10OK: the canonical continents are composited INTO the planet instead of
+// being forced to a flat plain, so the globe shows their real coastlines rather
+// than two square-edged patches. These three values control that compositing.
+const PLANET_CANONICAL_OCEAN_DEPTH = -38.0;  // canonical sea tiles, as depth
+const PLANET_CANONICAL_LIFT = 2.0;           // keeps land just above sea level
+const PLANET_PATCH_FEATHER = 0.030;          // blend margin past each box edge
+
 // Signed displacement applied to GLOBE_RADIUS. Negative is ocean floor.
 const PLANET_SEA_LEVEL = 0.33;      // field threshold: above this is land
 const PLANET_HEIGHT_SCALE = 118.0;  // world units of relief per unit of field
 const PLANET_DEEP_OCEAN = -150.0;   // floor of the bathymetry banding
-const PLANET_PATCH_PLAIN_H = 0.5;   // forced ground under the agents' continents
 
 // Fixed landmarks so the atlas has a describable geography rather than a blob.
 // lon/lat in radians about the patch frame, r is an angular falloff radius in
@@ -1411,38 +1417,48 @@ function planetBaseField(dx, dy, dz) {
   return n1 * 1.0 + n2 * 0.42 + n3 * 0.16;
 }
 
+// Canonical height for one sample inside (or feathering into) a patch box.
+// The inverse mapping is the exact algebraic inverse of computeGlobePosition,
+// so the planet surface and the projected flat mesh agree inside the box.
+function planetCanonicalHeight(cid, lon, lat) {
+  const patch = GLOBE_PATCHES[cid];
+  if (!patch) return PLANET_CANONICAL_OCEAN_DEPTH;
+  const t = (lon - patch.lon) / GLOBE_CONTINENT_SPAN + 0.5;
+  const v = (lat - patch.lat) / GLOBE_CONTINENT_SPAN + 0.5;
+  // +1e-9: a tile boundary like 0.095*200 is 18.999999999999996 in IEEE754,
+  // and flooring that drops a whole tile. The forward mapping produces these
+  // boundaries, so the inverse must tolerate one ULP of drift.
+  // Clamp rather than reject: the feather margin sits OUTSIDE the box, where
+  // there is no canonical tile, and those samples must blend from the edge
+  // tile's real height toward the procedural height. Returning ocean depth
+  // here produced a 70-unit cliff at every continent edge -- the exact defect
+  // the feather exists to prevent.
+  const cx = Math.max(0, Math.min(199, Math.floor(t * 200.0 + 1e-9)));
+  const cy = Math.max(0, Math.min(199, Math.floor(v * 200.0 + 1e-9)));
+  const idx = cy * 200 + cx;
+  const tData = terrainDB ? terrainDB[cid] : null;
+  const terr = (tData && tData.terr) ? String(tData.terr[idx]) : "ocean";
+  if (terr === "ocean") return PLANET_CANONICAL_OCEAN_DEPTH;
+  const h = (heightLookup && heightLookup[cid]) ? heightLookup[cid][idx] : 0.0;
+  return h + PLANET_CANONICAL_LIFT;
+}
+
 // Signed ground height in world units at a longitude / latitude in radians.
 function computePlanetHeight(lon, lat) {
-  // The two canonical continents are projected as flat meshes at
-  // GLOBE_RADIUS + h. Procedural terrain inside their bounding box would tear
-  // them, so those boxes are forced to a plain.
+  // Phase 10OK: the canonical continents are part of the planet now. Inside a
+  // patch box the height comes from the canonical data, so the globe shows the
+  // real coastline rather than a square-edged patch; across a narrow feather
+  // margin past each box edge the two fields blend so no cliff appears.
   const cLat = Math.cos(lat);
-  for (let i = 0; i < 2; i++) {
-    const keys = i === 0 ? "cont_a" : "cont_b";
-    const p = GLOBE_PATCHES[keys];
-    if (!p) continue;
-    const half = GLOBE_CONTINENT_SPAN / 2.0;
-    // Longitude wraps; compare the shortest way round.
-    let dLon = lon - p.lon;
-    while (dLon > Math.PI) dLon -= 6.283185307179586;
-    while (dLon < -Math.PI) dLon += 6.283185307179586;
-    if (Math.abs(dLon) <= half && Math.abs(lat - p.lat) <= half) {
-      return PLANET_PATCH_PLAIN_H;
-    }
-  }
-
   const dx = cLat * Math.cos(lon);
   const dy = Math.sin(lat);
   const dz = cLat * Math.sin(lon);
 
+  // ---- procedural height, exactly as before this phase ----
   let h = (planetBaseField(dx, dy, dz) - PLANET_SEA_LEVEL) * PLANET_HEIGHT_SCALE;
 
-  // Fixed landmarks add ground where they land, regardless of noise.
   for (let i = 0; i < PLANET_LANDMARKS.length; i++) {
     const lm = PLANET_LANDMARKS[i];
-    const cl = Math.cos(lat) * Math.cos(lm.lat)
-      + Math.sin(lat) * Math.sin(lm.lat);
-    // Angular cosine between the sample and the landmark centre.
     const cosD = Math.max(-1.0, Math.min(1.0,
       dx * Math.cos(lm.lat) * Math.cos(lm.lon)
       + dy * Math.sin(lm.lat)
@@ -1454,12 +1470,41 @@ function computePlanetHeight(lon, lat) {
     }
   }
 
-  // Polar caps: ice over both octaves, so they always read as frozen.
   const polar = (Math.abs(lat) - 1.24) / 0.30;
   if (polar > 0.0) {
     h = Math.max(h, 66.0 * polar);
-    // Ice sheets should not look like noise hills.
-    return h;
+    return h;   // ice sheets are not blended with continent data
+  }
+
+  // ---- canonical contribution ----
+  // The box edge is wobbled by the same planetary noise field, so the
+  // continent boundary is a ragged coastline rather than a straight line in
+  // longitude/latitude. halfE is continuous in (lon, lat), so the blend below
+  // stays continuous across it.
+  const wob = (planetBaseField(dx, dy, dz) - 0.5) * 2.0;   // ~[-1, 1]
+  const half = (GLOBE_CONTINENT_SPAN / 2.0) * (1.0 + 0.22 * wob);
+  const m = PLANET_PATCH_FEATHER;
+  for (let i = 0; i < 2; i++) {
+    const keys = i === 0 ? "cont_a" : "cont_b";
+    const p = GLOBE_PATCHES[keys];
+    if (!p) continue;
+    // Longitude wraps; compare the shortest way round.
+    let dLon = lon - p.lon;
+    while (dLon > Math.PI) dLon -= 6.283185307179586;
+    while (dLon < -Math.PI) dLon += 6.283185307179586;
+    const aLon = Math.abs(dLon);
+    const aLat = Math.abs(lat - p.lat);
+
+    if (aLon <= half && aLat <= half) {
+      return planetCanonicalHeight(keys, lon, lat);   // inside: canonical wins
+    }
+    if (aLon < half + m && aLat < half + m) {
+      const wLon = Math.max(0.0, (half + m - aLon) / m);
+      const wLat = Math.max(0.0, (half + m - aLat) / m);
+      const w = Math.min(wLon, wLat);
+      const canon = planetCanonicalHeight(keys, lon, lat);
+      return canon * w + h * (1.0 - w);
+    }
   }
 
   return h;
@@ -1585,7 +1630,7 @@ function buildPlanetSurface() {
   return mesh;
 }
 
-const globalPlanetMesh = buildPlanetSurface();
+let globalPlanetMesh = null;   // built after the continent meshes
 
 // Three exclusive projection states so the planet sphere can never overlap the
 // flat ocean plane or the legacy coloured shell.
@@ -4318,6 +4363,11 @@ function animateActionParticles(dt, time) {
 // -------------------------------------------------------------
 buildContinentMesh("cont_a");
 buildContinentMesh("cont_b");
+
+// Phase 10OK: build the planet surface AFTER the continent meshes, because it
+// now samples their canonical height data. Built eagerly it ran before that
+// data existed and every patch box fell back to ocean depth.
+globalPlanetMesh = buildPlanetSurface();
 
 continentGroups.cont_a.position.set(0, 0, 0);
 continentGroups.cont_b.position.set(0, 0, 0);
