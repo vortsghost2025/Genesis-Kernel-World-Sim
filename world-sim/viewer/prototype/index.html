@@ -4015,19 +4015,22 @@ function buildInteriorVolumeSpec(shelterWidth = 5.4, shelterDepth = 4.4) {
   const fw = Math.max(4.6, shelterWidth * 0.90);
   const fd = Math.max(3.6, shelterDepth * 0.86);
   const wallT = 0.18;
-  const wallH = 0.62;
+  // Phase 10PA: full-height walls (was 0.62 sill kerbs). Kerbs + no roof
+  // read as an open deck, not a house.
+  const wallH = 1.9;
   const halfW = fw * 0.5;
   const halfD = fd * 0.5;
   const doorGap = 1.25;
   const frontSegW = Math.max(0.8, (fw - doorGap) * 0.5);
   return {
     floor: { width: fw, depth: fd, thickness: 0.10, y: floorOffset },
+    ceiling: { width: fw + 0.2, depth: fd + 0.2, thickness: 0.10, y: floorOffset + wallH + 0.05 },
     walls: [
       { id: "back",  width: fw + wallT, height: wallH, depth: wallT, x: 0, y: floorOffset + wallH * 0.5, z: -halfD },
       { id: "left",  width: wallT, height: wallH, depth: fd, x: -halfW, y: floorOffset + wallH * 0.5, z: 0 },
       { id: "right", width: wallT, height: wallH, depth: fd, x:  halfW, y: floorOffset + wallH * 0.5, z: 0 },
-      { id: "front_left",  width: frontSegW, height: wallH * 0.78, depth: wallT, x: -(doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + (wallH * 0.78) * 0.5, z: halfD },
-      { id: "front_right", width: frontSegW, height: wallH * 0.78, depth: wallT, x:  (doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + (wallH * 0.78) * 0.5, z: halfD }
+      { id: "front_left",  width: frontSegW, height: wallH, depth: wallT, x: -(doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + wallH * 0.5, z: halfD },
+      { id: "front_right", width: frontSegW, height: wallH, depth: wallT, x:  (doorGap * 0.5 + frontSegW * 0.5), y: floorOffset + wallH * 0.5, z: halfD }
     ]
   };
 }
@@ -4044,6 +4047,16 @@ function rebuildInteriorVolume() {
   fMesh.position.set(0, spec.floor.y - spec.floor.thickness * 0.5, 0);
   fMesh.receiveShadow = true;
   interiorVolumeGroup.add(fMesh);
+
+  // Ceiling slab capping the room (Phase 10PA).
+  if (spec.ceiling) {
+    const cGeom = new THREE.BoxGeometry(spec.ceiling.width, spec.ceiling.thickness, spec.ceiling.depth);
+    const cMesh = new THREE.Mesh(cGeom, sillWallMat);
+    cMesh.position.set(0, spec.ceiling.y, 0);
+    cMesh.castShadow = true;
+    cMesh.receiveShadow = true;
+    interiorVolumeGroup.add(cMesh);
+  }
 
   for (const w of spec.walls) {
     const wGeom = new THREE.BoxGeometry(w.width, w.height, w.depth);
@@ -4684,10 +4697,10 @@ function applyCameraMode(mode, immediate = true) {
     const btn = document.getElementById("cam-interior");
     if (btn) btn.classList.add("active");
     scene.fog.density = 0.004;
-    // Phase 10OX: wide-ish eye-level framing across the floor. The old
-    // fov 36 from +1.85 with the 3.0 clearance raise read as a tiny
-    // top-down model, not an interior.
-    camera.fov = 55;
+    // Phase 10PA: the camera sits INSIDE the room near the front-right at
+    // eye height, looking across it. fov 58 keeps the whole room in frame.
+    // (10OX had it outside the kerbs looking in; full walls need inside.)
+    camera.fov = 58;
     camera.updateProjectionMatrix();
 
     let targetX = ax, targetZ = az;
@@ -4712,12 +4725,12 @@ function applyCameraMode(mode, immediate = true) {
       }
     }
     const sh = getTerrainHeight(cid, targetX, targetZ);
-    // Phase 10OX: low camera just outside the front sill, looking slightly
-    // down across floor, agents and hearth. Passes `immediate` through so
-    // the button snaps instead of slow-lerping from the previous view.
+    // Phase 10PA: inside the room, eye ~1.35 under the 2.02 ceiling,
+    // target at torso height across the room. Passes `immediate` through
+    // so the button snaps instead of slow-lerping from the previous view.
     smoothMoveCamera(
-      new THREE.Vector3(targetX - 0.4, sh + 0.95, targetZ + 2.9),
-      new THREE.Vector3(targetX + 0.3, sh + 0.35, targetZ - 1.2),
+      new THREE.Vector3(targetX + 0.7, sh + 1.35, targetZ + 1.15),
+      new THREE.Vector3(targetX - 0.4, sh + 0.55, targetZ - 1.1),
       immediate
     );
     toggleInteriorCutaway(true, targetX, targetZ, sh, targetTid);

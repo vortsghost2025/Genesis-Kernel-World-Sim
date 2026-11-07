@@ -26,14 +26,24 @@ def _get_prototype_script() -> str:
 def test_interior_button_snaps_and_branch_passes_immediate():
     script = _get_prototype_script()
     assert 'camInterior.onclick = () => applyCameraMode("interior", true)' in script
-    assert "new THREE.Vector3(targetX + 0.3, sh + 0.35, targetZ - 1.2),\n      immediate" in script
+    assert "new THREE.Vector3(targetX - 0.4, sh + 0.55, targetZ - 1.1),\n      immediate" in script
 
 
 def test_interior_clearance_and_framing():
     script = _get_prototype_script()
     assert 'activeCamMode === "interior") ? 1.45 : 3.0' in script
-    assert "camera.fov = 55;" in script
-    assert "new THREE.Vector3(targetX - 0.4, sh + 0.95, targetZ + 2.9)" in script
+    assert "camera.fov = 58;" in script
+    # camera inside the room, looking across it
+    assert "new THREE.Vector3(targetX + 0.7, sh + 1.35, targetZ + 1.15)" in script
+
+
+def test_interior_volume_is_enclosed_room():
+    script = _get_prototype_script()
+    assert "const wallH = 1.9;" in script
+    assert "ceiling:" in script
+    assert "spec.ceiling" in script
+    # front door-gap walls are full height too
+    assert '{ id: "front_left",  width: frontSegW, height: wallH, depth: wallT' in script
 
 
 def test_cutaway_hides_whole_tile_and_restores_all():
