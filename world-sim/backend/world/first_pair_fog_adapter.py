@@ -514,8 +514,12 @@ def merge_observation(
             "tile_id": td["tile_id"],
             "terrain": td.get("terrain", "unknown"),
             "biome": td.get("biome", "unknown"),
-            "resources": [],
-            "hazards": [],
+            # Phase 10OU-C root-cause fix: resources and hazards were
+            # hardcoded empty here, so observed_resources stayed [] in the
+            # lane known maps forever (Eve visited one tile 103 times and
+            # observed nothing). Pass the visible details through.
+            "resources": list(td.get("resources", []) or []),
+            "hazards": list(td.get("hazards", []) or []),
         })
 
     fog_observation = {

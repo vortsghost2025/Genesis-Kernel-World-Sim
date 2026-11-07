@@ -1865,6 +1865,17 @@ def build_system_prompt(context: AgentContext) -> str:
             + "\n".join("- " + line for line in settlement_lines)
         )
 
+    # Phase 10OU-C: resources the agent has personally observed on visited
+    # tiles, from its own known map. Same factual register — absent when
+    # empty, never the true map, never a suggestion.
+    rollup = getattr(context, "observed_resource_rollup", "") or ""
+    resource_section = ""
+    if rollup:
+        resource_section = (
+            "--- RESOURCES OBSERVED ON VISITED TILES ---\n"
+            f"- Resources observed on visited tiles: {rollup}."
+        )
+
     if _lines:
         body_section = (
             "--- YOUR BODY (the store, speaking at the moment of need) ---\n"
@@ -1902,6 +1913,8 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {belongings_section}
 
 {settlement_section}
+
+{resource_section}
 
 {body_section}
 

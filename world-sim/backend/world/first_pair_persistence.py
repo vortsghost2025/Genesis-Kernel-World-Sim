@@ -930,8 +930,21 @@ def select_human_context(
 
     scored.sort(key=lambda x: (x[0], x[1], x[2]))
 
-    selected = scored[:_MAX_COMBINED_HUMAN_RECORDS]
-    omitted = scored[_MAX_COMBINED_HUMAN_RECORDS:]
+    # Phase 10OU pin: the most recent answered record always survives.
+    # Answered operator answers were being crowded out by pending questions
+    # (5 unheard stone repeats in the live West lane). The pin is
+    # deterministic — most recent heartbeat, question-id tie-break — and
+    # the 4-slot cap and prompt budget are unchanged.
+    pinned = None
+    answered_scored = [s for s in scored if s[3].get("status") == "answered"]
+    if answered_scored:
+        pinned = sorted(answered_scored, key=lambda s: (s[1], s[2]))[0]
+        rest = [s for s in scored if s is not pinned]
+        selected = [pinned] + rest[: _MAX_COMBINED_HUMAN_RECORDS - 1]
+        omitted = [s for s in rest if s not in selected]
+    else:
+        selected = scored[:_MAX_COMBINED_HUMAN_RECORDS]
+        omitted = scored[_MAX_COMBINED_HUMAN_RECORDS:]
 
     selected_records = [s[3] for s in selected]
     all_answered_ids = [s[3].get("question_id", "") for s in selected if s[3].get("status") == "answered"]

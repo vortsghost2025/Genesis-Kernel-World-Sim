@@ -100,6 +100,10 @@ class AgentContext:
     operator_messages: list = field(default_factory=list)
     # Shelter ownership (Phase 10KX/10KZ): true if this agent owns a constructed shelter
     owns_shelter: bool = False
+    # Resource roll-up (Phase 10OU): "" when the agent has observed no
+    # resources; otherwise "stone: tile-a, tile-b; clay: tile-c" from the
+    # agent's own known map only. Factual line, never a suggestion.
+    observed_resource_rollup: str = ""
 
 
 @dataclass(frozen=True)

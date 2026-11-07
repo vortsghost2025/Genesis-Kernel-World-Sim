@@ -372,6 +372,31 @@ def _is_safe_object_id(value: str) -> bool:
     return all(c in _SAFE_OBJECT_ID_CHARS for c in value)
 
 
+def _holdings_summary(holdings: dict, exclude: str = "") -> str:
+    """Compact holdings summary for kinder rejection reasons (Phase 10OU-A).
+
+    Sorted "kind amount" pairs with positive amounts, excluding the
+    shortfall kind (already named in the prefix). Empty string when the
+    agent holds nothing beyond the shortfall, so the reason stays short.
+    Facts only — no directive phrasing.
+    """
+    if not isinstance(holdings, dict):
+        return ""
+    parts = []
+    for kind in sorted(holdings):
+        if kind == exclude:
+            continue
+        try:
+            amount = int(holdings.get(kind, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            parts.append(f"{kind} {amount}")
+    if not parts:
+        return ""
+    return "holdings: " + ", ".join(parts)
+
+
 def _reflection_is_echo(memory_list: list[dict], reflection: str) -> bool:
     """True when this reflection says nothing the last reflection didn't.
 
@@ -617,6 +642,18 @@ class FirstPairRuntime:
                 (self._world_state.public_objects or {}).values()
             ) if isinstance(self._world_state.public_objects, dict) else [],
         )
+        # Phase 10OU-C: write observed resources back into the known map.
+        # The observation already carries them in visible_tile_details;
+        # without this write they never persist (lane maps stayed empty).
+        if heartbeat_number is not None:
+            known_map, _changed = self._merge_visible_resources_into_known_map(
+                known_map, obs, heartbeat_number
+            )
+            if _changed:
+                try:
+                    persist_known_map(self._store.root, agent_ref, known_map)
+                except Exception:
+                    pass
         reports = project_unsettled_reports(known_map)
         if reports:
             obs["unsettled_reports"] = reports
@@ -685,6 +722,95 @@ class FirstPairRuntime:
                     if isinstance(h, str) and h.strip()]
         except Exception:
             return []
+
+    @staticmethod
+    def _observed_resource_rollup(known_map: dict) -> str:
+        """Factual roll-up of the agent's own observed resources (Phase 10OU-C).
+
+        "stone: tile-a, tile-b; clay: tile-c" from known_map's
+        known_tiles[].observed_resources only — never the true map.
+        Empty string when nothing has been observed. Bounded to 3 tiles
+        per resource, deterministic order.
+        """
+        tiles = (known_map or {}).get("known_tiles") or {}
+        by_resource: dict[str, list[str]] = {}
+        for tid in sorted(tiles):
+            entry = tiles.get(tid)
+            if not isinstance(entry, dict):
+                continue
+            for res in (entry.get("observed_resources") or []):
+                if not isinstance(res, str) or not res.strip():
+                    continue
+                by_resource.setdefault(res, [])
+                if tid not in by_resource[res]:
+                    by_resource[res].append(tid)
+        if not by_resource:
+            return ""
+        parts = []
+        for res in sorted(by_resource):
+            shown = by_resource[res][:3]
+            parts.append(f"{res}: {', '.join(shown)}")
+        return "; ".join(parts)
+
+    def _rollup_for(self, agent_ref: str) -> str:
+        """Best-effort roll-up for the prompt; "" when unavailable."""
+        try:
+            km = load_known_map(self._store.root, agent_ref)
+        except Exception:
+            return ""
+        return self._observed_resource_rollup(km)
+
+    @staticmethod
+    def _merge_visible_resources_into_known_map(
+        known_map: dict, observation: dict, tick: int
+    ) -> tuple[dict, bool]:
+        """Union visible_tile_details resources/hazards into the known map.
+
+        Phase 10OU-C root-cause fix: observations carried resources in
+        visible_tile_details, but nothing ever wrote them back, so lane
+        observed_resources stayed [] forever. Mirrors
+        merge_observation_into_known_map's entry shape. Fail-closed:
+        returns the input map unchanged on any error.
+        """
+        try:
+            known = known_map or {}
+            tiles = known.setdefault("known_tiles", {})
+            changed = False
+            for detail in observation.get("visible_tile_details", []) or []:
+                if not isinstance(detail, dict):
+                    continue
+                tid = detail.get("tile_id") or ""
+                if not tid:
+                    continue
+                entry = tiles.get(tid)
+                if entry is None:
+                    entry = {
+                        "tile_id": tid,
+                        "first_observed_tick": tick,
+                        "last_observed_tick": tick,
+                        "visit_count": 0,
+                        "confidence": 1.0,
+                        "observed_terrain": detail.get("terrain", "unknown"),
+                        "observed_biome": detail.get("biome", "unknown"),
+                        "observed_resources": [],
+                        "observed_hazards": [],
+                        "agent_given_name": None,
+                        "notes": [],
+                    }
+                    tiles[tid] = entry
+                    changed = True
+                for key, obs_key in (("resources", "observed_resources"), ("hazards", "observed_hazards")):
+                    incoming = [str(v) for v in (detail.get(key) or []) if isinstance(v, str) and v.strip()]
+                    current = entry.get(obs_key) or []
+                    merged = sorted(set(current) | set(incoming))
+                    if merged != current:
+                        entry[obs_key] = merged
+                        changed = True
+                if entry.get("last_observed_tick") != tick:
+                    entry["last_observed_tick"] = tick
+            return known, changed
+        except Exception:
+            return known_map, False
 
     def _on_road_tile(self, position: str) -> bool:
         """True when the agent's current tile carries a road object.
@@ -1464,6 +1590,7 @@ class FirstPairRuntime:
             physics=dict(observation["physics"]),
             operator_messages=operator_messages,
             owns_shelter=owns_shelter,
+            observed_resource_rollup=self._rollup_for(agent_ref),
         )
 
     # ------------------------------------------------------------------
@@ -2499,7 +2626,21 @@ class FirstPairRuntime:
             if r.get("kind") == resource_kind and r.get("amount", 0) > 0
         ]
         if not tile_resources:
-            return {"status": "rejected", "reason": f"No {resource_kind} available on this tile"}
+            listed = sorted(
+                {
+                    str(r.get("kind"))
+                    for r in self._current_tile_resources.get(position, [])
+                    if r.get("kind") and r.get("amount", 0) > 0
+                }
+            )
+            if listed:
+                tail = "it lists: " + ", ".join(listed)
+            else:
+                tail = "it lists nothing gatherable"
+            return {
+                "status": "rejected",
+                "reason": f"No {resource_kind} available on this tile; {tail}",
+            }
 
         resource = tile_resources[0]
         available = resource.get("amount", 0)
@@ -2628,7 +2769,17 @@ class FirstPairRuntime:
             existing_obj = self._world_state.public_objects.get(object_id)
             existing_tile = existing_obj.get("tile_id") if isinstance(existing_obj, dict) else None
             if existing_tile == tile_id:
-                return {"status": "rejected", "reason": f"Duplicate object_id: {object_id}"}
+                existing_type = (
+                    existing_obj.get("object_type", "object")
+                    if isinstance(existing_obj, dict) else "object"
+                )
+                return {
+                    "status": "rejected",
+                    "reason": (
+                        f"Duplicate object_id: {object_id} "
+                        f"(existing: {existing_type} on {existing_tile})"
+                    ),
+                }
             base_id = str(object_id)
             candidate_id = f"{base_id}-hb{heartbeat_number}"
             suffix = 2
@@ -2738,10 +2889,11 @@ class FirstPairRuntime:
         holdings = self._get_agent_inventory(agent_ref)
         for kind, amount in effective_materials.items():
             if holdings.get(kind, 0) < amount:
-                return {
-                    "status": "rejected",
-                    "reason": f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}",
-                }
+                summary = _holdings_summary(holdings, exclude=kind)
+                reason = f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}"
+                if summary:
+                    reason += f"; {summary}"
+                return {"status": "rejected", "reason": reason}
 
         for kind, amount in effective_materials.items():
             add_to_inventory(self._store, agent_ref, kind, -amount)
