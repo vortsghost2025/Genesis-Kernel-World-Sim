@@ -62,8 +62,9 @@ def test_person_cameras_gaze_at_nearest_shelter():
     assert "function getNearestShelterXY(pairName, fromX, fromZ)" in script
     assert "const shelterA = getNearestShelterXY(pairName, ax, az);" in script
     assert "const shelterE = getNearestShelterXY(pairName, ex, ez);" in script
-    assert "camX = ax - ux * 3.2;" in script
-    assert "lookX = ax + ux * 7.0;" in script
+    # camera spot stays fixed (proven clear); only the gaze turns
+    assert "lookX = ax + (dx / d) * 8.0;" in script
+    assert "lookX = ex + (dx / d) * 8.0;" in script
 
 
 def test_cutaway_hides_whole_tile_and_restores_all():

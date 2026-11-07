@@ -4760,18 +4760,17 @@ function applyCameraMode(mode, immediate = true) {
     // fixed gaze when the lane has no shelter.
     const ah = getTerrainHeight(cid, ax, az);
     const shelterA = getNearestShelterXY(pairName, ax, az);
-    let camX = ax - 1.8, camZ = az + 3.4;
+    // Keep the proven fixed camera spot; only the GAZE turns toward the
+    // shelter (moving the camera itself could land it inside a sprite).
+    const camX = ax - 1.8, camZ = az + 3.4;
     let lookX = ax + 0.8, lookZ = az - 0.4;
     if (shelterA) {
       const dx = shelterA.x - ax;
       const dz = shelterA.z - az;
       const d = Math.hypot(dx, dz);
       if (d > 0.5) {
-        const ux = dx / d, uz = dz / d;
-        camX = ax - ux * 3.2;
-        camZ = az - uz * 3.2;
-        lookX = ax + ux * 7.0;
-        lookZ = az + uz * 7.0;
+        lookX = ax + (dx / d) * 8.0;
+        lookZ = az + (dz / d) * 8.0;
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
@@ -4785,18 +4784,17 @@ function applyCameraMode(mode, immediate = true) {
     // Phase 10PD: same settlement bias for Eve (see Focus Adam).
     const eh = getTerrainHeight(cid, ex, ez);
     const shelterE = getNearestShelterXY(pairName, ex, ez);
-    let camX = ex - 1.8, camZ = ez + 3.4;
+    // Keep the proven fixed camera spot; only the GAZE turns toward the
+    // shelter (moving the camera itself could land it inside a sprite).
+    const camX = ex - 1.8, camZ = ez + 3.4;
     let lookX = ex + 0.4, lookZ = ez - 0.3;
     if (shelterE) {
       const dx = shelterE.x - ex;
       const dz = shelterE.z - ez;
       const d = Math.hypot(dx, dz);
       if (d > 0.5) {
-        const ux = dx / d, uz = dz / d;
-        camX = ex - ux * 3.2;
-        camZ = ez - uz * 3.2;
-        lookX = ex + ux * 7.0;
-        lookZ = ez + uz * 7.0;
+        lookX = ex + (dx / d) * 8.0;
+        lookZ = ez + (dz / d) * 8.0;
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
