@@ -4160,10 +4160,17 @@ function rebuildInteriorProps(tileId, pairName, hb) {
 let isInteriorModeActive = false;
 let activeShelterTileCoords = null;
 let cutawayShelterProp = null;
+let cutawayShelterProps = [];
 
 function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
   isInteriorModeActive = enable;
   interiorGroup.visible = enable;
+  // Phase 10OX: restore every prop the cutaway hid (was: only the first
+  // by distance, so neighboring huts kept standing over the diorama).
+  for (const prop of cutawayShelterProps) {
+    prop.visible = true;
+  }
+  cutawayShelterProps = [];
   if (cutawayShelterProp) {
     cutawayShelterProp.visible = true;
     cutawayShelterProp = null;
@@ -4177,18 +4184,37 @@ function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
     const oGroup = objectGroups[cid];
     if (oGroup) {
       for (const child of oGroup.children) {
-        if (Math.hypot(child.position.x - sx, child.position.z - sz) < 1.2) {
+        const ud = child.userData || {};
+        const onTile = (tileId != null && ud.tile_id === tileId);
+        const dx = Math.abs(child.position.x - sx);
+        const dz = Math.abs(child.position.z - sz);
+        const near = Math.max(dx, dz) <= 2;
+        const isShelter = String(ud.object_type || "").toLowerCase();
+        const shelterLike = isShelter.includes("shelter") || isShelter.includes("cabin") || isShelter.includes("hut");
+        if (onTile || (near && shelterLike)) {
           child.visible = false;
-          cutawayShelterProp = child;
-          break;
+          cutawayShelterProps.push(child);
         }
       }
+      cutawayShelterProp = cutawayShelterProps[0] || null;
     }
   } else {
     activeShelterTileCoords = null;
     disposeInteriorVolume();
     rebuildInteriorProps(null, selectedPair, currentHb);
   }
+}
+
+function refreshInteriorProps() {
+  // Phase 10OX: heartbeat-stay — while interior is active, heartbeats
+  // refresh the props only; the camera stays parked where the operator
+  // left it instead of re-aiming every tick.
+  if (!isInteriorModeActive || !activeShelterTileCoords) return;
+  rebuildInteriorProps(
+    activeShelterTileCoords.tileId,
+    selectedPair,
+    currentHb
+  );
 }
 
 // -------------------------------------------------------------
@@ -4639,7 +4665,10 @@ function applyCameraMode(mode, immediate = true) {
     const btn = document.getElementById("cam-interior");
     if (btn) btn.classList.add("active");
     scene.fog.density = 0.004;
-    camera.fov = 36;
+    // Phase 10OX: wide-ish eye-level framing across the floor. The old
+    // fov 36 from +1.85 with the 3.0 clearance raise read as a tiny
+    // top-down model, not an interior.
+    camera.fov = 55;
     camera.updateProjectionMatrix();
 
     let targetX = ax, targetZ = az;
@@ -4664,10 +4693,13 @@ function applyCameraMode(mode, immediate = true) {
       }
     }
     const sh = getTerrainHeight(cid, targetX, targetZ);
+    // Phase 10OX: low camera just outside the front sill, looking slightly
+    // down across floor, agents and hearth. Passes `immediate` through so
+    // the button snaps instead of slow-lerping from the previous view.
     smoothMoveCamera(
-      new THREE.Vector3(targetX - 0.4, sh + 1.85, targetZ + 3.8),
-      new THREE.Vector3(targetX, sh + 0.95, targetZ - 0.2),
-      false
+      new THREE.Vector3(targetX - 0.4, sh + 0.95, targetZ + 2.9),
+      new THREE.Vector3(targetX + 0.3, sh + 0.35, targetZ - 1.2),
+      immediate
     );
     toggleInteriorCutaway(true, targetX, targetZ, sh, targetTid);
   }
@@ -4756,7 +4788,7 @@ function smoothMoveCamera(newPos, newTarget, immediate = false) {
   if (selectedPair !== "orbit") {
     const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
     const groundH = getTerrainHeight(cid, newPos.x, newPos.z);
-    const minClearance = (activeCamMode === "human" || activeCamMode === "adam" || activeCamMode === "eve") ? 1.45 : 3.0;
+    const minClearance = (activeCamMode === "human" || activeCamMode === "adam" || activeCamMode === "eve" || activeCamMode === "interior") ? 1.45 : 3.0;
     if (newPos.y < groundH + minClearance) {
       newPos.y = groundH + minClearance;
     }
@@ -5219,7 +5251,12 @@ function syncHeartbeatScene(immediateCam = false) {
     // and re-aiming on every poll slid the camera back out from wherever the
     // operator had parked it -- even though nothing on screen had moved.
     // Camera-mode buttons call applyCameraMode directly, so they still work.
-    if (immediateCam || currentHb !== _lastCamSyncHb) {
+    // Phase 10OX: while interior is active, a heartbeat refreshes the
+    // diorama props only — it never re-aims the camera, so Enter House
+    // stays where the operator put it.
+    if (activeCamMode === "interior" && !immediateCam) {
+      refreshInteriorProps();
+    } else if (immediateCam || currentHb !== _lastCamSyncHb) {
       applyCameraMode(activeCamMode, immediateCam);
     }
     _lastCamSyncHb = currentHb;
@@ -5241,7 +5278,7 @@ document.getElementById("cam-follow-adam").onclick = () => toggleFollowAgent("ad
 document.getElementById("cam-follow-eve").onclick = () => toggleFollowAgent("eve");
 document.getElementById("cam-topdown").onclick = () => applyCameraMode("topdown", false);
 const camInterior = document.getElementById("cam-interior");
-if (camInterior) camInterior.onclick = () => applyCameraMode("interior", false);
+if (camInterior) camInterior.onclick = () => applyCameraMode("interior", true);
 
 function replayRecentActivity(count = 35) {
   currentHb = Math.max(minHb, maxHb - count);
