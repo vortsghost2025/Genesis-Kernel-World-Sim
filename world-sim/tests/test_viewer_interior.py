@@ -62,10 +62,11 @@ def test_person_cameras_gaze_at_nearest_shelter():
     assert "function getNearestShelterXY(pairName, fromX, fromZ)" in script
     assert "const shelterA = getNearestShelterXY(pairName, ax, az);" in script
     assert "const shelterE = getNearestShelterXY(pairName, ex, ez);" in script
-    # short high stand-off, gaze toward the shelter
-    assert "const camX = ax - 1.2, camZ = az + 2.4;" in script
-    assert "lookX = ax + (dx / d) * 5.0;" in script
-    assert "lookX = ex + (dx / d) * 5.0;" in script
+    # elevated shelter-ward vantage (agent + house in one frame)
+    assert "camX = ax - ux * 7.0;" in script
+    assert "camX = ex - ux * 7.0;" in script
+    assert "lookX = shelterA.x;" in script
+    assert "lookX = shelterE.x;" in script
     assert "function clearCameraSpot(cid, cam, look)" in script
     assert "clearCameraSpot(cid, new THREE.Vector3(camX," in script
 

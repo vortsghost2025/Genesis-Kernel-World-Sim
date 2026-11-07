@@ -4569,19 +4569,29 @@ function clearCameraSpot(cid, cam, look) {
   const dx = look.x - x, dz = look.z - z;
   const d = Math.hypot(dx, dz) || 1;
   const ax = dx / d, az = dz / d;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     let blocked = false;
     for (const child of group.children) {
       const px = child.position.x, pz = child.position.z;
-      if (Math.abs(px - x) < 0.6 && Math.abs(pz - z) < 0.6) {
+      // Tree canopies are wide sprites; the spot must clear the whole
+      // canopy, not just its centre point.
+      if (Math.abs(px - x) < 1.4 && Math.abs(pz - z) < 1.4) {
         blocked = true;
         break;
       }
     }
     if (!blocked) break;
-    x -= ax * 1.2;
-    z -= az * 1.2;
-    y += 0.8;
+    x -= ax * 1.0;
+    z -= az * 1.0;
+    y += 1.2;
+  }
+  // Hard fallback: if still buried in dense scenery, go high.
+  for (const child of group.children) {
+    const px = child.position.x, pz = child.position.z;
+    if (Math.abs(px - x) < 1.4 && Math.abs(pz - z) < 1.4) {
+      y = Math.max(y, look.y + 6.0);
+      break;
+    }
   }
   return { x, y, z };
 }
@@ -4789,23 +4799,27 @@ function applyCameraMode(mode, immediate = true) {
     // fixed gaze when the lane has no shelter.
     const ah = getTerrainHeight(cid, ax, az);
     const shelterA = getNearestShelterXY(pairName, ax, az);
-    // Shorter, higher stand-off: the old 1.8/3.4 spot at +1.7 could sit
-    // inside a campfire glow or tree sprite in the dense west cluster.
-    const camX = ax - 1.2, camZ = az + 2.4;
+    // Elevated shelter-ward vantage: high enough to clear sprites, far
+    // enough for the agent and the house behind him in one frame. Ground
+    // eye-level stands inside tree/hut sprites in the west cluster.
+    let camX = ax - 1.2, camZ = az + 2.4;
     let lookX = ax + 0.8, lookZ = az - 0.4;
     if (shelterA) {
       const dx = shelterA.x - ax;
       const dz = shelterA.z - az;
       const d = Math.hypot(dx, dz);
       if (d > 0.5) {
-        lookX = ax + (dx / d) * 5.0;
-        lookZ = az + (dz / d) * 5.0;
+        const ux = dx / d, uz = dz / d;
+        camX = ax - ux * 7.0;
+        camZ = az - uz * 7.0;
+        lookX = shelterA.x;
+        lookZ = shelterA.z;
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
     const lookV = new THREE.Vector3(lookX, Math.max(ah + 0.85, lookH * 0.55 + 0.85), lookZ);
-    const spotA = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(ah + 2.0, gH + 1.5), camZ), lookV);
+    const spotA = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(ah + 5.0, gH + 1.5), camZ), lookV);
     smoothMoveCamera(new THREE.Vector3(spotA.x, spotA.y, spotA.z), lookV, immediate);
   } else if (mode === "eve") {
     document.getElementById("cam-focus-eve").classList.add("active");
@@ -4815,22 +4829,25 @@ function applyCameraMode(mode, immediate = true) {
     // Phase 10PD: same settlement bias for Eve (see Focus Adam).
     const eh = getTerrainHeight(cid, ex, ez);
     const shelterE = getNearestShelterXY(pairName, ex, ez);
-    // Shorter, higher stand-off (see Focus Adam).
-    const camX = ex - 1.2, camZ = ez + 2.4;
+    // Elevated shelter-ward vantage (see Focus Adam).
+    let camX = ex - 1.2, camZ = ez + 2.4;
     let lookX = ex + 0.4, lookZ = ez - 0.3;
     if (shelterE) {
       const dx = shelterE.x - ex;
       const dz = shelterE.z - ez;
       const d = Math.hypot(dx, dz);
       if (d > 0.5) {
-        lookX = ex + (dx / d) * 5.0;
-        lookZ = ez + (dz / d) * 5.0;
+        const ux = dx / d, uz = dz / d;
+        camX = ex - ux * 7.0;
+        camZ = ez - uz * 7.0;
+        lookX = shelterE.x;
+        lookZ = shelterE.z;
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
     const lookV2 = new THREE.Vector3(lookX, Math.max(eh + 0.85, lookH * 0.55 + 0.85), lookZ);
-    const spotE = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(eh + 2.0, gH + 1.5), camZ), lookV2);
+    const spotE = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(eh + 5.0, gH + 1.5), camZ), lookV2);
     smoothMoveCamera(new THREE.Vector3(spotE.x, spotE.y, spotE.z), lookV2, immediate);
   } else if (mode === "topdown") {
     document.getElementById("cam-topdown").classList.add("active");
