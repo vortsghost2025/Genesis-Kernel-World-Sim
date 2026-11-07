@@ -4557,6 +4557,35 @@ function getNearestShelterXY(pairName, fromX, fromZ) {
   return best;
 }
 
+// Phase 10PD: nudge a requested camera spot out of scenery sprites.
+// Person cameras inside the dense west cluster could sit inside a
+// tree_cluster prop and render a blurred full-frame texture instead of
+// the agent. Pushes the spot away from the look target and up until it
+// clears sprite positions (bounded, deterministic).
+function clearCameraSpot(cid, cam, look) {
+  const group = sceneryGroups && sceneryGroups[cid];
+  if (!group) return cam;
+  let x = cam.x, y = cam.y, z = cam.z;
+  const dx = look.x - x, dz = look.z - z;
+  const d = Math.hypot(dx, dz) || 1;
+  const ax = dx / d, az = dz / d;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let blocked = false;
+    for (const child of group.children) {
+      const px = child.position.x, pz = child.position.z;
+      if (Math.abs(px - x) < 0.6 && Math.abs(pz - z) < 0.6) {
+        blocked = true;
+        break;
+      }
+    }
+    if (!blocked) break;
+    x -= ax * 1.2;
+    z -= az * 1.2;
+    y += 0.8;
+  }
+  return { x, y, z };
+}
+
 function updateFollowButtons() {
   const a = document.getElementById("cam-follow-adam");
   const e = document.getElementById("cam-follow-eve");
@@ -4775,7 +4804,9 @@ function applyCameraMode(mode, immediate = true) {
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
-    smoothMoveCamera(new THREE.Vector3(camX, Math.max(ah + 2.0, gH + 1.5), camZ), new THREE.Vector3(lookX, Math.max(ah + 0.85, lookH * 0.55 + 0.85), lookZ), immediate);
+    const lookV = new THREE.Vector3(lookX, Math.max(ah + 0.85, lookH * 0.55 + 0.85), lookZ);
+    const spotA = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(ah + 2.0, gH + 1.5), camZ), lookV);
+    smoothMoveCamera(new THREE.Vector3(spotA.x, spotA.y, spotA.z), lookV, immediate);
   } else if (mode === "eve") {
     document.getElementById("cam-focus-eve").classList.add("active");
     scene.fog.density = 0.007;
@@ -4798,7 +4829,9 @@ function applyCameraMode(mode, immediate = true) {
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
-    smoothMoveCamera(new THREE.Vector3(camX, Math.max(eh + 2.0, gH + 1.5), camZ), new THREE.Vector3(lookX, Math.max(eh + 0.85, lookH * 0.55 + 0.85), lookZ), immediate);
+    const lookV2 = new THREE.Vector3(lookX, Math.max(eh + 0.85, lookH * 0.55 + 0.85), lookZ);
+    const spotE = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(eh + 2.0, gH + 1.5), camZ), lookV2);
+    smoothMoveCamera(new THREE.Vector3(spotE.x, spotE.y, spotE.z), lookV2, immediate);
   } else if (mode === "topdown") {
     document.getElementById("cam-topdown").classList.add("active");
     scene.fog.density = 0.003;

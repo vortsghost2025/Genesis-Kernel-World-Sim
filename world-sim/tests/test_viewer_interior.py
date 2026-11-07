@@ -66,6 +66,8 @@ def test_person_cameras_gaze_at_nearest_shelter():
     assert "const camX = ax - 1.2, camZ = az + 2.4;" in script
     assert "lookX = ax + (dx / d) * 5.0;" in script
     assert "lookX = ex + (dx / d) * 5.0;" in script
+    assert "function clearCameraSpot(cid, cam, look)" in script
+    assert "clearCameraSpot(cid, new THREE.Vector3(camX," in script
 
 
 def test_cutaway_hides_whole_tile_and_restores_all():
