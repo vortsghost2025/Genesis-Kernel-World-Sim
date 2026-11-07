@@ -4180,29 +4180,47 @@ function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
     activeShelterTileCoords = { x: sx, z: sz, h: sh, tileId: tileId };
     rebuildInteriorVolume();
     rebuildInteriorProps(tileId, selectedPair, currentHb);
-    const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
-    const oGroup = objectGroups[cid];
-    if (oGroup) {
-      for (const child of oGroup.children) {
-        const ud = child.userData || {};
-        const onTile = (tileId != null && ud.tile_id === tileId);
-        const dx = Math.abs(child.position.x - sx);
-        const dz = Math.abs(child.position.z - sz);
-        const near = Math.max(dx, dz) <= 2;
-        const isShelter = String(ud.object_type || "").toLowerCase();
-        const shelterLike = isShelter.includes("shelter") || isShelter.includes("cabin") || isShelter.includes("hut");
-        if (onTile || (near && shelterLike)) {
-          child.visible = false;
-          cutawayShelterProps.push(child);
-        }
-      }
-      cutawayShelterProp = cutawayShelterProps[0] || null;
-    }
+    hideExteriorPropsForInterior();
   } else {
     activeShelterTileCoords = null;
     disposeInteriorVolume();
     rebuildInteriorProps(null, selectedPair, currentHb);
   }
+}
+
+function hideExteriorPropsForInterior() {
+  // Phase 10OX: hide every object prop on the active shelter tile plus
+  // every object prop within Chebyshev 2 (any type), so neighboring huts
+  // and campfires stop standing over the diorama. Re-appliable: the
+  // object set is rebuilt on heartbeat changes, which resurrects props.
+  const coords = activeShelterTileCoords;
+  if (!coords) return;
+  const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
+  const oGroup = objectGroups[cid];
+  if (!oGroup) return;
+  // The object set is rebuilt (disposed + recreated) whenever the active
+  // object signature changes. Tracked props then go stale; forget them so
+  // the re-hide tracks the live children instead.
+  if (cutawayShelterProps.length > 0) {
+    const live = new Set(oGroup.children);
+    if (!cutawayShelterProps.some(prop => live.has(prop))) {
+      cutawayShelterProps = [];
+      cutawayShelterProp = null;
+    }
+  }
+  for (const child of oGroup.children) {
+    if (!child.visible) continue;
+    const ud = child.userData || {};
+    const onTile = (coords.tileId != null && ud.tile_id === coords.tileId);
+    const dx = Math.abs(child.position.x - coords.x);
+    const dz = Math.abs(child.position.z - coords.z);
+    const near = Math.max(dx, dz) <= 2;
+    if (onTile || near) {
+      child.visible = false;
+      cutawayShelterProps.push(child);
+    }
+  }
+  cutawayShelterProp = cutawayShelterProps[0] || null;
 }
 
 function refreshInteriorProps() {
@@ -4215,6 +4233,7 @@ function refreshInteriorProps() {
     selectedPair,
     currentHb
   );
+  hideExteriorPropsForInterior();
 }
 
 // -------------------------------------------------------------

@@ -39,10 +39,13 @@ def test_interior_clearance_and_framing():
 def test_cutaway_hides_whole_tile_and_restores_all():
     script = _get_prototype_script()
     assert "cutawayShelterProps = []" in script
-    assert "const onTile = (tileId != null && ud.tile_id === tileId);" in script
+    assert "const onTile = (coords.tileId != null && ud.tile_id === coords.tileId);" in script
     assert "Math.max(dx, dz) <= 2" in script
     assert "cutawayShelterProps.push(child)" in script
     assert "for (const prop of cutawayShelterProps) {" in script
+    # re-hide must be re-appliable after object-set rebuilds, with stale reset
+    assert "function hideExteriorPropsForInterior()" in script
+    assert "hideExteriorPropsForInterior();" in script
 
 
 def test_sync_stays_interior_props_refresh_only():
