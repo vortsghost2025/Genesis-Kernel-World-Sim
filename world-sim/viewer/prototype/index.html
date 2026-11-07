@@ -710,6 +710,9 @@ header {
         <button class="cam-btn active" id="cam-cinematic">🏞️ Elevated Landscape</button>
         <button class="cam-btn" id="cam-focus-adam">🧍 Focus Adam</button>
         <button class="cam-btn" id="cam-focus-eve">🧍 Focus Eve</button>
+        <button class="cam-btn" id="cam-settlement" title="Frame the current pair's public-object centroid">🏘️ Settlement</button>
+        <button class="cam-btn follow-btn" id="cam-follow-adam" title="Toggle per-frame follow of Adam">🎥 Adam</button>
+        <button class="cam-btn follow-btn" id="cam-follow-eve" title="Toggle per-frame follow of Eve">🎥 Eve</button>
         <button class="cam-btn" id="cam-topdown">🗺️ Top-Down</button>
         <button class="cam-btn" id="cam-interior">🏠 Enter House (Interior)</button>
       </div>
@@ -803,6 +806,7 @@ try {
 // State
 let selectedPair = "east";
 let activeCamMode = "landscape";
+let followAgent = null;
 let playbackMode = "live";
 let isPlaying = false;
 let playSpeed = 2;
@@ -4380,9 +4384,64 @@ objectGroups.cont_b.position.set(0, 0, 0);
 // 1. "human"     -> Human-Eye Perspective (standing at eye level ~1.52m behind Adam looking toward Eve / settlement)
 // 2. "landscape" -> Elevated Landscape View (sweeping valley overlook dynamically framing both agents' positions)
 // 3. "orbit"     -> Full-Continent Orbit View (both 40,000-tile continents side-by-side across the Great Ocean)
+// Phase 10OR: settlement preset + follow-agent state. getSettlementCentroid
+// is pure over the exported public_objects so the landscape blend and the
+// settlement button can never disagree about where "the settlement" is.
+function getSettlementCentroid(pairName) {
+  const pobjs = (PAIRS[pairName] && PAIRS[pairName].public_objects) ? Object.values(PAIRS[pairName].public_objects) : [];
+  let sumX = 0, sumZ = 0, count = 0;
+  for (const po of pobjs) {
+    if (!po || !po.tile_id) continue;
+    const t = tilesById.get(po.tile_id);
+    if (t && t.coordinates) {
+      sumX += t.coordinates.x;
+      sumZ += t.coordinates.y;
+      count += 1;
+      continue;
+    }
+    const m = /_(-?\d+)_(-?\d+)$/.exec(String(po.tile_id));
+    if (m) {
+      sumX += Number(m[1]);
+      sumZ += Number(m[2]);
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  return { x: sumX / count, z: sumZ / count, count };
+}
+
+function updateFollowButtons() {
+  const a = document.getElementById("cam-follow-adam");
+  const e = document.getElementById("cam-follow-eve");
+  if (a) a.classList.toggle("active", followAgent === "adam");
+  if (e) e.classList.toggle("active", followAgent === "eve");
+}
+
+function setFollowAgentState(agent) {
+  followAgent = (agent === "adam" || agent === "eve") ? agent : null;
+  updateFollowButtons();
+}
+
+function toggleFollowAgent(agent) {
+  if (followAgent === agent) {
+    setFollowAgentState(null);
+    return;
+  }
+  setFollowAgentState(agent);
+  applyCameraMode(agent, false);
+}
+
 function applyCameraMode(mode, immediate = true) {
   activeCamMode = mode;
-  document.querySelectorAll(".cam-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".cam-btn:not(.follow-btn)").forEach(b => b.classList.remove("active"));
+  // Follow is tied to an agent focus mode. Switching to any other mode (or
+  // to the other agent's focus button) releases the lock; switching civ also
+  // releases it in focusCiv.
+  if (mode === "adam" || mode === "eve") {
+    if (followAgent && followAgent !== mode) setFollowAgentState(null);
+  } else {
+    setFollowAgentState(null);
+  }
 
   const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
   const cid = (pairName === "west") ? "cont_b" : "cont_a";
@@ -4451,6 +4510,7 @@ function applyCameraMode(mode, immediate = true) {
     sunLight.target.position.set(0, 0, 0);
     sunLight.target.updateMatrixWorld();
     smoothMoveCamera(orbitDir.multiplyScalar(dist), new THREE.Vector3(0, 0, 0), immediate);
+    updateFollowButtons();
     return;
   }
 
@@ -4499,31 +4559,11 @@ function applyCameraMode(mode, immediate = true) {
     camera.updateProjectionMatrix();
 
     // Anchor valley framing on built settlement structures blended with active agent positions
-    const pobjs = (PAIRS[pairName] && PAIRS[pairName].public_objects) ? Object.values(PAIRS[pairName].public_objects) : [];
-    let sSumX = 0, sSumZ = 0, sCnt = 0;
-    function addCamSettleCoord(tid) {
-      if (!tid) return;
-      const t = tilesById.get(tid);
-      if (t && t.coordinates) {
-        sSumX += t.coordinates.x;
-        sSumZ += t.coordinates.y;
-        sCnt += 1;
-        return;
-      }
-      const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid));
-      if (m) {
-        sSumX += Number(m[1]);
-        sSumZ += Number(m[2]);
-        sCnt += 1;
-      }
-    }
-    for (const po of pobjs) {
-      if (po && po.tile_id) addCamSettleCoord(po.tile_id);
-    }
+    const settle = getSettlementCentroid(pairName);
     const agentCx = (ax + ex) * 0.5;
     const agentCz = (az + ez) * 0.5;
-    const cx = (sCnt > 0) ? ((sSumX / sCnt) * 0.78 + agentCx * 0.22) : agentCx;
-    const cz = (sCnt > 0) ? ((sSumZ / sCnt) * 0.78 + agentCz * 0.22) : agentCz;
+    const cx = settle ? (settle.x * 0.78 + agentCx * 0.22) : agentCx;
+    const cz = settle ? (settle.z * 0.78 + agentCz * 0.22) : agentCz;
 
     const ch = getTerrainHeight(cid, cx, cz);
     const camX = cx - 2.0;
@@ -4540,6 +4580,29 @@ function applyCameraMode(mode, immediate = true) {
     const eyeY = Math.max(ch + 7.2, maxPathH + 4.0);
     // Val di Funes / Dolomites framing: village in foreground sunlit pasture (22-38% up, clear of bottom HUD), dark spruce foothills in middle (38-58%), jagged spires + blue sky in upper frame
     smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx - 0.5, eyeY - 0.4, cz - 18.0), immediate);
+  } else if (mode === "settlement") {
+    // Phase 10OR: dedicated settlement preset. Frame the public-object
+    // centroid purely (no agent blend); fall back to the agent midpoint so an
+    // object-less lane still gets a useful view instead of the continent origin.
+    document.getElementById("cam-settlement").classList.add("active");
+    scene.fog.density = 0.0018;
+    camera.fov = 48;
+    camera.updateProjectionMatrix();
+    const settle = getSettlementCentroid(pairName);
+    const cx = settle ? settle.x : (ax + ex) * 0.5;
+    const cz = settle ? settle.z : (az + ez) * 0.5;
+    const ch = getTerrainHeight(cid, cx, cz);
+    const camX = cx - 3.0;
+    const camZ = cz + 22.0;
+    let maxPathH = ch;
+    for (let s = 1; s <= 10; s++) {
+      const t = s / 10.0;
+      const sx = cx + (camX - cx) * t;
+      const sz = cz + (camZ - cz) * t;
+      maxPathH = Math.max(maxPathH, getTerrainHeight(cid, sx, sz));
+    }
+    const eyeY = Math.max(ch + 6.2, maxPathH + 3.5);
+    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx, eyeY - 0.8, cz - 8.0), immediate);
   } else if (mode === "adam") {
     document.getElementById("cam-focus-adam").classList.add("active");
     scene.fog.density = 0.007;
@@ -4612,11 +4675,15 @@ function applyCameraMode(mode, immediate = true) {
   if (mode !== "interior") {
     toggleInteriorCutaway(false);
   }
+  updateFollowButtons();
 }
 
 // Focus Civilization
 function focusCiv(pairName) {
   selectedPair = pairName;
+  // Phase 10OR: a follow lock is per viewed civ; switching East/West/Orbit
+  // releases it rather than silently following the other lane's figure.
+  setFollowAgentState(null);
   updateHbBounds();
 
   document.querySelectorAll(".nav-pill").forEach(p => p.classList.remove("active"));
@@ -5169,6 +5236,9 @@ document.getElementById("cam-human").onclick = () => applyCameraMode("human", fa
 document.getElementById("cam-cinematic").onclick = () => applyCameraMode("landscape", false);
 document.getElementById("cam-focus-adam").onclick = () => applyCameraMode("adam", false);
 document.getElementById("cam-focus-eve").onclick = () => applyCameraMode("eve", false);
+document.getElementById("cam-settlement").onclick = () => applyCameraMode("settlement", false);
+document.getElementById("cam-follow-adam").onclick = () => toggleFollowAgent("adam");
+document.getElementById("cam-follow-eve").onclick = () => toggleFollowAgent("eve");
 document.getElementById("cam-topdown").onclick = () => applyCameraMode("topdown", false);
 const camInterior = document.getElementById("cam-interior");
 if (camInterior) camInterior.onclick = () => applyCameraMode("interior", false);
@@ -5434,6 +5504,24 @@ function animate(time) {
   updateAllAgentFigures(time);
   animateActionParticles(dt, time);
 
+  // Phase 10OR: per-frame follow-agent. The figure position above is already
+  // interpolated between heartbeats, so tracking it here keeps the camera on
+  // the visible agent mid-stride. Translate the camera by the same delta as
+  // the target so the operator's zoom/orbit offset is preserved.
+  if (followAgent && selectedPair !== "orbit") {
+    const fig = charFigures[followAgent];
+    if (fig && fig.visible) {
+      const desired = new THREE.Vector3(fig.position.x, fig.position.y + 0.9, fig.position.z);
+      const delta = desired.clone().sub(controls.target);
+      camera.position.add(delta);
+      controls.target.copy(desired);
+      camTargetPos.copy(camera.position);
+      controlsTargetPos.copy(controls.target);
+      camAnimating = false;
+      controls.update();
+    }
+  }
+
   // 3D Precipitation Rain Streaks Animation
   if (rainLines && rainLines.visible) {
     rainLines.position.set(camera.position.x, 0, camera.position.z);
@@ -5489,6 +5577,7 @@ window.__GENESIS_PROTO__ = {
     return {
       selectedPair,
       activeCamMode,
+      followAgent,
       playbackMode,
       currentHb,
       minHb,
@@ -5519,6 +5608,25 @@ window.__GENESIS_PROTO__ = {
     updateAllAgentFigures(performance.now());
     renderer.render(scene, camera);
     return this.getCameraState();
+  },
+  setFollowAgent(agent) {
+    if (agent === "adam" || agent === "eve") {
+      if (followAgent !== agent) {
+        setFollowAgentState(agent);
+        applyCameraMode(agent, true);
+      }
+    } else {
+      setFollowAgentState(null);
+    }
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getState();
+  },
+  toggleFollowAgent(agent) {
+    toggleFollowAgent(agent);
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getState();
   },
   evaluateLivePollUpdate(freshData) {
     return evaluateLivePollUpdate(freshData);
