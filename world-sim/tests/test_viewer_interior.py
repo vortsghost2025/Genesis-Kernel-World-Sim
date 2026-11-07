@@ -40,13 +40,30 @@ def test_interior_clearance_and_framing():
 def test_interior_volume_is_enclosed_room():
     script = _get_prototype_script()
     assert "const wallH = 1.9;" in script
-    assert "ceiling:" in script
-    assert "spec.ceiling" in script
+    assert "roof:" in script
+    assert "spec.roof" in script
     # front door-gap walls are full height too
     assert '{ id: "front_left",  width: frontSegW, height: wallH, depth: wallT' in script
     # figures sit across the room, not in the camera's face
     assert "(isEve ? -1.0 : 0.9)" in script
     assert "(isEve ? -0.7 : -0.9)" in script
+
+
+def test_wall_roof_texture_and_warm_light():
+    script = _get_prototype_script()
+    assert "logWallMat" in script and "roofMat" in script
+    assert "spec.roof" in script and "slopeLen" in script
+    assert "new THREE.PointLight(0xffb45e" in script
+    assert "sillWallMat = logWallMat" in script
+
+
+def test_person_cameras_gaze_at_nearest_shelter():
+    script = _get_prototype_script()
+    assert "function getNearestShelterXY(pairName, fromX, fromZ)" in script
+    assert "const shelterA = getNearestShelterXY(pairName, ax, az);" in script
+    assert "const shelterE = getNearestShelterXY(pairName, ex, ez);" in script
+    assert "camX = ax - ux * 3.2;" in script
+    assert "lookX = ax + ux * 7.0;" in script
 
 
 def test_cutaway_hides_whole_tile_and_restores_all():

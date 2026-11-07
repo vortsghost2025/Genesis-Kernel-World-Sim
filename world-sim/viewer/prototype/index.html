@@ -4002,7 +4002,40 @@ fctx.fillStyle = "#3a2210";
 for (let p = 0; p < 128; p += 16) { fctx.fillRect(0, p, 128, 2); }
 const floorTex = new THREE.CanvasTexture(floorCanvas);
 const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, userData: { isSharedMaterial: true } });
-const sillWallMat = new THREE.MeshStandardMaterial({ color: 0x5c3c20, roughness: 0.88, userData: { isSharedMaterial: true } });
+
+// Phase 10PD: procedural log walls + thatch roof so the room reads as a
+// cabin, not a flat box.
+const logCanvas = document.createElement("canvas");
+logCanvas.width = 256; logCanvas.height = 256;
+const lctx = logCanvas.getContext("2d");
+lctx.fillStyle = "#5a3818"; lctx.fillRect(0, 0, 256, 256);
+for (let y = 0; y < 256; y += 32) {
+  lctx.fillStyle = (y / 32) % 2 ? "#6e4825" : "#553514";
+  lctx.fillRect(0, y, 256, 30);
+  lctx.fillStyle = "rgba(0,0,0,0.35)";
+  lctx.fillRect(0, y + 30, 256, 2);
+  lctx.fillStyle = "rgba(255,230,180,0.12)";
+  lctx.fillRect(0, y + 4, 256, 3);
+}
+const logTex = new THREE.CanvasTexture(logCanvas);
+const logWallMat = new THREE.MeshStandardMaterial({ map: logTex, roughness: 0.9, userData: { isSharedMaterial: true } });
+
+const thatchCanvas = document.createElement("canvas");
+thatchCanvas.width = 256; thatchCanvas.height = 256;
+const tctx = thatchCanvas.getContext("2d");
+tctx.fillStyle = "#8f7434"; tctx.fillRect(0, 0, 256, 256);
+for (let x = 0; x < 256; x += 7) {
+  tctx.strokeStyle = (x / 7) % 2 ? "#a68a4a" : "#7d6428";
+  tctx.beginPath();
+  tctx.moveTo(x, 0);
+  tctx.lineTo(x + 3, 256);
+  tctx.stroke();
+}
+tctx.fillStyle = "#5c4a1e";
+for (let y = 64; y < 256; y += 64) tctx.fillRect(0, y, 256, 4);
+const roofMat = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(thatchCanvas), roughness: 0.95, userData: { isSharedMaterial: true } });
+
+const sillWallMat = logWallMat;
 
 const interiorVolumeGroup = new THREE.Group();
 interiorGroup.add(interiorVolumeGroup);
@@ -4024,7 +4057,18 @@ function buildInteriorVolumeSpec(shelterWidth = 5.4, shelterDepth = 4.4) {
   const frontSegW = Math.max(0.8, (fw - doorGap) * 0.5);
   return {
     floor: { width: fw, depth: fd, thickness: 0.10, y: floorOffset },
-    ceiling: { width: fw + 0.2, depth: fd + 0.2, thickness: 0.10, y: floorOffset + wallH + 0.05 },
+    // Phase 10PD: pitched gabled roof (two slanted thatch slabs + ridge).
+    roof: (() => {
+      const angle = 0.6;
+      const over = halfD + 0.3;
+      return {
+        angle,
+        slopeLen: over / Math.cos(angle),
+        yBase: floorOffset + wallH,
+        ridgeY: floorOffset + wallH + over * Math.tan(angle),
+        over
+      };
+    })(),
     walls: [
       { id: "back",  width: fw + wallT, height: wallH, depth: wallT, x: 0, y: floorOffset + wallH * 0.5, z: -halfD },
       { id: "left",  width: wallT, height: wallH, depth: fd, x: -halfW, y: floorOffset + wallH * 0.5, z: 0 },
@@ -4048,15 +4092,35 @@ function rebuildInteriorVolume() {
   fMesh.receiveShadow = true;
   interiorVolumeGroup.add(fMesh);
 
-  // Ceiling slab capping the room (Phase 10PA).
-  if (spec.ceiling) {
-    const cGeom = new THREE.BoxGeometry(spec.ceiling.width, spec.ceiling.thickness, spec.ceiling.depth);
-    const cMesh = new THREE.Mesh(cGeom, sillWallMat);
-    cMesh.position.set(0, spec.ceiling.y, 0);
-    cMesh.castShadow = true;
-    cMesh.receiveShadow = true;
-    interiorVolumeGroup.add(cMesh);
+  // Pitched thatch roof (Phase 10PD): reads as a house from outside,
+  // caps the room from inside.
+  if (spec.roof) {
+    const roofW = spec.floor.width + 0.5;
+    for (const side of [-1, 1]) {
+      const rGeom = new THREE.BoxGeometry(roofW, 0.12, spec.roof.slopeLen);
+      const rMesh = new THREE.Mesh(rGeom, roofMat);
+      rMesh.position.set(
+        0,
+        spec.roof.yBase + (spec.roof.ridgeY - spec.roof.yBase) * 0.5,
+        side * spec.roof.over * 0.5
+      );
+      rMesh.rotation.x = side * spec.roof.angle;
+      rMesh.castShadow = true;
+      rMesh.receiveShadow = true;
+      interiorVolumeGroup.add(rMesh);
+    }
+    const capGeom = new THREE.BoxGeometry(roofW, 0.14, 0.4);
+    const capMesh = new THREE.Mesh(capGeom, roofMat);
+    capMesh.position.set(0, spec.roof.ridgeY + 0.05, 0);
+    capMesh.castShadow = true;
+    interiorVolumeGroup.add(capMesh);
   }
+
+  // Warm interior light, always while inside (Phase 10PD) — West tiles
+  // with no hearth went shadow-flat under sun-only light.
+  const warmLight = new THREE.PointLight(0xffb45e, 1.1, 12, 1.5);
+  warmLight.position.set(0, spec.floor.y + 1.35, 0);
+  interiorVolumeGroup.add(warmLight);
 
   for (const w of spec.walls) {
     const wGeom = new THREE.BoxGeometry(w.width, w.height, w.depth);
@@ -4464,6 +4528,35 @@ function getSettlementCentroid(pairName) {
   return { x: sumX / count, z: sumZ / count, count };
 }
 
+// Phase 10PD: nearest shelter/cabin/hut coordinates to a point, for
+// biasing the person cameras toward the settlement.
+function getNearestShelterXY(pairName, fromX, fromZ) {
+  const pobjs = (PAIRS[pairName] && PAIRS[pairName].public_objects) ? Object.values(PAIRS[pairName].public_objects) : [];
+  let best = null;
+  let bestD = Infinity;
+  for (const po of pobjs) {
+    if (!po || !po.tile_id) continue;
+    const otype = String(po.object_type || "").toLowerCase();
+    if (!(otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut"))) continue;
+    const t = tilesById.get(po.tile_id);
+    let x = null, z = null;
+    if (t && t.coordinates) {
+      x = t.coordinates.x;
+      z = t.coordinates.y;
+    } else {
+      const m = /_(-?\d+)_(-?\d+)$/.exec(String(po.tile_id));
+      if (m) { x = Number(m[1]); z = Number(m[2]); }
+    }
+    if (x == null || z == null) continue;
+    const d = Math.hypot(x - fromX, z - fromZ);
+    if (d < bestD) {
+      bestD = d;
+      best = { x, z };
+    }
+  }
+  return best;
+}
+
 function updateFollowButtons() {
   const a = document.getElementById("cam-follow-adam");
   const e = document.getElementById("cam-follow-eve");
@@ -4662,21 +4755,53 @@ function applyCameraMode(mode, immediate = true) {
     scene.fog.density = 0.007;
     camera.fov = 38;
     camera.updateProjectionMatrix();
+    // Phase 10PD: look through Adam TOWARD the nearest shelter so the
+    // house sits beyond him instead of only trees. Falls back to the
+    // fixed gaze when the lane has no shelter.
     const ah = getTerrainHeight(cid, ax, az);
-    const camX = ax - 1.8;
-    const camZ = az + 3.4;
+    const shelterA = getNearestShelterXY(pairName, ax, az);
+    let camX = ax - 1.8, camZ = az + 3.4;
+    let lookX = ax + 0.8, lookZ = az - 0.4;
+    if (shelterA) {
+      const dx = shelterA.x - ax;
+      const dz = shelterA.z - az;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.5) {
+        const ux = dx / d, uz = dz / d;
+        camX = ax - ux * 3.2;
+        camZ = az - uz * 3.2;
+        lookX = ax + ux * 7.0;
+        lookZ = az + uz * 7.0;
+      }
+    }
     const gH = getTerrainHeight(cid, camX, camZ);
-    smoothMoveCamera(new THREE.Vector3(camX, Math.max(ah + 1.7, gH + 1.5), camZ), new THREE.Vector3(ax + 0.8, ah + 0.85, az - 0.4), immediate);
+    const lookH = getTerrainHeight(cid, lookX, lookZ);
+    smoothMoveCamera(new THREE.Vector3(camX, Math.max(ah + 1.7, gH + 1.5), camZ), new THREE.Vector3(lookX, Math.max(ah + 0.85, lookH * 0.55 + 0.85), lookZ), immediate);
   } else if (mode === "eve") {
     document.getElementById("cam-focus-eve").classList.add("active");
     scene.fog.density = 0.007;
     camera.fov = 38;
     camera.updateProjectionMatrix();
+    // Phase 10PD: same settlement bias for Eve (see Focus Adam).
     const eh = getTerrainHeight(cid, ex, ez);
-    const camX = ex - 1.8;
-    const camZ = ez + 3.4;
+    const shelterE = getNearestShelterXY(pairName, ex, ez);
+    let camX = ex - 1.8, camZ = ez + 3.4;
+    let lookX = ex + 0.4, lookZ = ez - 0.3;
+    if (shelterE) {
+      const dx = shelterE.x - ex;
+      const dz = shelterE.z - ez;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.5) {
+        const ux = dx / d, uz = dz / d;
+        camX = ex - ux * 3.2;
+        camZ = ez - uz * 3.2;
+        lookX = ex + ux * 7.0;
+        lookZ = ez + uz * 7.0;
+      }
+    }
     const gH = getTerrainHeight(cid, camX, camZ);
-    smoothMoveCamera(new THREE.Vector3(camX, Math.max(eh + 1.7, gH + 1.5), camZ), new THREE.Vector3(ex + 0.4, eh + 0.85, ez - 0.3), immediate);
+    const lookH = getTerrainHeight(cid, lookX, lookZ);
+    smoothMoveCamera(new THREE.Vector3(camX, Math.max(eh + 1.7, gH + 1.5), camZ), new THREE.Vector3(lookX, Math.max(eh + 0.85, lookH * 0.55 + 0.85), lookZ), immediate);
   } else if (mode === "topdown") {
     document.getElementById("cam-topdown").classList.add("active");
     scene.fog.density = 0.003;
