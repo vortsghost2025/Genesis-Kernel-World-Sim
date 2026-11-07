@@ -26,15 +26,15 @@ def _get_prototype_script() -> str:
 def test_interior_button_snaps_and_branch_passes_immediate():
     script = _get_prototype_script()
     assert 'camInterior.onclick = () => applyCameraMode("interior", true)' in script
-    assert "new THREE.Vector3(targetX - 0.4, sh + 0.55, targetZ - 1.1),\n      immediate" in script
+    assert "new THREE.Vector3(targetX + 0.1, sh + 0.4, targetZ - 1.6),\n      immediate" in script
 
 
 def test_interior_clearance_and_framing():
     script = _get_prototype_script()
     assert 'activeCamMode === "interior") ? 1.45 : 3.0' in script
     assert "camera.fov = 58;" in script
-    # camera inside the room, looking across it
-    assert "new THREE.Vector3(targetX + 0.7, sh + 1.35, targetZ + 1.15)" in script
+    # camera inside the room, looking at the back wall, never the door
+    assert "new THREE.Vector3(targetX + 0.2, sh + 1.55, targetZ + 1.35)" in script
 
 
 def test_interior_volume_is_enclosed_room():
@@ -44,18 +44,21 @@ def test_interior_volume_is_enclosed_room():
     assert "spec.ceiling" in script
     # front door-gap walls are full height too
     assert '{ id: "front_left",  width: frontSegW, height: wallH, depth: wallT' in script
+    # figures sit across the room, not in the camera's face
+    assert "(isEve ? -1.0 : 0.9)" in script
+    assert "(isEve ? -0.7 : -0.9)" in script
 
 
 def test_cutaway_hides_whole_tile_and_restores_all():
     script = _get_prototype_script()
     assert "cutawayShelterProps = []" in script
-    assert "const onTile = (coords.tileId != null && ud.tile_id === coords.tileId);" in script
-    assert "Math.max(dx, dz) <= 2" in script
     assert "cutawayShelterProps.push(child)" in script
     assert "for (const prop of cutawayShelterProps) {" in script
     # re-hide must be re-appliable after object-set rebuilds, with stale reset
     assert "function hideExteriorPropsForInterior()" in script
     assert "hideExteriorPropsForInterior();" in script
+    # sealed interior: every object prop hides, no neighbor sprite peeks over the wall
+    assert "child.visible = false;" in script
 
 
 def test_sync_stays_interior_props_refresh_only():

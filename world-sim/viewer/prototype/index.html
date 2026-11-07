@@ -4206,6 +4206,9 @@ function hideExteriorPropsForInterior() {
   // every object prop within Chebyshev 2 (any type), so neighboring huts
   // and campfires stop standing over the diorama. Re-appliable: the
   // object set is rebuilt on heartbeat changes, which resurrects props.
+  // Phase 10PA: tall neighbor sprites still peeked OVER the 1.9 wall, so
+  // while the operator is inside, every object prop in the active
+  // continent group hides — the interior is sealed. Restored on exit.
   const coords = activeShelterTileCoords;
   if (!coords) return;
   const cid = (selectedPair === "west") ? "cont_b" : "cont_a";
@@ -4223,15 +4226,8 @@ function hideExteriorPropsForInterior() {
   }
   for (const child of oGroup.children) {
     if (!child.visible) continue;
-    const ud = child.userData || {};
-    const onTile = (coords.tileId != null && ud.tile_id === coords.tileId);
-    const dx = Math.abs(child.position.x - coords.x);
-    const dz = Math.abs(child.position.z - coords.z);
-    const near = Math.max(dx, dz) <= 2;
-    if (onTile || near) {
-      child.visible = false;
-      cutawayShelterProps.push(child);
-    }
+    child.visible = false;
+    cutawayShelterProps.push(child);
   }
   cutawayShelterProp = cutawayShelterProps[0] || null;
 }
@@ -4725,12 +4721,14 @@ function applyCameraMode(mode, immediate = true) {
       }
     }
     const sh = getTerrainHeight(cid, targetX, targetZ);
-    // Phase 10PA: inside the room, eye ~1.35 under the 2.02 ceiling,
-    // target at torso height across the room. Passes `immediate` through
-    // so the button snaps instead of slow-lerping from the previous view.
+    // Phase 10PA: inside the room near the front-right, looking along
+    // the room's length at the BACK wall (~21 deg down) — never through
+    // the door gap, which faces the camera's side. Eye 1.55 under the
+    // 2.02 ceiling. Passes `immediate` through so the button snaps
+    // instead of slow-lerping from the previous view.
     smoothMoveCamera(
-      new THREE.Vector3(targetX + 0.7, sh + 1.35, targetZ + 1.15),
-      new THREE.Vector3(targetX - 0.4, sh + 0.55, targetZ - 1.1),
+      new THREE.Vector3(targetX + 0.2, sh + 1.55, targetZ + 1.35),
+      new THREE.Vector3(targetX + 0.1, sh + 0.4, targetZ - 1.6),
       immediate
     );
     toggleInteriorCutaway(true, targetX, targetZ, sh, targetTid);
@@ -5478,8 +5476,10 @@ function updateAllAgentFigures(time) {
       const isEve = (agentShort === "eve");
 
       if (isInteriorModeActive && activeShelterTileCoords) {
-        finalX = activeShelterTileCoords.x + (isEve ? -1.0 : 0.8);
-        finalZ = activeShelterTileCoords.z + (isEve ? 0.5 : 0.3);
+        // Phase 10PA: figures sit in the back half, across the room from
+        // the inside camera, instead of at arm's length in front of it.
+        finalX = activeShelterTileCoords.x + (isEve ? -1.0 : 0.9);
+        finalZ = activeShelterTileCoords.z + (isEve ? -0.7 : -0.9);
       } else if (isSheltered) {
         finalX = cx + (isEve ? -1.0 : 0.8);
         finalZ = cz + (isEve ? 0.5 : 0.3);
