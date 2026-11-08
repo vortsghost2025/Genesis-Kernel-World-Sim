@@ -120,7 +120,8 @@ FREEZE_THRESHOLD = 20.0       # at/below this warmth: vitality drains
 def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
                 in_shelter: bool, wet: float = 0.0,
                 comfort_floor: float = SHELTER_COMFORT_FLOOR,
-                shelter_decay_factor: float = SHELTER_DECAY_FACTOR) -> float:
+                shelter_decay_factor: float = SHELTER_DECAY_FACTOR,
+                approach_rate: float = WARMTH_APPROACH_RATE) -> float:
     """Warmth drifts toward the ambient comfort level.
 
     A fire dominates: warmth climbs toward 100 fast regardless of season.
@@ -138,7 +139,7 @@ def warmth_next(warmth: float, ambient_temp: float, by_fire: bool,
     if by_fire and wet < 50.0:
         return min(100.0, warmth + FIRE_WARMTH_PER_HB)
     gap = comfort - warmth
-    change = gap * WARMTH_APPROACH_RATE
+    change = gap * max(0.0, approach_rate)
     if wet >= 50.0:
         change *= 0.4
     if change < 0 and in_shelter:
@@ -264,12 +265,16 @@ STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
 
 def vitality_next(vitality: float, hunger: float, warmth: float,
                   downed: bool, in_shelter: bool = False,
-                  regen_rate: float | None = None) -> float:
+                  regen_rate: float | None = None,
+                  downed_regen_rate: float | None = None) -> float:
     """Vitality drains under neglect, regenerates under care.
     Rest inside a shelter heals faster - comfort is medicine.
     Compounds provide enhanced vitality recovery (Phase 10JV/10JX)."""
     if downed:
-        rate = DOWNED_REGEN_IN_SHELTER if in_shelter else DOWNED_PASSIVE_REGEN
+        if in_shelter and downed_regen_rate is not None:
+            rate = downed_regen_rate
+        else:
+            rate = DOWNED_REGEN_IN_SHELTER if in_shelter else DOWNED_PASSIVE_REGEN
         return min(RECOVERY_STAND_AT, vitality + rate)
     v = vitality
     if hunger >= HUNGER_WEAKEN:
@@ -294,7 +299,9 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
                     weather: str = "clear",
                     comfort_floor: float = SHELTER_COMFORT_FLOOR,
                     shelter_decay_factor: float = SHELTER_DECAY_FACTOR,
-                    regen_rate: float | None = None) -> dict:
+                    regen_rate: float | None = None,
+                    downed_regen_rate: float | None = None,
+                    warmth_approach_rate: float = WARMTH_APPROACH_RATE) -> dict:
     """One heartbeat of embodiment. Returns a NEW vitals dict.
 
     `ate_satisfaction` is the hunger points satisfied by food eaten this
@@ -310,11 +317,13 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
     warmth = warmth_next(vitals.get("warmth", 50.0), temp,
                          by_fire, in_shelter, wetness,
                          comfort_floor=comfort_floor,
-                         shelter_decay_factor=shelter_decay_factor)
+                         shelter_decay_factor=shelter_decay_factor,
+                         approach_rate=warmth_approach_rate)
     downed = bool(vitals.get("downed", False))
     vitality = vitality_next(vitals.get("vitality", 100.0), hunger,
                              warmth, downed, in_shelter,
-                             regen_rate=regen_rate)
+                             regen_rate=regen_rate,
+                             downed_regen_rate=downed_regen_rate)
     if weather == "storm" and not in_shelter and not downed:
         vitality = max(0.0, vitality - STORM_EXPOSURE_DRAIN)
     if downed and vitality >= RECOVERY_STAND_AT:

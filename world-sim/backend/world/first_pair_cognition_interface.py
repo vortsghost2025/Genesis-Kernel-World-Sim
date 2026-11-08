@@ -100,6 +100,9 @@ class AgentContext:
     operator_messages: list = field(default_factory=list)
     # Shelter ownership (Phase 10KX/10KZ): true if this agent owns a constructed shelter
     owns_shelter: bool = False
+    # Home-network footprint (Phase 10PJ): roofed connected footprint units
+    # reached from this position; warmth/recovery/storage scale from it.
+    home_network_footprint: int = 0
     # Resource roll-up (Phase 10OU): "" when the agent has observed no
     # resources; otherwise "stone: tile-a, tile-b; clay: tile-c" from the
     # agent's own known map only. Factual line, never a suggestion.

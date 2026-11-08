@@ -348,6 +348,47 @@ _STRUCTURAL_TIMBER_MIN = {
 # component is discounted. Half the timber minimum, rounding up.
 _ADDON_STRUCTURAL_DISCOUNT_DIVISOR = 2
 
+# Phase 10PJ: thermal physics scale with a roofed footprint network, not
+# with the raw number of shelter objects. One compact roofed line is one
+# larger home; scattered duplicates remain small.
+_HOME_NETWORK_TIERS = (
+    (1, 45.0, 0.45, 1.00, 0.40, 0.10),
+    (2, 52.0, 0.30, 1.25, 0.55, 0.12),
+    (3, 62.0, 0.18, 1.50, 0.70, 0.15),
+    (5, 68.0, 0.14, 1.75, 0.90, 0.18),
+    (8, 75.0, 0.10, 2.00, 1.10, 0.22),
+)
+_CELLAR_FOOD_BUDGET_PER_FOOTPRINT = 20
+
+
+def _home_network_tier(footprint: int) -> tuple[float, float, float, float, float]:
+    """Map roofed footprint to warmth floor, cold decay, rest regen,
+    downed regen, and warmth approach rates."""
+    footprint = max(0, int(footprint or 0))
+    params = _HOME_NETWORK_TIERS[0][1:]
+    for threshold, floor, decay, regen, downed, approach in _HOME_NETWORK_TIERS:
+        if footprint >= threshold:
+            params = (floor, decay, regen, downed, approach)
+    return params
+
+
+def _roofed_structure_weight(object_type: str) -> int:
+    """Roofed footprint weight for a public object type.
+
+    A `cabin` occupies a larger roofed volume than a lean-to or hut.
+    Duplicate structures on one tile do not multiply in the caller, which
+    keeps the largest weight per tile instead of summing all records.
+    """
+    otype = str(object_type or "").lower()
+    if "cabin" in otype:
+        return 2
+    if any(kind in otype for kind in (
+        "shelter", "hut", "roof", "tent", "lean", "cave", "cavern",
+        "overhang", "grotto", "burrow", "stable", "cellar",
+    )):
+        return 1
+    return 0
+
 # Phrases that would turn a disclosure of facts into an instruction. Used by
 # the cognition-model recipe advertisement and by its regression test.
 _BANNED_DIRECTIVE_PHRASES = (
@@ -1590,6 +1631,9 @@ class FirstPairRuntime:
             physics=dict(observation["physics"]),
             operator_messages=operator_messages,
             owns_shelter=owns_shelter,
+            home_network_footprint=(
+                self._home_network_footprint(position) if position else 0
+            ),
             observed_resource_rollup=self._rollup_for(agent_ref),
         )
 
@@ -1743,6 +1787,94 @@ class FirstPairRuntime:
                     continue
                 return True
         return False
+
+    def _connected_home_network(self, tile_id: str) -> tuple[int, set[str]]:
+        """One connected roofed footprint and its object IDs.
+
+        Adjacent structures form one home network; duplicates sharing a
+        tile do not add footprint. Returns footprint units (weighted)
+        and IDs of roofed objects in the network reached from the target
+        tile, if any.
+        """
+        pos = self._tile_xy(str(tile_id or ""))
+        if pos is None:
+            return 0, set()
+        continent = self._tile_continent(str(tile_id or ""))
+        nodes: dict[tuple[int, int], tuple[int, list[str]]] = {}
+        for oid, record in list(((self._world_state.public_objects or {}).items())):
+            if not isinstance(record, dict):
+                continue
+            rec_tid = record.get("tile_id", "")
+            if self._tile_continent(rec_tid) != continent:
+                continue
+            xy = self._tile_xy(rec_tid)
+            if xy is None:
+                continue
+            weight = _roofed_structure_weight(str(record.get("object_type", "")))
+            if weight <= 0:
+                continue
+            current_weight, ids = nodes.get(xy, (0, []))
+            ids.append(oid)
+            nodes[xy] = (max(current_weight, weight), ids)
+        if not nodes:
+            return 0, set()
+
+        px, py = pos
+        seeds = [
+            xy for xy in nodes
+            if max(abs(xy[0] - px), abs(xy[1] - py)) <= 1
+        ]
+        if not seeds:
+            return 0, set()
+
+        visited: set[tuple[int, int]] = set()
+        stack = list(seeds)
+        while stack:
+            xy = stack.pop()
+            if xy in visited:
+                continue
+            visited.add(xy)
+            for other in nodes:
+                if other not in visited and max(abs(other[0] - xy[0]), abs(other[1] - xy[1])) <= 1:
+                    stack.append(other)
+
+        footprint = sum(nodes[xy][0] for xy in visited)
+        object_ids = set()
+        for xy in visited:
+            _w, ids = nodes[xy]
+            object_ids.update(ids)
+        return footprint, object_ids
+
+    def _home_network_footprint(self, tile_id: str) -> int:
+        footprint, _ = self._connected_home_network(str(tile_id or ""))
+        return footprint
+
+    def _shelter_params_for(self, tile_id: str) -> dict:
+        footprint = self._home_network_footprint(tile_id)
+        explicit = 0
+        compounds = getattr(self._world_state, "compounds", {}) or {}
+        for comp in compounds.values():
+            if not isinstance(comp, dict):
+                continue
+            rooms = comp.get("rooms") or {}
+            if any(isinstance(r, dict) and r.get("tile_id") == tile_id and r.get("roofed") for r in rooms.values()):
+                explicit = max(explicit, int(comp.get("thermal_mass", 0) or 0))
+        footprint = max(footprint, explicit)
+        floor, decay, regen, downed_regen, approach = _home_network_tier(footprint)
+        return {
+            "footprint": footprint,
+            "comfort_floor": floor,
+            "shelter_decay_factor": decay,
+            "regen_rate": regen,
+            "downed_regen_rate": downed_regen,
+            "approach_rate": approach,
+        }
+
+    def _cellar_food_capacity(self, obj_id: str) -> int:
+        record = (self._world_state.public_objects or {}).get(obj_id) or {}
+        tile_id = record.get("tile_id", "")
+        footprint, _ = self._connected_home_network(str(tile_id))
+        return _CELLAR_FOOD_BUDGET_PER_FOOTPRINT * max(1, footprint)
 
     def _in_shelter(self, tile_id: str) -> bool:
         """Shelter here or adjacent: the cold drains less than half as fast."""
@@ -2079,25 +2211,15 @@ class FirstPairRuntime:
             comfort_floor = survival.SHELTER_COMFORT_FLOOR
             shelter_decay = survival.SHELTER_DECAY_FACTOR
             regen_rate = None
+            downed_regen_rate = None
+            warmth_approach_rate = survival.WARMTH_APPROACH_RATE
             if in_shelter and position:
-                comp_mass = 1
-                compounds = getattr(self._world_state, "compounds", {}) or {}
-                for comp in compounds.values():
-                    rooms = comp.get("rooms", {})
-                    if any(r.get("tile_id") == position for r in rooms.values()):
-                        comp_mass = max(comp_mass, comp.get("thermal_mass", len(rooms)))
-                if comp_mass >= 3:
-                    shelter_decay = 0.18
-                    comfort_floor = 62.0
-                    regen_rate = 1.50
-                elif comp_mass == 2:
-                    shelter_decay = 0.30
-                    comfort_floor = 52.0
-                    regen_rate = 1.25
-                else:
-                    shelter_decay = 0.45
-                    comfort_floor = 45.0
-                    regen_rate = 1.00
+                params = self._shelter_params_for(position)
+                comfort_floor = params["comfort_floor"]
+                shelter_decay = params["shelter_decay_factor"]
+                regen_rate = params["regen_rate"]
+                downed_regen_rate = params["downed_regen_rate"]
+                warmth_approach_rate = params["approach_rate"]
 
             self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
                 vitals, heartbeat_number, by_fire=by_fire,
@@ -2105,7 +2227,9 @@ class FirstPairRuntime:
                 weather=weather,
                 comfort_floor=comfort_floor,
                 shelter_decay_factor=shelter_decay,
-                regen_rate=regen_rate)
+                regen_rate=regen_rate,
+                downed_regen_rate=downed_regen_rate,
+                warmth_approach_rate=warmth_approach_rate)
 
     def _downed_tile_feed(self, agent_ref: str, position: str | None) -> float:
         """A collapsed body eats from objects on its own tile.
@@ -3175,13 +3299,50 @@ class FirstPairRuntime:
                     return {"status": "rejected",
                             "reason": f"Not enough {kind}: you hold {held}, "
                                       f"tried to deposit {amount}"}
+            # Phase 10PJ: storage_cellar food capacity scales with the
+            # connected home's roofed footprint; existing contents are
+            # grandfathered, only new deposits encounter the budget.
+            cellar_capacity = None
+            if "cellar" in obj_type:
+                cellar_capacity = self._cellar_food_capacity(obj_id)
+                edible_kinds = set(survival.EAT_SATISFACTION)
+                current_food = 0
+                _, network_ids = self._connected_home_network(str(obj.get("tile_id", "")))
+                for oid in network_ids:
+                    record = (self._world_state.public_objects or {}).get(oid) or {}
+                    if not isinstance(record, dict):
+                        continue
+                    if "cellar" not in str(record.get("object_type", "")).casefold():
+                        continue
+                    contents = record.get("contents") or {}
+                    current_food += sum(
+                        int(contents.get(kind, 0) or 0) for kind in edible_kinds
+                    )
+                incoming_food = sum(
+                    int(amount) for kind, amount in materials.items()
+                    if kind in edible_kinds
+                )
+                if incoming_food and current_food + incoming_food > cellar_capacity:
+                    return {
+                        "status": "rejected",
+                        "reason": (
+                            f"Cellar food budget exceeded: stores {current_food} "
+                            f"of {cellar_capacity} home food units"
+                        ),
+                    }
             # All checks pass; move the materials via the persistence layer
             for kind, amount in materials.items():
                 add_to_inventory(self._store, agent_ref, kind, -amount)
                 obj["contents"][kind] = obj["contents"].get(kind, 0) + amount
-            return {"status": "success",
-                    "detail": f"Deposited {materials} into {obj_id}",
-                    "contents": dict(obj["contents"])}
+            detail = f"Deposited {materials} into {obj_id}"
+            outcome = {
+                "status": "success",
+                "detail": detail,
+                "contents": dict(obj["contents"]),
+            }
+            if cellar_capacity is not None:
+                outcome["storage_budget"] = cellar_capacity
+            return outcome
 
         if operation == "extract":
             from backend.world.first_pair_persistence import add_to_inventory

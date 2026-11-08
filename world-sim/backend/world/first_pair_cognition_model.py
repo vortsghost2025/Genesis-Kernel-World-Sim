@@ -1232,6 +1232,27 @@ def _structural_timber_requirement_desc() -> str:
     )
 
 
+def _home_network_description() -> str:
+    from backend.world.first_pair_runtime import _HOME_NETWORK_TIERS
+
+    rows = []
+    for threshold, floor, decay, regen, downed, approach in _HOME_NETWORK_TIERS:
+        rows.append(
+            f"{threshold} footprint: comfort floor {floor:g}, cold decay "
+            f"{decay:g}, rest recovery {regen:g}/hb, downed recovery "
+            f"{downed:g}/hb, warmth approach {approach:g}"
+        )
+    return (
+        "- Connected roofed home footprint: adjacent shelter, hut, roof, "
+        "tent, lean-to, cabin, stable, and cellar structures form one "
+        "connected home network; `cabin` counts as two footprint units and "
+        "each tile counts at most once. "
+        + "; ".join(rows)
+        + ". Storage-cellars in the same connected home share a food "
+        "budget of 20 units x connected footprint."
+    )
+
+
 def _craft_recipe_advertisement() -> str:
     """Disclose the crafting recipes as facts, not instructions.
 
@@ -1278,7 +1299,7 @@ Available actions:
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default. Holding tools (stone/iron axe, woven basket) increases gathering yield
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
-- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}; optional: addon_to referencing an existing adjacent structure to build a multi-room compound) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'shelter_stable' protects domestic animals from wolves and wandering; 'storage_cellar' preserves perishable food 4x longer; 'enclosed_garden' enables crop planting; 'campfire' or 'hearth' provides warmth (radiating throughout connected compound rooms); 'crafting_surface' enables tool crafting
+- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}; optional: addon_to referencing an existing adjacent structure to build a multi-room compound) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'shelter_stable' protects domestic animals from wolves and wandering; 'storage_cellar' shares a food budget equal to 20 units times the connected home footprint; 'enclosed_garden' enables crop planting; 'campfire' or 'hearth' provides warmth (radiating throughout connected compound rooms); 'crafting_surface' enables tool crafting
 - hew_timber: strike a tree on your tile to fell it (requires: reason; optional: tool) — requires an axe (stone_axe, iron_axe) or knapped blade (flint_knife) to fell trees into structural timber logs for framing compounds
 - plant_crop: sow 1 unit of crop resource (wild_berries, edible_roots, wild_grain) into an enclosed garden bed (requires: target_id, resource_kind, reason)
 - harvest_crop: harvest mature produce and seed units from an enclosed garden bed (requires: target_id, reason)
@@ -1418,6 +1439,7 @@ def build_system_prompt(context: AgentContext) -> str:
     # module while loading, so a module-level call would be circular.
     _CRAFT_RECIPE_DESC = _craft_recipe_advertisement()
     _STRUCTURAL_TIMBER_DESC = _structural_timber_requirement_desc()
+    _HOME_NETWORK_DESC = _home_network_description()
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
         json.dumps(context.unanswered_questions, indent=2)
@@ -1851,6 +1873,18 @@ def build_system_prompt(context: AgentContext) -> str:
     if not getattr(context, "owns_shelter", False):
         settlement_lines.append("Fact: you own no shelter of your own.")
 
+    footprint = int(getattr(context, "home_network_footprint", 0) or 0)
+    if footprint > 0:
+        from backend.world.first_pair_runtime import _home_network_tier
+        floor, decay, regen, downed, approach = _home_network_tier(footprint)
+        settlement_lines.append(
+            f"Fact: connected roofed home footprint is {footprint}; "
+            f"comfort floor is {floor:g}; cold decay factor is {decay:g}; "
+            f"rest recovery is {regen:g} per heartbeat; downed recovery is "
+            f"{downed:g} per heartbeat; warmth approach is {approach:g}; "
+            f"storage-cellar food budget is {footprint * 20} units."
+        )
+
     stone = inv.get("stone", 0) or 0
     wood = inv.get("wood", 0) or 0
     if stone > 0 or wood > 0:
@@ -1973,6 +2007,7 @@ Answers you have received:
 {answered_str}
 {_AVAILABLE_ACTIONS_DESC}
 {_CRAFT_RECIPE_DESC}
+{_HOME_NETWORK_DESC}
 {_STRUCTURAL_TIMBER_DESC}
 {_MESSAGE_FIELD_DESC}
 You must respond with a single JSON object containing exactly these fields:
