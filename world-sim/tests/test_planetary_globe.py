@@ -573,3 +573,35 @@ def test_orbit_globe_labels_mark_both_canonical_continents():
     assert "const radius = GLOBE_RADIUS + 18.0;" in script
     assert "facing > 0.05" in script
     assert "updateGlobeLabels();" in script
+
+
+def test_globe_atlas_is_high_resolution_and_biome_driven():
+    """The orbit sphere must use a real biome atlas, not latitude stripes.
+
+    The 2048x1024 canvas, canonical patch rasterization, cloud sphere, and
+    atmosphere shell are the visual layers that make the planet read as an
+    orbital atlas instead of a painted toy ball.
+    """
+    script = _get_prototype_script()
+
+    assert "const PLANET_ATLAS_WIDTH = 2048;" in script
+    assert "const PLANET_ATLAS_HEIGHT = 1024;" in script
+    assert "const PLANET_LON_STEPS = 720;" in script
+    assert "const PLANET_LAT_STEPS = 360;" in script
+    assert "function generatePlanetTerrainAtlas()" in script
+    assert "function planetCanonicalAtlasColor(cid, lon, lat)" in script
+    assert "new THREE.CanvasTexture(canvas)" in script
+    assert "map: planetAtlasTex || undefined" in script
+    assert "vertexColors: !planetAtlasTex" in script
+    assert "geom.setAttribute(\"uv\", new THREE.BufferAttribute(uvs, 2));" in script
+    assert "if (terr === \"ocean\" && waterMask === 0) return null;" in script
+    assert "const PLANET_LANDMARKS = [];" in script
+
+    assert "function createPlanetCloudTexture()" in script
+    assert "SphereGeometry(GLOBE_RADIUS + 42, 96, 64)" in script
+    assert "SphereGeometry(GLOBE_RADIUS + 98, 64, 32)" in script
+    assert "blending: THREE.AdditiveBlending" in script
+
+    assert "const PLANET_SEA_LEVEL = 0.74;" in script
+    assert "const PLANET_HEIGHT_SCALE = 46.0;" in script
+    assert "The canonical atlas is the only playable land" in script

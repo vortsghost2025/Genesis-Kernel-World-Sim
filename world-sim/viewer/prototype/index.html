@@ -1389,9 +1389,10 @@ const LOCAL_WORLD_SCALE = 1.0;
 const GLOBE_RADIUS = 900.0;
 
 // Each continent becomes a patch on the sphere. lon/lat are the patch centre
-// in radians; SPAN is the angular width of one 200-tile edge, derived so the
-// continent's arc length on the globe equals its 200-unit flat extent.
-const GLOBE_CONTINENT_SPAN = 200.0 / GLOBE_RADIUS;
+// in radians; SPAN is the angular width of one 200-tile edge. The atlas uses
+// an exaggerated display span so the canonical continents read at orbital
+// distance; local views still use the exact 1 unit = 1 metre mapping.
+const GLOBE_CONTINENT_SPAN = 0.62;
 const GLOBE_PATCHES = {
   cont_a: { lon: -0.85, lat: 0.30 },
   cont_b: { lon: 0.85, lat: -0.30 }
@@ -1417,31 +1418,14 @@ const PLANET_CANONICAL_LIFT = 2.0;           // keeps land just above sea level
 const PLANET_PATCH_FEATHER = 0.030;          // blend margin past each box edge
 
 // Signed displacement applied to GLOBE_RADIUS. Negative is ocean floor.
-const PLANET_SEA_LEVEL = 0.33;      // field threshold: above this is land
-const PLANET_HEIGHT_SCALE = 118.0;  // world units of relief per unit of field
-const PLANET_DEEP_OCEAN = -150.0;   // floor of the bathymetry banding
+const PLANET_SEA_LEVEL = 0.74;      // procedural field threshold: almost all non-canonical surface is ocean bathymetry
+const PLANET_HEIGHT_SCALE = 46.0;   // world units of relief per unit of field
+const PLANET_DEEP_OCEAN = -110.0;   // floor of the bathymetry banding
 
-// Fixed landmarks so the atlas has a describable geography rather than a blob.
-// lon/lat in radians about the patch frame, r is an angular falloff radius in
-// radians, h is the ground height the landmark adds at its centre.
-const PLANET_LANDMARKS = [
-  // South polar ice cap.
-  { lon: 0.0000, lat: -1.4800, r: 0.3400, h: 62.0 },
-  // Ring coast around the canonical supercontinent.
-  { lon: -0.8500, lat: 0.3000, r: 0.2600, h: 34.0 },
-  { lon: 0.8500, lat: -0.3000, r: 0.2600, h: 30.0 },
-  // Two mid-latitude continents, roughly antipodal in longitude.
-  { lon: 2.9000, lat: 0.6400, r: 0.3300, h: 78.0 },
-  { lon: -2.6000, lat: -0.5600, r: 0.3100, h: 64.0 },
-  // Equatorial archipelago belt.
-  { lon: 1.4500, lat: -0.0200, r: 0.1700, h: 26.0 },
-  { lon: 1.9000, lat: 0.1100, r: 0.1400, h: 22.0 },
-  // Southern island continent.
-  { lon: -1.1000, lat: -1.1000, r: 0.2400, h: 44.0 },
-  // Deliberately isolated pair: a real long-range exploration target.
-  { lon: 4.0500, lat: 0.5200, r: 0.0750, h: 20.0 },
-  { lon: 4.2600, lat: 0.4600, r: 0.0600, h: 16.0 }
-];
+// Canonical-only atlas: decorative procedural continents were removed so the
+// globe shows only the playable canonical continents and polar ice. The
+// procedural field remains as ocean bathymetry, not fake land.
+const PLANET_LANDMARKS = [];
 
 // Lattice hash: integer cell + seed -> deterministic value in [-1, 1].
 function planetHash3(ix, iy, iz, seed) {
@@ -1526,8 +1510,11 @@ function computePlanetHeight(lon, lat) {
   const dy = Math.sin(lat);
   const dz = cLat * Math.sin(lon);
 
-  // ---- procedural height, exactly as before this phase ----
-  let h = (planetBaseField(dx, dy, dz) - PLANET_SEA_LEVEL) * PLANET_HEIGHT_SCALE;
+  // ---- procedural bathymetry, not fake land ----
+  // The canonical atlas is the only playable land. Outside the canonical
+  // patches the procedural field is deliberately kept below sea level so the
+  // sphere reads as ocean with bathymetry rather than invented continents.
+  let h = Math.min((planetBaseField(dx, dy, dz) - PLANET_SEA_LEVEL) * PLANET_HEIGHT_SCALE, -8.0);
 
   for (let i = 0; i < PLANET_LANDMARKS.length; i++) {
     const lm = PLANET_LANDMARKS[i];
@@ -1584,37 +1571,238 @@ function computePlanetHeight(lon, lat) {
 
 // Ocean colour for the bathymetry bands, as an RGB triplet.
 function planetOceanColor(h) {
-  const t = Math.max(0.0, Math.min(1.0, -h / 150.0));
-  const r = 6 + t * 8, g = 32 + t * 34, b = 74 + t * 88;
+  const t = Math.max(0.0, Math.min(1.0, -h / 110.0));
+  // deep abyss -> pelagic -> shelf -> shallow turquoise
+  const r = 3 + (1 - t) * 20;
+  const g = 18 + (1 - t) * 70;
+  const b = 42 + (1 - t) * 105;
   return [r / 255, g / 255, b / 255];
 }
 
-// Land colour by altitude and latitude: boreal -> temperate -> desert bands,
-// greying to rock with height, snow above a latitude-adjusted snowline.
+// Land colour by altitude and latitude, tuned for a realistic orbital read:
+// green lowlands, dark forests, ochre highland rock, and bright summit snow.
 function planetLandColor(h, lat) {
   const absLat = Math.abs(lat);
   let r, g, b;
   if (absLat > 1.24) {
-    r = 214; g = 226; b = 238;                    // polar ice
+    r = 226; g = 237; b = 246;                    // polar ice
   } else if (absLat > 0.83) {
-    r = 92; g = 104; b = 88;                      // boreal taiga
+    r = 42; g = 82; b = 48;                      // boreal taiga
   } else if (absLat > 0.52) {
-    r = 118; g = 128; b = 78;                     // temperate green
+    r = 72; g = 116; b = 54;                     // temperate green
   } else if (absLat > 0.26) {
-    r = 168; g = 150; b = 92;                     // arid belt
+    r = 112; g = 126; b = 74;                    // dry grass / steppe
   } else {
-    r = 96; g = 122; b = 74;                      // equatorial
+    r = 54; g = 104; b = 48;                     // equatorial green
   }
-  if (h > 34) {                                   // highland rock
-    const t = Math.min(1.0, (h - 34) / 90.0);
-    r += (128 - r) * t; g += (132 - g) * t; b += (136 - b) * t;
+  if (h > 13) {                                   // dry highland rock
+    const t = Math.min(1.0, (h - 13) / 18.0);
+    r += (126 - r) * t; g += (118 - g) * t; b += (102 - b) * t;
   }
-  const snowline = 118 - Math.abs(lat) * 46.0;
-  if (h > snowline) {                             // summit snow
-    const t = Math.min(1.0, (h - snowline) / 26.0);
-    r += (238 - r) * t; g += (242 - g) * t; b += (248 - b) * t;
+  if (h > 24) {                                   // summit snow
+    const t = Math.min(1.0, (h - 24) / 12.0);
+    r += (232 - r) * t; g += (238 - g) * t; b += (246 - b) * t;
   }
   return [r / 255, g / 255, b / 255];
+}
+
+const PLANET_ATLAS_WIDTH = 2048;
+const PLANET_ATLAS_HEIGHT = 1024;
+
+function planetAtlasOceanColor(field, lat) {
+  const absLat = Math.abs(lat);
+  const depth = Math.max(0, Math.min(1, (field + 0.55) / 1.1));
+  let r = 3 + (1 - depth) * 20;
+  let g = 18 + (1 - depth) * 70;
+  let b = 42 + (1 - depth) * 105;
+  const ice = Math.max(0, Math.min(1, (absLat - 1.20) / 0.18));
+  if (ice > 0) {
+    r += (228 - r) * ice;
+    g += (238 - g) * ice;
+    b += (248 - b) * ice;
+  }
+  return [Math.round(r), Math.round(g), Math.round(b)];
+}
+
+function planetCanonicalAtlasColor(cid, lon, lat) {
+  const patch = GLOBE_PATCHES[cid];
+  const tData = terrainDB ? terrainDB[cid] : null;
+  if (!patch || !tData) return null;
+  let dLon = lon - patch.lon;
+  while (dLon > Math.PI) dLon -= Math.PI * 2;
+  while (dLon < -Math.PI) dLon += Math.PI * 2;
+  const t = dLon / GLOBE_CONTINENT_SPAN + 0.5;
+  const v = (lat - patch.lat) / GLOBE_CONTINENT_SPAN + 0.5;
+  if (t < 0 || t > 1 || v < 0 || v > 1) return null;
+  const cx = Math.max(0, Math.min(199, Math.floor(t * 200.0 + 1e-9)));
+  const cy = Math.max(0, Math.min(199, Math.floor(v * 200.0 + 1e-9)));
+  const idx = cy * 200 + cx;
+  const terr = String((tData.terr && tData.terr[idx]) || "ocean").toLowerCase();
+  const biome = String((tData.biome && tData.biome[idx]) || "").toLowerCase();
+  const water = String((tData.water && tData.water[idx]) || "").toLowerCase();
+  const waterMask = waterMaskLookup && waterMaskLookup[cid] ? waterMaskLookup[cid][idx] : 0;
+  const elev = (heightLookup && heightLookup[cid] && heightLookup[cid][idx]) || 0;
+
+  if (terr === "ocean" && waterMask === 0) return null;
+  if (waterMask > 0 || water === "river" || water === "lake" || water === "stream" || water === "freshwater") {
+    return waterMask === 2 ? [36, 106, 148] : [43, 125, 168];
+  }
+
+  let r, g, b;
+  if (biome.includes("forest") || biome.includes("woodland") || biome.includes("thicket") || terr === "forest") {
+    r = 24; g = 66; b = 34;
+  } else if (biome.includes("highland") || terr === "mountain") {
+    r = 122; g = 116; b = 102;
+  } else if (biome.includes("hills") || terr === "hill") {
+    r = 112; g = 118; b = 76;
+  } else if (biome.includes("coastal") || terr === "coast") {
+    r = 170; g = 158; b = 120;
+  } else if (biome.includes("valley") || terr === "grassland") {
+    r = 76; g = 124; b = 50;
+  } else {
+    r = 82; g = 118; b = 54;
+  }
+
+  // Coast sand where any immediate tile neighbour is canonical ocean.
+  const terrArr = tData.terr || [];
+  const neighbours = [idx - 1, idx + 1, idx - 200, idx + 200];
+  const touchesOcean = neighbours.some((n) => n >= 0 && n < 40000 && String(terrArr[n] || "").toLowerCase() === "ocean");
+  if (touchesOcean && terr !== "ocean") {
+    r += (190 - r) * 0.22;
+    g += (172 - g) * 0.22;
+    b += (120 - b) * 0.22;
+  }
+
+  // Simple canonical hillshade from tile-elevation gradients.
+  const hArr = (heightLookup && heightLookup[cid]) || (tData.elev || []);
+  const hL = Number(hArr[Math.max(0, idx - 1)] || 0);
+  const hR = Number(hArr[Math.min(39999, idx + 1)] || 0);
+  const hU = Number(hArr[Math.max(0, idx - 200)] || 0);
+  const hD = Number(hArr[Math.min(39999, idx + 200)] || 0);
+  const gx = hR - hL;
+  const gy = hD - hU;
+  const shade = 0.82 + 0.18 * Math.max(-1, Math.min(1, (-gx * 0.55 + gy * 0.75) / 8.0));
+  r *= shade; g *= shade; b *= shade;
+
+  if (elev > 22) {
+    const snow = Math.min(1, (elev - 22) / 8);
+    r += (232 - r) * snow;
+    g += (238 - g) * snow;
+    b += (246 - b) * snow;
+  }
+  return [
+    Math.max(0, Math.min(255, Math.round(r))),
+    Math.max(0, Math.min(255, Math.round(g))),
+    Math.max(0, Math.min(255, Math.round(b)))
+  ];
+}
+
+function generatePlanetTerrainAtlas() {
+  const W = PLANET_ATLAS_WIDTH;
+  const H = PLANET_ATLAS_HEIGHT;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, "#dfeaf2");
+  grad.addColorStop(0.12, "#0c2d52");
+  grad.addColorStop(0.5, "#0a2a4b");
+  grad.addColorStop(0.88, "#0c2d52");
+  grad.addColorStop(1, "#dfeaf2");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Low-frequency ocean variation: a small deterministic noise canvas stretched
+  // smoothly across the full equirectangular ocean.
+  const noiseCanvas = document.createElement("canvas");
+  noiseCanvas.width = 256;
+  noiseCanvas.height = 128;
+  const nctx = noiseCanvas.getContext("2d");
+  if (nctx) {
+    const nimg = nctx.createImageData(256, 128);
+    for (let y = 0; y < 128; y++) {
+      const lat = Math.PI / 2 - ((y + 0.5) / 128) * Math.PI;
+      for (let x = 0; x < 256; x++) {
+        const lon = ((x + 0.5) / 256) * Math.PI * 2;
+        const dx = Math.cos(lat) * Math.cos(lon);
+        const dy = Math.sin(lat);
+        const dz = Math.cos(lat) * Math.sin(lon);
+        const field = planetBaseField(dx, dy, dz);
+        const col = planetAtlasOceanColor(field, lat);
+        const p = (y * 256 + x) * 4;
+        nimg.data[p] = col[0];
+        nimg.data[p + 1] = col[1];
+        nimg.data[p + 2] = col[2];
+        nimg.data[p + 3] = 255;
+      }
+    }
+    nctx.putImageData(nimg, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(noiseCanvas, 0, 0, W, H);
+  }
+
+  // Canonical continents: paint the actual 200x200 biome/elevation/water data
+  // into the equirectangular patch that labels and the planet share.
+  for (const cid of ["cont_a", "cont_b"]) {
+    const patch = GLOBE_PATCHES[cid];
+    if (!patch) continue;
+    const centerLon = ((patch.lon % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const x0 = Math.floor(((centerLon - GLOBE_CONTINENT_SPAN / 2) / (Math.PI * 2)) * W);
+    const x1 = Math.ceil(((centerLon + GLOBE_CONTINENT_SPAN / 2) / (Math.PI * 2)) * W);
+    const y0 = Math.floor(((Math.PI / 2 - (patch.lat + GLOBE_CONTINENT_SPAN / 2)) / Math.PI) * H);
+    const y1 = Math.ceil(((Math.PI / 2 - (patch.lat - GLOBE_CONTINENT_SPAN / 2)) / Math.PI) * H);
+    for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) {
+      const lat = Math.PI / 2 - ((y + 0.5) / H) * Math.PI;
+      for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) {
+        const lon = ((x + 0.5) / W) * Math.PI * 2;
+        const col = planetCanonicalAtlasColor(cid, lon, lat);
+        if (!col) continue;
+        ctx.fillStyle = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+function createPlanetCloudTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, 1024, 512);
+  let seed = 96231;
+  function rand() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return (seed & 0xffffff) / 0x1000000;
+  }
+  for (let i = 0; i < 720; i++) {
+    const x = rand() * 1024;
+    const y = 512 * Math.pow(rand(), 0.72);
+    const r = 10 + rand() * 42;
+    const alpha = 0.012 + rand() * 0.045;
+    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 // Phase 10NG: the ocean has two forms. Local views keep the original flat
@@ -1635,15 +1823,16 @@ scene.add(globalOceanGlobe);
 
 // Phase 10NS: the planet itself. One dense equirectangular grid pushed onto the
 // sphere at GLOBE_RADIUS + computed height. Built once; nothing per frame.
-const PLANET_LON_STEPS = 360;
-const PLANET_LAT_STEPS = 180;
+const PLANET_LON_STEPS = 720;
+const PLANET_LAT_STEPS = 360;
 
 function buildPlanetSurface() {
   const cols = PLANET_LON_STEPS + 1;   // +1 closes the seam with duplicate verts
   const rows = PLANET_LAT_STEPS + 1;   // +1 carries the poles
   const positions = new Float32Array(cols * rows * 3);
   const colors = new Float32Array(cols * rows * 3);
-  let p = 0, c = 0;
+  const uvs = new Float32Array(cols * rows * 2);
+  let p = 0, c = 0, uv = 0;
 
   for (let iy = 0; iy < rows; iy++) {
     const lat = -1.5707963267948966 + (iy / PLANET_LAT_STEPS) * Math.PI;
@@ -1663,6 +1852,8 @@ function buildPlanetSurface() {
       colors[c++] = col[0];
       colors[c++] = col[1];
       colors[c++] = col[2];
+      uvs[uv++] = ix / PLANET_LON_STEPS;
+      uvs[uv++] = iy / PLANET_LAT_STEPS;
     }
   }
 
@@ -1684,20 +1875,57 @@ function buildPlanetSurface() {
   const geom = new THREE.BufferGeometry();
   geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geom.setIndex(new THREE.BufferAttribute(indices, 1));
   geom.computeVertexNormals();
   geom.computeBoundingSphere();
 
+  const planetAtlasTex = generatePlanetTerrainAtlas();
   const mesh = new THREE.Mesh(
     geom,
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.92,
-      metalness: 0.0,
+    new THREE.MeshPhongMaterial({
+      map: planetAtlasTex || undefined,
+      vertexColors: !planetAtlasTex,
+      shininess: 8,
+      specular: 0x10151f,
       side: THREE.DoubleSide
     })
   );
   mesh.visible = false;
+
+  // Subtle animated-atmosphere helpers: wispy clouds above the surface and a
+  // BackSide additive limb glow. Both are children so orbit visibility follows
+  // the planet mesh exactly.
+  const cloudTex = createPlanetCloudTexture();
+  if (cloudTex) {
+    const clouds = new THREE.Mesh(
+      new THREE.SphereGeometry(GLOBE_RADIUS + 42, 96, 64),
+      new THREE.MeshBasicMaterial({
+        map: cloudTex,
+        transparent: true,
+        opacity: 0.045,
+        depthWrite: false
+      })
+    );
+    clouds.renderOrder = 10;
+    mesh.add(clouds);
+    mesh.userData.cloud = clouds;
+  }
+  const atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(GLOBE_RADIUS + 98, 64, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x6fb7ff,
+      transparent: true,
+      opacity: 0.09,
+      side: THREE.BackSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    })
+  );
+  atmosphere.renderOrder = 9;
+  mesh.add(atmosphere);
+  mesh.userData.atmosphere = atmosphere;
+
   scene.add(mesh);
   return mesh;
 }

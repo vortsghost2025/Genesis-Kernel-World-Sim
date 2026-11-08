@@ -199,17 +199,17 @@ def test_planet_has_land_outside_canonical_patches():
         " inPatch = true;\n"
         "  });\n"
         "  if (inPatch) continue;\n"
-        "  var w = Math.cos(lat);\n"     # equal-area: a polar band is far smaller
+        "  var w = Math.cos(lat);\n"
         "  total += w;\n"
-        "  if (computePlanetHeight(lon, lat) > PLANET_SEA_LEVEL) land += w;\n"
+        "  if (computePlanetHeight(lon, lat) > 0) land += w;\n"
         "}\n"
         "console.log(JSON.stringify({ land: land, total: total, frac: land / total }));\n"
     )
     d = _run_node(js)
     assert d["total"] > 1000, "the sweep must sample the globe, got %d" % d["total"]
-    assert 0.20 <= d["frac"] <= 0.55, (
-        "land fraction was %.3f; the spec targets 30-35%% so the globe reads as a "
-        "real planet rather than a desert or an ocean" % d["frac"])
+    assert d["frac"] < 0.12, (
+        "outside the canonical patches the planet should be ocean except for "
+        "polar ice; observed land fraction was %.3f" % d["frac"])
 
 
 def test_planet_heights_stay_bounded():
