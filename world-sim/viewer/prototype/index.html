@@ -928,10 +928,19 @@ scene.background = new THREE.Color(0x458ee0);
 scene.fog = new THREE.FogExp2(0x8ec5f2, 0.0012);
 
 const camera = new THREE.PerspectiveCamera(45, mapPanel.clientWidth / mapPanel.clientHeight, 0.25, 1600);
-const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({
+  canvas: canvas,
+  antialias: false,
+  alpha: false,
+  powerPreference: "low-power",
+  stencil: false,
+  depth: true
+});
 renderer.setSize(mapPanel.clientWidth, mapPanel.clientHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+// Crash safety: cap render resolution at native 1x. Hi-DPI upscaling doubled
+// the fill cost and pushed desktop GPUs into full-fan/crash territory.
+renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = false;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
@@ -984,7 +993,7 @@ const sunLight = new THREE.DirectionalLight(0xffeed2, 1.18);
 // visible hemisphere of the planet and restores it on the way back.
 const LOCAL_SUN_POSITION = { x: -95, y: 84, z: 55 };
 sunLight.position.set(LOCAL_SUN_POSITION.x, LOCAL_SUN_POSITION.y, LOCAL_SUN_POSITION.z);
-sunLight.castShadow = true;
+sunLight.castShadow = false;
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
 sunLight.shadow.camera.near = 10;
@@ -1823,8 +1832,8 @@ scene.add(globalOceanGlobe);
 
 // Phase 10NS: the planet itself. One dense equirectangular grid pushed onto the
 // sphere at GLOBE_RADIUS + computed height. Built once; nothing per frame.
-const PLANET_LON_STEPS = 720;
-const PLANET_LAT_STEPS = 360;
+const PLANET_LON_STEPS = 360;
+const PLANET_LAT_STEPS = 180;
 
 function buildPlanetSurface() {
   const cols = PLANET_LON_STEPS + 1;   // +1 closes the seam with duplicate verts
@@ -1893,39 +1902,9 @@ function buildPlanetSurface() {
   );
   mesh.visible = false;
 
-  // Subtle animated-atmosphere helpers: wispy clouds above the surface and a
-  // BackSide additive limb glow. Both are children so orbit visibility follows
-  // the planet mesh exactly.
-  const cloudTex = createPlanetCloudTexture();
-  if (cloudTex) {
-    const clouds = new THREE.Mesh(
-      new THREE.SphereGeometry(GLOBE_RADIUS + 42, 96, 64),
-      new THREE.MeshBasicMaterial({
-        map: cloudTex,
-        transparent: true,
-        opacity: 0.045,
-        depthWrite: false
-      })
-    );
-    clouds.renderOrder = 10;
-    mesh.add(clouds);
-    mesh.userData.cloud = clouds;
-  }
-  const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(GLOBE_RADIUS + 98, 64, 32),
-    new THREE.MeshBasicMaterial({
-      color: 0x6fb7ff,
-      transparent: true,
-      opacity: 0.09,
-      side: THREE.BackSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    })
-  );
-  atmosphere.renderOrder = 9;
-  mesh.add(atmosphere);
-  mesh.userData.atmosphere = atmosphere;
-
+  // Crash-safety: no extra cloud or atmosphere shells. The planet material's
+  // atlas is the visual layer; extra transparent spheres cost fill rate and
+  // overdraw for no sim value.
   scene.add(mesh);
   return mesh;
 }
@@ -6117,6 +6096,12 @@ function updateAllAgentFigures(time) {
 
 function animate(time) {
   requestAnimationFrame(animate);
+
+  // Crash-safety: do no scene work while the tab is hidden.
+  if (document.hidden) {
+    lastTick = time;
+    return;
+  }
 
   const frameStart = performance.now();
   const dt = (time - lastTick) / 1000;

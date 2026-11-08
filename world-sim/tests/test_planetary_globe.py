@@ -589,8 +589,8 @@ def test_globe_atlas_is_high_resolution_and_biome_driven():
 
     assert "const PLANET_ATLAS_WIDTH = 2048;" in script
     assert "const PLANET_ATLAS_HEIGHT = 1024;" in script
-    assert "const PLANET_LON_STEPS = 720;" in script
-    assert "const PLANET_LAT_STEPS = 360;" in script
+    assert "const PLANET_LON_STEPS = 360;" in script
+    assert "const PLANET_LAT_STEPS = 180;" in script
     assert "function generatePlanetTerrainAtlas()" in script
     assert "function planetCanonicalAtlasColor(cid, lon, lat)" in script
     assert "new THREE.CanvasTexture(canvas)" in script
@@ -600,10 +600,12 @@ def test_globe_atlas_is_high_resolution_and_biome_driven():
     assert "if (terr === \"ocean\" && waterMask === 0) return null;" in script
     assert "const PLANET_LANDMARKS = [];" in script
 
-    assert "function createPlanetCloudTexture()" in script
-    assert "SphereGeometry(GLOBE_RADIUS + 42, 96, 64)" in script
-    assert "SphereGeometry(GLOBE_RADIUS + 98, 64, 32)" in script
-    assert "blending: THREE.AdditiveBlending" in script
+    assert "antialias: false" in script
+    assert "powerPreference: \"low-power\"" in script
+    assert "renderer.setPixelRatio(1);" in script
+    assert "renderer.shadowMap.enabled = false;" in script
+    assert "sunLight.castShadow = false;" in script
+    assert "Crash-safety: do no scene work while the tab is hidden." in script
 
     assert "const PLANET_SEA_LEVEL = 0.74;" in script
     assert "const PLANET_HEIGHT_SCALE = 46.0;" in script
