@@ -83,6 +83,17 @@ def test_cutaway_hides_whole_tile_and_restores_all():
     assert "child.visible = false;" in script
 
 
+def test_door_lintel_windows_posts_chimney_and_shelter_scale():
+    script = _get_prototype_script()
+    assert "const doorGap = 0.95;" in script
+    assert "spec.lintel" in script
+    assert "spec.windows" in script
+    assert "spec.posts" in script
+    assert "spec.chimney" in script
+    assert "const EXTERIOR_SHELTER_SCALE = 0.62;" in script
+    assert "const s = EXTERIOR_SHELTER_SCALE * scale;" in script
+
+
 def test_sync_stays_interior_props_refresh_only():
     script = _get_prototype_script()
     assert 'if (activeCamMode === "interior" && !immediateCam) {' in script

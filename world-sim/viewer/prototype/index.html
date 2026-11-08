@@ -2752,11 +2752,16 @@ function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow
   return group;
 }
 
+// Phase 10PG: exterior shelters draw at 0.62 of the nominal 5.4m footprint
+// (~3.35m). At full size every sprite engulfs ~5 tiles of the 1-unit grid,
+// so adjacent cabins interpenetrate into an unreadable mega-blob. The
+// interior diorama is independent and keeps its explicit 5.4x4.4 spec.
+const EXTERIOR_SHELTER_SCALE = 0.62;
 function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
-  // Rescaled to true human architectural scale (5.4m x 4.4m, ~2.2m door clearance)
-  const w = 5.4 * scale;
-  const ht = 4.4 * scale;
-  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * scale : 0, withShadow ? 2.2 * scale : 0, 0.18 * scale, tintHex);
+  const s = EXTERIOR_SHELTER_SCALE * scale;
+  const w = 5.4 * s;
+  const ht = 4.4 * s;
+  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * s : 0, withShadow ? 2.2 * s : 0, 0.18 * s, tintHex);
 }
 
 function createStorageSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
@@ -4053,10 +4058,24 @@ function buildInteriorVolumeSpec(shelterWidth = 5.4, shelterDepth = 4.4) {
   const wallH = 1.9;
   const halfW = fw * 0.5;
   const halfD = fd * 0.5;
-  const doorGap = 1.25;
+  // Phase 10PG: narrow door with a lintel — a doorway, not a missing
+  // wall (the 1.25-wide full-height cut read as a stall door).
+  const doorGap = 0.95;
   const frontSegW = Math.max(0.8, (fw - doorGap) * 0.5);
   return {
+    wallH,
     floor: { width: fw, depth: fd, thickness: 0.10, y: floorOffset },
+    lintel: { width: doorGap + 0.36, height: 0.22, depth: wallT + 0.04, x: 0, y: floorOffset + wallH - 0.11, z: halfD },
+    windows: [
+      { id: "back", width: 0.55, height: 0.65, x: 0, y: floorOffset + 1.35, z: -halfD + wallT + 0.01, rotY: 0 },
+      { id: "right", width: 0.55, height: 0.65, x: halfW - wallT - 0.01, y: floorOffset + 1.35, z: 0, rotY: -Math.PI / 2 }
+    ],
+    posts: [
+      { x: -halfW, z: -halfD - 0.02 }, { x: halfW, z: -halfD - 0.02 },
+      { x: -halfW, z: halfD + 0.02 }, { x: halfW, z: halfD + 0.02 }
+    ],
+    skirting: { stone: 0x6a6a62, y: floorOffset + 0.09, inset: 0.05 },
+    chimney: { size: 0.5, height: 1.6, x: fw * 0.28, z: -0.75 },
     // Phase 10PD: pitched gabled roof (two slanted thatch slabs + ridge).
     roof: (() => {
       const angle = 0.6;
@@ -4121,6 +4140,57 @@ function rebuildInteriorVolume() {
   const warmLight = new THREE.PointLight(0xffb45e, 1.1, 12, 1.5);
   warmLight.position.set(0, spec.floor.y + 1.35, 0);
   interiorVolumeGroup.add(warmLight);
+
+  // Phase 10PG stall-breakers: door lintel, glowing windows, corner
+  // posts, stone skirting, chimney through the back roof slope.
+  const lintel = spec.lintel;
+  if (lintel) {
+    const lGeom = new THREE.BoxGeometry(lintel.width, lintel.height, lintel.depth);
+    const lMesh = new THREE.Mesh(lGeom, sillWallMat);
+    lMesh.position.set(lintel.x, lintel.y, lintel.z);
+    lMesh.castShadow = true;
+    lMesh.receiveShadow = true;
+    interiorVolumeGroup.add(lMesh);
+  }
+  const windowMat = new THREE.MeshBasicMaterial({ color: 0xffc26e, side: THREE.DoubleSide });
+  for (const win of (spec.windows || [])) {
+    const wGeom = new THREE.PlaneGeometry(win.width, win.height);
+    const wMesh = new THREE.Mesh(wGeom, windowMat);
+    wMesh.position.set(win.x, win.y, win.z);
+    wMesh.rotation.y = win.rotY;
+    interiorVolumeGroup.add(wMesh);
+  }
+  const skirtingMat = new THREE.MeshStandardMaterial({ color: (spec.skirting && spec.skirting.stone) || 0x6a6a62, roughness: 0.95 });
+  const skirting = [
+    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: -(fd * 0.5 + 0.02) },
+    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: (fd * 0.5 + 0.02) },
+    { w: 0.10, d: fd + 0.16, x: -(fw * 0.5 + 0.02), z: 0 },
+    { w: 0.10, d: fd + 0.16, x: (fw * 0.5 + 0.02), z: 0 }
+  ];
+  for (const s of skirting) {
+    const sGeom = new THREE.BoxGeometry(s.w, 0.18, s.d);
+    const sMesh = new THREE.Mesh(sGeom, skirtingMat);
+    sMesh.position.set(s.x, spec.floor.y + 0.09, s.z);
+    sMesh.castShadow = true;
+    sMesh.receiveShadow = true;
+    interiorVolumeGroup.add(sMesh);
+  }
+  for (const p of (spec.posts || [])) {
+    const pGeom = new THREE.BoxGeometry(0.24, spec.wallH, 0.24);
+    const pMesh = new THREE.Mesh(pGeom, sillWallMat);
+    pMesh.position.set(p.x, spec.floor.y + spec.wallH * 0.5, p.z);
+    pMesh.castShadow = true;
+    pMesh.receiveShadow = true;
+    interiorVolumeGroup.add(pMesh);
+  }
+  if (spec.chimney) {
+    const ch = spec.chimney;
+    const cGeom = new THREE.BoxGeometry(ch.size, ch.height, ch.size);
+    const cMesh = new THREE.Mesh(cGeom, skirtingMat);
+    cMesh.position.set(ch.x, (spec.roof ? spec.roof.ridgeY : spec.floor.y + wallH) - 0.1, ch.z);
+    cMesh.castShadow = true;
+    interiorVolumeGroup.add(cMesh);
+  }
 
   for (const w of spec.walls) {
     const wGeom = new THREE.BoxGeometry(w.width, w.height, w.depth);
