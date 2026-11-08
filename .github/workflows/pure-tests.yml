@@ -113,5 +113,6 @@ jobs:
             tests/test_fauna_field_observation.py \
             tests/test_compound_architecture.py \
             tests/test_home_network_scaling.py \
+            tests/test_thirst_spoilage_tool_condition.py \
             tests/test_cultivation.py \
             -v

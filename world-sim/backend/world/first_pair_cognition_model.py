@@ -420,6 +420,7 @@ _VALID_ACTIONS = frozenset({
     "build",
     "use_object",
     "eat",
+    "drink",
     "attack",
     "offer_food",
     "milk_animal",
@@ -534,6 +535,7 @@ _ACTION_SCHEMAS: dict[str, frozenset[str]] = {
     }),
     # eat: epistemic.4 — consume food from belongings to satisfy hunger.
     "eat": frozenset({"action_type", "resource_kind", "reason", "food_type", "food", "item"}),
+    "drink": frozenset({"action_type", "source", "resource_kind", "target_object_id", "reason"}),
     "attack": frozenset({"action_type", "target_id", "reason"}),
     "offer_food": frozenset({"action_type", "target_id", "resource_kind", "reason"}),
     "milk_animal": frozenset({"action_type", "target_id", "reason"}),
@@ -660,6 +662,34 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             err = _check_length(raw["resource_kind"], _MAX_TARGET_CHARS, "action:resource_kind")
             if err:
                 errors.append(err)
+
+    elif at == "drink":
+        reason = raw.get("reason")
+        if reason is not None:
+            err = _check_length(reason, _MAX_REASON_CHARS, "action:reason")
+            if err:
+                errors.append(err)
+            elif _casefolded_contaminated(reason):
+                errors.append("action:contaminated_reason")
+        source = raw.get("source")
+        if source is not None:
+            if not isinstance(source, str) or not source.strip():
+                errors.append("action:empty_source")
+            else:
+                raw["source"] = source.strip()
+                err = _check_length(raw["source"], _MAX_TARGET_CHARS, "action:source")
+                if err:
+                    errors.append(err)
+        target_object_id = raw.get("target_object_id")
+        if target_object_id is not None:
+            if not isinstance(target_object_id, str) or not target_object_id.strip() or not _is_safe_id(target_object_id):
+                errors.append("action:invalid_target_object_id")
+        resource_kind = raw.get("resource_kind")
+        if resource_kind is not None:
+            if not isinstance(resource_kind, str) or not resource_kind.strip():
+                errors.append("action:empty_resource_kind")
+            elif resource_kind.strip() not in ("fresh_water", "fresh water", "freshwater"):
+                errors.append("action:invalid_drink_resource")
 
     elif at == "revise_charter":
         ct = raw.get("charter_text", "")
@@ -1249,7 +1279,8 @@ def _home_network_description() -> str:
         "each tile counts at most once. "
         + "; ".join(rows)
         + ". Storage-cellars in the same connected home share a food "
-        "budget of 20 units x connected footprint."
+        "budget of 20 units x connected footprint, and food in a cellar keeps "
+        "for (4 + connected footprint) x its ordinary lifetime."
     )
 
 
@@ -1299,12 +1330,13 @@ Available actions:
 - move: move to an adjacent tile (requires: target_tile, reason) — you may move only one edge per heartbeat; only to tiles listed in available_moves. If you are standing on a tile with a road object, you may move up to two edges in one heartbeat to any tile in available_moves
 - gather: collect a resource from your current tile (requires: resource_kind, reason) — only resources visible in your observation can be gathered; gathering requires no capability grant, it is yours by default. Holding tools (stone/iron axe, woven basket) increases gathering yield
 - revise_charter: rewrite your charter (requires: charter_text) — your charter is a short statement in your own words of who you are, what you have committed to, and what you refuse to forget; it is shown to you verbatim at every heartbeat and is never summarized, compressed, or forgotten by the runtime
-- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}; optional: addon_to referencing an existing adjacent structure to build a multi-room compound) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'shelter_stable' protects domestic animals from wolves and wandering; 'storage_cellar' shares a food budget equal to 20 units times the connected home footprint; 'enclosed_garden' enables crop planting; 'campfire' or 'hearth' provides warmth (radiating throughout connected compound rooms); 'crafting_surface' enables tool crafting
+- build: construct something from resources you hold (requires: object_id, object_type, description, tile_id, materials dict like {"stone": 3} or {"wood": 4}; optional: addon_to referencing an existing adjacent structure to build a multi-room compound) — you may spend what your belongings list shows. Building functional types gives permanent effects: 'shelter', 'cabin', 'hut', or 'roof' shelters your tile and adjacent tiles from cold and storms; 'shelter_stable' protects domestic animals from wolves and wandering; 'storage_cellar' keeps food for a lifetime equal to its base life multiplied by 4 + the connected home footprint and shares a food budget equal to 20 units times the connected home footprint; 'enclosed_garden' enables crop planting; 'campfire' or 'hearth' provides warmth (radiating throughout connected compound rooms); 'crafting_surface' enables tool crafting
 - hew_timber: strike a tree on your tile to fell it (requires: reason; optional: tool) — requires an axe (stone_axe, iron_axe) or knapped blade (flint_knife) to fell trees into structural timber logs for framing compounds
 - plant_crop: sow 1 unit of crop resource (wild_berries, edible_roots, wild_grain) into an enclosed garden bed (requires: target_id, resource_kind, reason)
 - harvest_crop: harvest mature produce and seed units from an enclosed garden bed (requires: target_id, reason)
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
+- drink: drink water (requires: reason; optional: source, resource_kind, target_object_id) — the environment states whether your current tile is drinkable; source tile drinks there (satisfies thirst by 75), source carried or resource_kind fresh_water consumes carried fresh water (satisfies thirst by 55), or target_object_id names a clay_pot on your tile/adjacent tile holding fresh water (satisfies thirst by 55). Thirst rises each heartbeat; at 88+ vitality drains. Rain is not a drink source.
 - attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area; a snake struck and defeated leaves 1 meat. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
 - offer_food: offer one unit of animal food to an adjacent cow or horse (requires: target_id, resource_kind, reason) - accepted animal foods are wild_berries, edible_roots, wild_apples, wild_grain, and fiber_plants
 - milk_animal: milk an adjacent tamed cow when milk is ready (requires: target_id, reason)
@@ -1670,10 +1702,29 @@ def build_system_prompt(context: AgentContext) -> str:
             _lines.append(
                 "Facts: the eat action consumes one unit of a named food "
                 "from your belongings and works while you are collapsed. "
+                "The drink action also works while you are collapsed. "
                 "Food deposited into any object on your tile also feeds "
                 "you while you are down. Vitality recovers slowly on its "
                 "own, and faster when fed.")
         else:
+            thirst_val = _sb.get("thirst", 18) or 0
+            if thirst_val >= 40:
+                _lines.append(
+                    f"Your thirst is {round(thirst_val)}/100."
+                    + (" Your vitality drains while thirst stays at 88 or "
+                       "higher, and at 0 vitality you collapse."
+                       if thirst_val >= 88 else "")
+                )
+                inventory = context.inventory if isinstance(context.inventory, dict) else {}
+                carried_water = int(inventory.get("fresh_water", 0) or 0)
+                _lines.append(
+                    "Fact: the drink action reduces thirst: a drinkable "
+                    "current tile satisfies 75; one carried fresh_water or "
+                    "one fresh_water from a clay_pot vessel satisfies 55. "
+                    f"This tile is drinkable: {_env.get('drinkable_water', False)}; "
+                    f"carried fresh_water units: {carried_water}. "
+                    "Thirst rises 0.8 each heartbeat."
+                )
             hunger_val = _sb.get("hunger", 0) or 0
             if hunger_val >= 60:
                 hunger_int = round(hunger_val)
@@ -1884,6 +1935,36 @@ def build_system_prompt(context: AgentContext) -> str:
             f"{downed:g} per heartbeat; warmth approach is {approach:g}; "
             f"storage-cellar food budget is {footprint * 20} units."
         )
+
+    tool_condition = getattr(context, "tool_condition", {}) or {}
+    if isinstance(tool_condition, dict) and tool_condition:
+        parts = []
+        for kind, remaining in sorted(tool_condition.items()):
+            if isinstance(remaining, list) and remaining:
+                parts.append(f"{kind} {remaining}")
+        if parts:
+            settlement_lines.append(
+                "Fact: tool condition (uses left per item): "
+                + ", ".join(parts)
+                + "."
+            )
+
+    food_freshness = getattr(context, "food_freshness", {}) or {}
+    if isinstance(food_freshness, dict) and food_freshness:
+        parts = []
+        for kind, data in sorted(food_freshness.items()):
+            if not isinstance(data, dict):
+                continue
+            lots = data.get("lots") or []
+            if lots:
+                parts.append(
+                    f"{kind}: "
+                    + ", ".join(f"{lot['quantity']} born hb {lot['born_hb']}" for lot in lots if isinstance(lot, dict))
+                )
+        if parts:
+            settlement_lines.append(
+                "Fact: oldest tracked held food lots: " + "; ".join(parts) + "."
+            )
 
     stone = inv.get("stone", 0) or 0
     wood = inv.get("wood", 0) or 0

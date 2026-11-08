@@ -228,6 +228,41 @@ def fire_is_snuffed(weather: str, fire_tile_sheltered: bool) -> bool:
     valuable."""
     return weather in ("rain", "storm") and not fire_tile_sheltered
 
+# --- thirst ------------------------------------------------------------------
+THIRST_RATE = 0.8            # rise per heartbeat
+THIRST_CAP = 100.0
+THIRST_WEAKEN = 88.0
+DEHYDRATION_DRAIN = 0.6      # per heartbeat at thirst >= THIRST_WEAKEN
+DRINK_SATISFACTION = {
+    "tile": 75.0,
+    "carried": 55.0,
+    "vessel": 55.0,
+}
+
+
+def thirst_next(thirst: float, drank_satisfaction: float = 0.0) -> float:
+    return min(
+        THIRST_CAP,
+        max(0.0, thirst + THIRST_RATE - drank_satisfaction),
+    )
+
+
+# --- spoilage ----------------------------------------------------------------
+SPOILAGE_LIFETIME_HB = {
+    "cooked_meal": 72,
+    "wild_berries": 72,
+    "mushrooms": 72,
+    "edible_roots": 72,
+    "wild_apples": 72,
+    "milk": 36,
+    "fish": 48,
+    "meat": 48,
+    "shellfish": 48,
+    "wild_grain": 144,
+    "nuts": 720,
+    "honeycomb": 360,
+}
+
 # --- vitality ------------------------------------------------------------------
 VITALITY_CAP = 100.0
 STARVING_DRAIN = 0.6        # per heartbeat at hunger >= HUNGER_WEAKEN
@@ -266,7 +301,8 @@ STORM_EXPOSURE_DRAIN = 0.3     # vitality per heartbeat, exposed in a storm
 def vitality_next(vitality: float, hunger: float, warmth: float,
                   downed: bool, in_shelter: bool = False,
                   regen_rate: float | None = None,
-                  downed_regen_rate: float | None = None) -> float:
+                  downed_regen_rate: float | None = None,
+                  thirst: float = 0.0) -> float:
     """Vitality drains under neglect, regenerates under care.
     Rest inside a shelter heals faster - comfort is medicine.
     Compounds provide enhanced vitality recovery (Phase 10JV/10JX)."""
@@ -275,13 +311,17 @@ def vitality_next(vitality: float, hunger: float, warmth: float,
             rate = downed_regen_rate
         else:
             rate = DOWNED_REGEN_IN_SHELTER if in_shelter else DOWNED_PASSIVE_REGEN
+        if thirst >= THIRST_WEAKEN:
+            rate = DOWNED_PASSIVE_REGEN
         return min(RECOVERY_STAND_AT, vitality + rate)
     v = vitality
     if hunger >= HUNGER_WEAKEN:
         v -= STARVING_DRAIN
+    if thirst >= THIRST_WEAKEN:
+        v -= DEHYDRATION_DRAIN
     if warmth <= FREEZE_THRESHOLD:
         v -= FREEZING_DRAIN
-    if hunger <= 45.0 and warmth >= 50.0:
+    if hunger <= 45.0 and warmth >= 50.0 and thirst <= 45.0:
         if regen_rate is not None:
             v += regen_rate
         else:
@@ -291,7 +331,7 @@ def vitality_next(vitality: float, hunger: float, warmth: float,
 def initial_vitals() -> dict:
     """Healthy start. No retroactive famine for existing agents."""
     return {"hunger": 18.0, "warmth": 82.0, "vitality": 100.0,
-            "wetness": 0.0, "downed": False}
+            "wetness": 0.0, "thirst": 18.0, "downed": False}
 
 
 def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
@@ -301,16 +341,19 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
                     shelter_decay_factor: float = SHELTER_DECAY_FACTOR,
                     regen_rate: float | None = None,
                     downed_regen_rate: float | None = None,
-                    warmth_approach_rate: float = WARMTH_APPROACH_RATE) -> dict:
+                    warmth_approach_rate: float = WARMTH_APPROACH_RATE,
+                    drank_satisfaction: float = 0.0) -> dict:
     """One heartbeat of embodiment. Returns a NEW vitals dict.
 
     `ate_satisfaction` is the hunger points satisfied by food eaten this
-    heartbeat (0 = nothing eaten). `weather` is the current sky (the
+    heartbeat (0 = nothing eaten). `drank_satisfaction` absorbs thirst in
+    the same way. `weather` is the current sky (the
     caller resolves the forecast); it drives wetness, the temperature
     modifier, and storm exposure. Everything else follows the physics.
     """
     hunger = hunger_next(vitals.get("hunger", 0.0), heartbeat_number)
     hunger = max(0.0, hunger - ate_satisfaction)
+    thirst = thirst_next(vitals.get("thirst", 18.0), drank_satisfaction)
     wetness = wetness_next(vitals.get("wetness", 0.0), weather,
                            in_shelter, by_fire)
     temp = effective_temperature(heartbeat_number, weather)
@@ -323,7 +366,8 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
     vitality = vitality_next(vitals.get("vitality", 100.0), hunger,
                              warmth, downed, in_shelter,
                              regen_rate=regen_rate,
-                             downed_regen_rate=downed_regen_rate)
+                             downed_regen_rate=downed_regen_rate,
+                             thirst=thirst)
     if weather == "storm" and not in_shelter and not downed:
         vitality = max(0.0, vitality - STORM_EXPOSURE_DRAIN)
     if downed and vitality >= RECOVERY_STAND_AT:
@@ -335,6 +379,7 @@ def apply_heartbeat(vitals: dict, heartbeat_number: int, by_fire: bool,
         "warmth": round(warmth, 2),
         "vitality": round(vitality, 2),
         "wetness": round(wetness, 2),
+        "thirst": round(thirst, 2),
         "downed": downed,
     }
 
@@ -345,6 +390,8 @@ def vitals_state_label(vitals: dict) -> str:
         return "collapsed"
     if vitals.get("vitality", 100.0) <= 25.0:
         return "failing"
+    if vitals.get("thirst", 0.0) >= THIRST_WEAKEN:
+        return "dehydrated"
     if vitals.get("hunger", 0.0) >= HUNGER_WEAKEN:
         return "starving"
     if vitals.get("warmth", 100.0) <= FREEZE_THRESHOLD:

@@ -107,6 +107,10 @@ class AgentContext:
     # resources; otherwise "stone: tile-a, tile-b; clay: tile-c" from the
     # agent's own known map only. Factual line, never a suggestion.
     observed_resource_rollup: str = ""
+    # Life-state detail (Phase 10PM): own remaining tool condition and the
+    # oldest tracked freshness lot per food kind; both empty in old contexts.
+    tool_condition: dict = field(default_factory=dict)
+    food_freshness: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -332,6 +332,11 @@ class WorldStateRecord:
     # 10JX: Compound Settlement Architecture: spatially contiguous networks of
     # structural objects sharing enclosure, thermal mass, and security.
     compounds: dict[str, dict] = field(default_factory=dict)
+    # 10PM: custody of crafted tools and the age lots of held food.
+    # Missing in stores written before these physics existed; runtime helpers
+    # seed fresh values on first use without rediscovering old inventory.
+    tool_condition: dict[str, dict] = field(default_factory=dict)
+    food_freshness: dict[str, dict] = field(default_factory=dict)
     tick: int = 0
     updated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = "world_state.1"

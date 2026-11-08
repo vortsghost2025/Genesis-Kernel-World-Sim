@@ -389,6 +389,17 @@ def _roofed_structure_weight(object_type: str) -> int:
         return 1
     return 0
 
+# Phase 10PM: ordinary successful use wears crafted tools. Values are the
+# number of uses before an individual item breaks from belongings.
+_TOOL_DURABILITY = {
+    "stone_axe": 24,
+    "iron_axe": 48,
+    "flint_knife": 12,
+    "flint_spear": 16,
+    "iron_spear": 24,
+    "woven_basket": 36,
+}
+
 # Phrases that would turn a disclosure of facts into an instruction. Used by
 # the cognition-model recipe advertisement and by its regression test.
 _BANNED_DIRECTIVE_PHRASES = (
@@ -918,6 +929,326 @@ class FirstPairRuntime:
             return {}
         return dict(load_inventory(self._store).get(agent_ref, {}))
 
+    def _ensure_life_state(self, agent_ref: str, heartbeat_number: int | None = None) -> None:
+        """Seed Phase 10PM custody records without disturbing existing stock.
+
+        Tools and food that predate the implementation are grandfathered at
+        full condition / fresh-from-arrival; only post-migration use ages
+        them."""
+        if not hasattr(self._world_state, "tool_condition"):
+            self._world_state.tool_condition = {}
+        if not hasattr(self._world_state, "food_freshness"):
+            self._world_state.food_freshness = {}
+        tools = dict(getattr(self._world_state, "tool_condition", {}) or {})
+        foods = dict(getattr(self._world_state, "food_freshness", {}) or {})
+        tools.setdefault(agent_ref, {})
+        foods.setdefault(agent_ref, {})
+        self._world_state.tool_condition = tools
+        self._world_state.food_freshness = foods
+        self._sync_tool_condition(agent_ref)
+        self._sync_food_freshness(
+            agent_ref,
+            int(heartbeat_number if heartbeat_number is not None else self._world_state.tick),
+        )
+
+    def _clean_tool_states(self, states: object, maximum: int) -> list[int]:
+        if not isinstance(states, list):
+            return []
+        return [
+            value for value in states
+            if isinstance(value, int) and not isinstance(value, bool)
+            and 0 < value <= maximum
+        ]
+
+    def _sync_tool_condition(self, agent_ref: str) -> None:
+        if not hasattr(self._world_state, "tool_condition"):
+            self._world_state.tool_condition = {}
+        state = dict(self._world_state.tool_condition or {})
+        agent_state = dict(state.get(agent_ref) or {})
+        holdings = self._get_agent_inventory(agent_ref)
+        for kind, maximum in _TOOL_DURABILITY.items():
+            held = int(holdings.get(kind, 0) or 0)
+            values = self._clean_tool_states(agent_state.get(kind), maximum)
+            if len(values) > held:
+                values = values[:held]
+            if len(values) < held:
+                values.extend([maximum] * (held - len(values)))
+            if values:
+                agent_state[kind] = values
+            else:
+                agent_state.pop(kind, None)
+        state[agent_ref] = agent_state
+        self._world_state.tool_condition = state
+
+    def _register_tool(self, agent_ref: str, kind: str, quantity: int = 1) -> None:
+        """Recognize newly acquired crafted items at full condition."""
+        if kind not in _TOOL_DURABILITY or quantity <= 0:
+            return
+        self._ensure_life_state(agent_ref)
+        self._sync_tool_condition(agent_ref)
+
+    def _tool_states_for(self, agent_ref: str) -> dict[str, list[int]]:
+        """One remaining-use count per tool item, from condition records."""
+        self._ensure_life_state(agent_ref)
+        state = (self._world_state.tool_condition or {}).get(agent_ref) or {}
+        return {
+            kind: list(self._clean_tool_states(
+                values, _TOOL_DURABILITY[kind]
+            ))
+            for kind, values in state.items()
+            if kind in _TOOL_DURABILITY
+            and self._clean_tool_states(values, _TOOL_DURABILITY[kind])
+        }
+
+    def _use_best_tool(self, agent_ref: str, kinds: tuple[str, ...]) -> dict:
+        """Wear the best-condition eligible tool. A tool breaks only
+        after its final successful use."""
+        self._ensure_life_state(agent_ref)
+        state = dict(self._world_state.tool_condition.get(agent_ref) or {})
+        candidates = [
+            (kind, self._clean_tool_states(state.get(kind), _TOOL_DURABILITY[kind]))
+            for kind in kinds
+        ]
+        candidates = [(kind, values) for kind, values in candidates if values]
+        if not candidates:
+            return {"used": None, "remaining": 0, "broke": False}
+        kind, values = max(candidates, key=lambda item: max(item[1]))
+        values = list(values)
+        index = values.index(max(values))
+        values[index] -= 1
+        broke = values[index] <= 0
+        if broke:
+            del values[index]
+            add_to_inventory(self._store, agent_ref, kind, -1)
+        if values:
+            state[kind] = values
+        else:
+            state.pop(kind, None)
+        self._world_state.tool_condition[agent_ref] = state
+        return {
+            "used": kind,
+            "remaining": max(values) if values else 0,
+            "broke": broke,
+        }
+
+    @staticmethod
+    def _clean_food_lots(lots: object) -> list[dict]:
+        if not isinstance(lots, list):
+            return []
+        clean = []
+        for lot in lots:
+            if not isinstance(lot, dict):
+                continue
+            quantity = lot.get("quantity", 0)
+            born_hb = lot.get("born_hb", 0)
+            if (isinstance(quantity, int) and not isinstance(quantity, bool)
+                    and quantity > 0 and isinstance(born_hb, int)
+                    and not isinstance(born_hb, bool)):
+                clean.append({"quantity": quantity, "born_hb": born_hb})
+        return sorted(clean, key=lambda lot: lot["born_hb"])
+
+    def _sync_food_freshness(self, agent_ref: str, heartbeat_number: int) -> None:
+        """Seed lots for untracked existing holdings; never backdate them."""
+        if not hasattr(self._world_state, "food_freshness"):
+            self._world_state.food_freshness = {}
+        freshness = dict(self._world_state.food_freshness or {})
+        agent_freshness = dict(freshness.get(agent_ref) or {})
+        holdings = self._get_agent_inventory(agent_ref)
+        for kind, lifetime in survival.SPOILAGE_LIFETIME_HB.items():
+            held = int(holdings.get(kind, 0) or 0)
+            if held <= 0:
+                agent_freshness.pop(kind, None)
+                continue
+            lots = self._clean_food_lots(agent_freshness.get(kind))
+            tracked = sum(lot["quantity"] for lot in lots)
+            if tracked < held:
+                lots.append({
+                    "quantity": held - tracked,
+                    "born_hb": int(heartbeat_number),
+                })
+            if tracked > held:
+                excess = tracked - held
+                lots = sorted(lots, key=lambda lot: lot["born_hb"])
+                while excess > 0 and lots:
+                    lot = lots[-1]
+                    remove = min(excess, lot["quantity"])
+                    lot["quantity"] -= remove
+                    excess -= remove
+                    if lot["quantity"] <= 0:
+                        lots.pop()
+            ordered = sorted(lots, key=lambda lot: lot["born_hb"])
+            agent_freshness[kind] = ordered
+        freshness[agent_ref] = {
+            kind: lots for kind, lots in agent_freshness.items() if lots
+        }
+        self._world_state.food_freshness = freshness
+
+    def _wear_preferred_attack_tool(self, agent_ref: str) -> dict:
+        inventory = self._get_agent_inventory(agent_ref)
+        for kind in ("iron_spear", "iron_axe", "flint_spear", "stone_axe", "flint_knife"):
+            if int(inventory.get(kind, 0) or 0) > 0:
+                return self._use_best_tool(agent_ref, (kind,))
+        return {"used": None, "remaining": 0, "broke": False}
+
+    def _food_freshness_for(self, agent_ref: str) -> dict[str, dict]:
+        self._ensure_life_state(agent_ref)
+        freshness = (self._world_state.food_freshness or {}).get(agent_ref) or {}
+        out: dict[str, dict] = {}
+        for kind, lots in freshness.items():
+            clean = self._clean_food_lots(lots)
+            if clean:
+                out[kind] = {
+                    "lots": clean,
+                    "oldest_born_hb": clean[0]["born_hb"],
+                    "quantity": sum(lot["quantity"] for lot in clean),
+                }
+        return out
+
+    def _record_food_birth(
+        self, agent_ref: str, kind: str, quantity: int,
+        heartbeat_number: int,
+    ) -> None:
+        if kind not in survival.SPOILAGE_LIFETIME_HB or quantity <= 0:
+            return
+        if not hasattr(self._world_state, "food_freshness"):
+            self._world_state.food_freshness = {}
+        freshness = dict(self._world_state.food_freshness or {})
+        agent_freshness = dict(freshness.get(agent_ref) or {})
+        lots = self._clean_food_lots(agent_freshness.get(kind))
+        lots.append({"quantity": int(quantity), "born_hb": int(heartbeat_number)})
+        agent_freshness[kind] = sorted(lots, key=lambda lot: lot["born_hb"])
+        freshness[agent_ref] = agent_freshness
+        self._world_state.food_freshness = freshness
+
+    def _remove_food_lots(
+        self, agent_ref: str, kind: str, quantity: int
+    ) -> list[dict]:
+        """Remove oldest lots first and return the lots taken."""
+        if quantity <= 0:
+            return []
+        freshness = dict(self._world_state.food_freshness or {})
+        agent_freshness = dict(freshness.get(agent_ref) or {})
+        lots = self._clean_food_lots(agent_freshness.get(kind))
+        taken = []
+        remaining = int(quantity)
+        kept = []
+        for lot in lots:
+            if remaining <= 0:
+                kept.append(lot)
+                continue
+            take = min(remaining, lot["quantity"])
+            taken.append({"quantity": take, "born_hb": lot["born_hb"]})
+            remaining -= take
+            if lot["quantity"] > take:
+                kept.append({
+                    "quantity": lot["quantity"] - take,
+                    "born_hb": lot["born_hb"],
+                })
+        if kept:
+            agent_freshness[kind] = kept
+        else:
+            agent_freshness.pop(kind, None)
+        freshness[agent_ref] = agent_freshness
+        self._world_state.food_freshness = freshness
+        return taken
+
+    def _effective_food_lifetime(
+        self, kind: str, obj_id: str, obj: dict
+    ) -> int:
+        base = survival.SPOILAGE_LIFETIME_HB.get(kind)
+        if base is None:
+            return 0
+        if "cellar" in str(obj.get("object_type", "")).casefold():
+            footprint, _ = self._connected_home_network(
+                str(obj.get("tile_id", ""))
+            )
+            return int(base * (4 + max(1, footprint)))
+        return int(base)
+
+    def _age_and_spoil_world_food(self, heartbeat_number: int) -> None:
+        """Walk persisted perishables before embodiment; nothing is
+        retroactively aged on first migration."""
+        objects = self._world_state.public_objects or {}
+        for ref in (self._adam_ref, self._eve_ref):
+            self._ensure_life_state(ref, heartbeat_number)
+            holdings = self._get_agent_inventory(ref)
+            for kind, lifetime in survival.SPOILAGE_LIFETIME_HB.items():
+                held = int(holdings.get(kind, 0) or 0)
+                if held <= 0:
+                    continue
+                lots = self._clean_food_lots(
+                    (self._world_state.food_freshness or {}).get(ref, {}).get(kind)
+                )
+                spoiled = sum(
+                    lot["quantity"] for lot in lots
+                    if heartbeat_number - lot["born_hb"] >= lifetime
+                )
+                if spoiled:
+                    lots = [
+                        lot for lot in lots
+                        if heartbeat_number - lot["born_hb"] < lifetime
+                    ]
+                    add_to_inventory(self._store, ref, kind, -spoiled)
+                    freshness = dict(self._world_state.food_freshness)
+                    agent_freshness = dict(freshness.get(ref) or {})
+                    if lots:
+                        agent_freshness[kind] = lots
+                    else:
+                        agent_freshness.pop(kind, None)
+                    freshness[ref] = agent_freshness
+                    self._world_state.food_freshness = freshness
+
+        for obj_id, obj in list(objects.items()):
+            if not isinstance(obj, dict):
+                continue
+            for source, age_key in (("contents", "contents_age"), ("materials", "materials_age")):
+                stores = obj.get(source)
+                if not isinstance(stores, dict) or not stores:
+                    continue
+                ages = obj.get(age_key)
+                if not isinstance(ages, dict):
+                    ages = {}
+                    obj[age_key] = ages
+                for kind, held in list(stores.items()):
+                    if kind not in survival.SPOILAGE_LIFETIME_HB:
+                        continue
+                    if not isinstance(held, int) or held <= 0:
+                        continue
+                    born_hb = ages.get(kind)
+                    if not isinstance(born_hb, int) or isinstance(born_hb, bool):
+                        ages[kind] = int(heartbeat_number)
+                        continue
+                    if heartbeat_number - born_hb >= self._effective_food_lifetime(kind, obj_id, obj):
+                        del stores[kind]
+                        ages.pop(kind, None)
+
+    def _current_tile_water_drinkable(self, position: str) -> bool:
+        position = str(position or "")
+        if not position:
+            return False
+        if not hasattr(self, "_drinkable_tile_ids"):
+            self._drinkable_tile_ids = set()
+        if position in self._drinkable_tile_ids:
+            return True
+        if self._fog_active():
+            try:
+                tm = load_true_map(self._get_data_root())
+                for tile in tm.get("tiles", []):
+                    if tile.get("tile_id") != position:
+                        continue
+                    water = tile.get("water")
+                    if isinstance(water, dict) and water.get("drinkable") is True:
+                        self._drinkable_tile_ids.add(position)
+                        return True
+                    return False
+            except FogAdapterError:
+                return False
+        return any(
+            r.get("kind") == "fresh_water"
+            for r in self._current_tile_resources.get(position, [])
+        )
+
+
     def retire_stale_goals(self, agent_ref: str, heartbeat_number: int) -> list[GoalRecord]:
         """Phase 10KX/10KZ: Retire goals whose satisfying condition has objectively ceased to hold."""
         view = self._agent_view(agent_ref)
@@ -1214,6 +1545,7 @@ class FirstPairRuntime:
             "weather_changes_at_heartbeat": forecast["changes_at_heartbeat"],
             "by_fire": self._nearby_fire(position, heartbeat_number) if position else False,
             "sheltered": self._in_shelter(position) if position else False,
+            "drinkable_water": self._current_tile_water_drinkable(position) if position else False,
         }
 
         # Check if honeycomb on current tile to report bee colony state
@@ -1635,6 +1967,8 @@ class FirstPairRuntime:
                 self._home_network_footprint(position) if position else 0
             ),
             observed_resource_rollup=self._rollup_for(agent_ref),
+            tool_condition=self._tool_states_for(agent_ref),
+            food_freshness=self._food_freshness_for(agent_ref),
         )
 
     # ------------------------------------------------------------------
@@ -2198,6 +2532,7 @@ class FirstPairRuntime:
         heartbeat BEFORE the cognition cycles, so the observation the
         agent reasons from includes the body it is about to act with."""
         weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+        self._age_and_spoil_world_food(heartbeat_number)
         for agent_ref in (self._adam_ref, self._eve_ref):
             vitals = self._vitals_for(agent_ref)
             position = self._world_state.tile_occupancy.get(agent_ref)
@@ -2266,6 +2601,77 @@ class FirstPairRuntime:
             del obj["materials"][best_kind]
         return best_sat
 
+    def _execute_drink(self, agent_ref: str, action: dict,
+                       heartbeat_number: int) -> dict:
+        """Drink on a drinkable tile, from belongings, or from a pottery
+        object on the same/adjacent tile. Rain is not a source."""
+        source = str(action.get("source") or action.get("resource_kind") or "").strip().lower()
+        target_object_id = action.get("target_object_id")
+        position = self._world_state.tile_occupancy.get(agent_ref)
+        vitals = self._vitals_for(agent_ref)
+        thirst_now = float(vitals.get("thirst", 18.0))
+        satisfaction = 0.0
+        outcome_source = None
+
+        if target_object_id:
+            if not isinstance(target_object_id, str) or not target_object_id.strip():
+                return {"status": "rejected", "reason": "Missing target_object_id for drink"}
+            obj = self._world_state.public_objects.get(target_object_id)
+            if not isinstance(obj, dict):
+                return {"status": "rejected",
+                        "reason": f"Drink target not found: {target_object_id}"}
+            if "pot" not in str(obj.get("object_type", "")).casefold():
+                return {"status": "rejected",
+                        "reason": f"Cannot drink from a {obj.get('object_type', 'object')}; use a clay_pot vessel"}
+            contents = obj.get("contents")
+            if not isinstance(contents, dict) or int(contents.get("fresh_water", 0) or 0) < 1:
+                return {"status": "rejected",
+                        "reason": f"{target_object_id} holds no fresh_water"}
+            obj_pos = self._entity_xy(obj.get("tile_id")) or self._tile_xy(obj.get("tile_id", ""))
+            pos_xy = self._tile_xy(position or "")
+            if obj_pos is None or pos_xy is None or max(
+                abs(obj_pos[0] - pos_xy[0]), abs(obj_pos[1] - pos_xy[1])
+            ) > 1:
+                return {"status": "rejected",
+                        "reason": f"Drink target {target_object_id} is not on your tile or adjacent"}
+            contents["fresh_water"] -= 1
+            if contents["fresh_water"] <= 0:
+                del contents["fresh_water"]
+            satisfaction = survival.DRINK_SATISFACTION["vessel"]
+            outcome_source = "vessel"
+        elif source in ("", "tile", "environment", "current_tile"):
+            if not self._current_tile_water_drinkable(str(position or "")):
+                return {"status": "rejected",
+                        "reason": "This tile is not drinkable; the drink action names a drinkable source"}
+            satisfaction = survival.DRINK_SATISFACTION["tile"]
+            outcome_source = "tile"
+        elif source in ("carried", "belongings", "fresh_water", "fresh water", "inventory"):
+            kind = str(action.get("resource_kind") or "fresh_water").strip().lower()
+            if kind not in ("fresh_water", "fresh water", "freshwater"):
+                return {"status": "rejected",
+                        "reason": "Drink from belongings requires resource_kind fresh_water"}
+            inventory = self._get_agent_inventory(agent_ref)
+            if int(inventory.get("fresh_water", 0) or 0) < 1:
+                return {"status": "rejected",
+                        "reason": "You hold no fresh_water to drink"}
+            add_to_inventory(self._store, agent_ref, "fresh_water", -1)
+            satisfaction = survival.DRINK_SATISFACTION["carried"]
+            outcome_source = "carried"
+        else:
+            return {"status": "rejected",
+                    "reason": "Invalid drink source; use tile, carried fresh_water, or a clay_pot object"}
+
+        vitals["thirst"] = round(
+            max(0.0, min(survival.THIRST_CAP, thirst_now - satisfaction)), 2
+        )
+        return {
+            "status": "success",
+            "action_type": "drink",
+            "source": outcome_source,
+            "thirst_satisfied": satisfaction,
+            "thirst_now": vitals["thirst"],
+        }
+
     def _eat_satisfaction(self, agent_ref: str, resource_kind: str) -> dict:
         """Consume one unit of food from belongings, satisfy hunger."""
         kind = str(resource_kind or "").strip()
@@ -2280,6 +2686,7 @@ class FirstPairRuntime:
         satisfaction = survival.eat_satisfaction(kind)
         vitals["hunger"] = round(max(0.0, vitals["hunger"] - satisfaction), 2)
         add_to_inventory(self._store, agent_ref, kind, -1)
+        self._remove_food_lots(agent_ref, kind, 1)
         return {
             "status": "success",
             "resource_kind": kind,
@@ -2356,6 +2763,7 @@ class FirstPairRuntime:
 
         fauna_interactions.begin_animal_interaction(self._store, event_id, intent)
         modify_inventory_batch(self._store, agent_ref, {resource_kind: -1})
+        self._remove_food_lots(agent_ref, resource_kind, 1)
         fauna_interactions.mark_inventory_applied(self._store, event_id)
 
         target["trust"] = trust_after
@@ -2433,6 +2841,7 @@ class FirstPairRuntime:
 
         fauna_interactions.begin_animal_interaction(self._store, event_id, intent)
         modify_inventory_batch(self._store, agent_ref, {"milk": 1})
+        self._record_food_birth(agent_ref, "milk", 1, heartbeat_number)
         fauna_interactions.mark_inventory_applied(self._store, event_id)
 
         target["milk_ready"] = False
@@ -2453,8 +2862,10 @@ class FirstPairRuntime:
             "detail": "Milked the ready cow.",
         }
 
-    def _execute_attack(self, agent_ref: str, action: dict) -> dict:
+    def _execute_attack(self, agent_ref: str, action: dict,
+                        heartbeat_number: int | None = None) -> dict:
         """Strike an adjacent animal. Wolves/deer stay in wildlife; snakes are fauna."""
+        hb = int(heartbeat_number if heartbeat_number is not None else getattr(self._world_state, "tick", 0))
         target_id = action.get("target_id", "")
         entities = self._world_state.wildlife or []
 
@@ -2495,6 +2906,7 @@ class FirstPairRuntime:
 
             inventory = load_inventory(self._store).get(agent_ref, {})
             entity, dmg, killed, meat = wildlife.strike(entity, inventory)
+            wear = self._wear_preferred_attack_tool(agent_ref)
             kind = entity.get("kind", "animal")
             if killed:
                 if kind == "wolf":
@@ -2503,6 +2915,9 @@ class FirstPairRuntime:
                     detail = f"Struck deer for {dmg} damage; deer killed and dropped {meat} meat"
             else:
                 detail = f"Struck {kind} for {dmg} damage ({entity.get('hp')} HP remaining)"
+            if wear.get("used"):
+                detail += f"; used {wear['used']} ({wear['remaining']} use(s) left"
+                detail += ", broke)" if wear.get("broke") else ")"
 
             outcome = {
                 "status": "success",
@@ -2513,11 +2928,15 @@ class FirstPairRuntime:
                 "driven_off": (killed and kind == "wolf"),
                 "meat": meat,
                 "detail": detail,
+                "tool_used": wear.get("used"),
+                "tool_remaining": wear.get("remaining", 0),
+                "tool_broke": bool(wear.get("broke")),
             }
             if killed:
                 self._world_state.wildlife = [e for e in entities if e.get("id") != target_id]
                 if meat:
                     add_to_inventory(self._store, agent_ref, wildlife.MEAT, meat)
+                    self._record_food_birth(agent_ref, wildlife.MEAT, meat, hb)
                     outcome["meat_held"] = meat
             else:
                 self._world_state.wildlife = [
@@ -2546,6 +2965,7 @@ class FirstPairRuntime:
 
         inventory = load_inventory(self._store).get(agent_ref, {})
         target, dmg, killed, meat = fauna.strike_snake(target, inventory)
+        wear = self._wear_preferred_attack_tool(agent_ref)
         outcome = {
             "status": "success",
             "target_id": target_id,
@@ -2554,11 +2974,15 @@ class FirstPairRuntime:
             "killed": killed,
             "meat": meat,
             "driven_off": False,
+            "tool_used": wear.get("used"),
+            "tool_remaining": wear.get("remaining", 0),
+            "tool_broke": bool(wear.get("broke")),
         }
         if killed:
             self._world_state.fauna = [e for e in faunae if e.get("id") != target_id]
             if meat:
                 add_to_inventory(self._store, agent_ref, wildlife.MEAT, meat)
+                self._record_food_birth(agent_ref, wildlife.MEAT, meat, hb)
                 outcome["meat_held"] = meat
         else:
             self._world_state.fauna = [
@@ -2570,6 +2994,7 @@ class FirstPairRuntime:
     # ------------------------------------------------------------------
 
     def _execute_action(self, agent_ref: str, action: dict | None, heartbeat_number: int) -> dict:
+        self._age_and_spoil_world_food(heartbeat_number)
         if action is None:
             return {"status": "no_action", "detail": "No action chosen"}
         action_type = action.get("action_type")
@@ -2581,22 +3006,24 @@ class FirstPairRuntime:
         # impossible board: starving with full pockets.
         if self._vitals_for(agent_ref).get("downed"):
             if action_type not in ("leave_public_message", "ask_human",
-                                   "no_action", "eat"):
+                                   "no_action", "eat", "drink"):
                 return {
                     "status": "rejected",
                     "reason": ("You have collapsed (vitality 0). Your body "
-                               "cannot act. If food is brought to your tile "
-                               "you will eat and recover; otherwise rest."),
+                               "cannot act. If food or water is brought to your tile "
+                               "you will drink and eat and recover; otherwise rest."),
                 }
 
         if action_type == "eat":
             return self._eat_satisfaction(agent_ref, action.get("resource_kind"))
+        if action_type == "drink":
+            return self._execute_drink(agent_ref, action, heartbeat_number)
         if action_type == "offer_food":
             return self._execute_offer_food(agent_ref, action, heartbeat_number)
         if action_type == "milk_animal":
             return self._execute_milk_animal(agent_ref, action, heartbeat_number)
         if action_type == "attack":
-            return self._execute_attack(agent_ref, action)
+            return self._execute_attack(agent_ref, action, heartbeat_number)
         if action_type == "move":
             return self._execute_move(agent_ref, action)
         if action_type == "create_public_object":
@@ -2650,13 +3077,28 @@ class FirstPairRuntime:
 
         timber_yield = 2 if has_axe else 1
         add_to_inventory(self._store, agent_ref, "timber", timber_yield)
+        tool_kind = (
+            "iron_axe" if inv.get("iron_axe", 0) > 0
+            else "stone_axe" if has_axe
+            else "flint_knife"
+        )
+        wear = self._use_best_tool(agent_ref, (tool_kind,))
+        detail = f"Hewn {timber_yield} structural timber logs from tree."
+        if wear.get("used"):
+            detail += (
+                f" {wear['used']} condition left {wear['remaining']} use(s)"
+            )
+            if wear.get("broke"):
+                detail += ", broke"
         return {
             "status": "success",
             "action_type": "hew_timber",
             "timber_yield": timber_yield,
-            "tool_used": "axe" if has_axe else "blade",
+            "tool_used": wear.get("used"),
+            "tool_remaining": wear.get("remaining", 0),
+            "tool_broke": bool(wear.get("broke")),
             "remaining": self._get_agent_inventory(agent_ref),
-            "detail": f"Hewn {timber_yield} structural timber logs from tree.",
+            "detail": detail,
         }
 
     def _execute_plant_crop(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
@@ -2689,6 +3131,7 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": f"Insufficient {resource_kind}: need 1 to plant"}
 
         add_to_inventory(self._store, agent_ref, resource_kind, -1)
+        self._remove_food_lots(agent_ref, resource_kind, 1)
         obj["crop"] = {
             "kind": resource_kind,
             "planted_heartbeat": heartbeat_number,
@@ -2723,6 +3166,7 @@ class FirstPairRuntime:
         crop_kind = crop.get("kind", "wild_berries")
         yield_amount = 4
         add_to_inventory(self._store, agent_ref, crop_kind, yield_amount)
+        self._record_food_birth(agent_ref, crop_kind, yield_amount, heartbeat_number)
         obj["crop"] = None
 
         return {
@@ -2774,12 +3218,15 @@ class FirstPairRuntime:
         inv = self._get_agent_inventory(agent_ref)
         gather_yield = GATHER_YIELD
         tool_detail = ""
+        tool_kind_used = None
         if resource_kind == "wood" and (inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0):
             gather_yield = 5
             tool_detail = " (hewn with axe)"
+            tool_kind_used = "iron_axe" if inv.get("iron_axe", 0) > 0 else "stone_axe"
         elif resource_kind in ("wild_berries", "mushrooms", "edible_roots") and inv.get("woven_basket", 0) > 0:
             gather_yield = 3
             tool_detail = " (gathered with woven basket)"
+            tool_kind_used = "woven_basket"
 
         take = min(gather_yield, available)
 
@@ -2788,15 +3235,30 @@ class FirstPairRuntime:
         # Belongings persist: holdings live in the store, not in memory,
         # so what is gathered survives restarts.
         add_to_inventory(self._store, agent_ref, resource_kind, take)
+        self._record_food_birth(agent_ref, resource_kind, take, heartbeat_number)
+        wear = (
+            self._use_best_tool(agent_ref, (tool_kind_used,))
+            if tool_kind_used
+            else {"used": None, "remaining": 0, "broke": False}
+        )
 
         outcome = {
             "status": "success",
             "resource_kind": resource_kind,
             "amount_gathered": take,
             "remaining_on_tile": resource.get("amount", 0),
+            "tool_used": wear.get("used"),
+            "tool_remaining": wear.get("remaining", 0),
+            "tool_broke": bool(wear.get("broke")),
         }
         if tool_detail:
             outcome["detail"] = f"Gathered {take} {resource_kind}{tool_detail}"
+            if wear.get("used"):
+                outcome["detail"] += (
+                    f"; {wear['used']} condition left {wear['remaining']} use(s)"
+                )
+                if wear.get("broke"):
+                    outcome["detail"] += f", broke"
 
         # Micro-ecology: wild bee colonies defend honeycomb unless calmed or dormant
         if resource_kind == "honeycomb":
@@ -3282,10 +3744,10 @@ class FirstPairRuntime:
             return self._smelt_materials(obj_id, obj, materials)
 
         if operation == "craft":
-            return self._craft_on_surface(obj_id, obj, materials, agent_ref)
+            return self._craft_on_surface(obj_id, obj, materials, agent_ref, heartbeat_number)
 
         if operation == "cook":
-            return self._cook_on_fire(obj_id, obj, materials, agent_ref)
+            return self._cook_on_fire(obj_id, obj, materials, agent_ref, heartbeat_number)
 
         if operation == "deposit":
             from backend.world.first_pair_persistence import add_to_inventory
@@ -3332,8 +3794,20 @@ class FirstPairRuntime:
                     }
             # All checks pass; move the materials via the persistence layer
             for kind, amount in materials.items():
+                self._ensure_life_state(agent_ref, heartbeat_number)
+                removed_lots = self._remove_food_lots(agent_ref, kind, amount)
                 add_to_inventory(self._store, agent_ref, kind, -amount)
                 obj["contents"][kind] = obj["contents"].get(kind, 0) + amount
+                if removed_lots:
+                    ages = obj.get("contents_age")
+                    if not isinstance(ages, dict):
+                        ages = {}
+                        obj["contents_age"] = ages
+                    born_hb = min(lot["born_hb"] for lot in removed_lots)
+                    if kind not in ages or born_hb < ages[kind]:
+                        ages[kind] = born_hb
+                if kind in _TOOL_DURABILITY:
+                    self._sync_tool_condition(agent_ref)
             detail = f"Deposited {materials} into {obj_id}"
             outcome = {
                 "status": "success",
@@ -3357,8 +3831,18 @@ class FirstPairRuntime:
                                       f"{contained}, tried to extract {amount}"}
             # All checks pass; move the materials via the persistence layer
             for kind, amount in materials.items():
-                obj["contents"][kind] = obj["contents"].get(kind, 0) - amount
+                obj_contents = obj["contents"]
+                obj_contents[kind] = obj_contents.get(kind, 0) - amount
+                if obj_contents[kind] <= 0:
+                    del obj_contents[kind]
                 add_to_inventory(self._store, agent_ref, kind, amount)
+                born_hb = heartbeat_number
+                ages = obj.get("contents_age")
+                if isinstance(ages, dict) and isinstance(ages.get(kind), int):
+                    born_hb = ages[kind]
+                self._record_food_birth(agent_ref, kind, amount, born_hb)
+                if kind in _TOOL_DURABILITY:
+                    self._register_tool(agent_ref, kind, amount)
             return {"status": "success",
                     "detail": f"Extracted {materials} from {obj_id}",
                     "contents": dict(obj["contents"])}
@@ -3426,12 +3910,13 @@ class FirstPairRuntime:
                 "contents": dict(obj["contents"])}
 
     def _craft_on_surface(self, obj_id: str, obj: dict, materials: dict,
-                          agent_ref: str) -> dict:
+                          agent_ref: str, heartbeat_number: int | None = None) -> dict:
         """Combine materials into a tool. The crafting surface doesn't
         store anything — the materials are consumed from the agent's
         inventory and the tool goes into their inventory."""
         from backend.world.first_pair_persistence import modify_inventory_batch, load_inventory
 
+        hb = int(heartbeat_number if heartbeat_number is not None else self._world_state.tick)
         inventory = load_inventory(self._store).get(agent_ref, {})
         material_set = tuple(sorted(materials.items()))
 
@@ -3447,16 +3932,22 @@ class FirstPairRuntime:
                 return {"status": "rejected",
                         "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
 
+        self._ensure_life_state(agent_ref, hb)
+        for kind, amount in materials.items():
+            self._remove_food_lots(agent_ref, kind, amount)
         deltas = {kind: -amount for kind, amount in materials.items()}
         deltas[recipe] = deltas.get(recipe, 0) + 1
         modify_inventory_batch(self._store, agent_ref, deltas)
+        if recipe in _TOOL_DURABILITY:
+            self._register_tool(agent_ref, recipe)
         return {"status": "success", "detail": f"Crafted {recipe}", "crafted": recipe}
 
     def _cook_on_fire(self, obj_id: str, obj: dict, materials: dict,
-                      agent_ref: str) -> dict:
+                      agent_ref: str, heartbeat_number: int | None = None) -> dict:
         """Cook raw ingredients into cooked meals over an active fire."""
         from backend.world.first_pair_persistence import modify_inventory_batch, load_inventory
 
+        hb = int(heartbeat_number if heartbeat_number is not None else self._world_state.tick)
         inventory = load_inventory(self._store).get(agent_ref, {})
         material_set = tuple(sorted(materials.items()))
 
@@ -3471,9 +3962,13 @@ class FirstPairRuntime:
                 return {"status": "rejected",
                         "reason": f"Not enough {kind}: you hold {held}, needs {amount}"}
 
+        self._ensure_life_state(agent_ref, hb)
+        for kind, amount in materials.items():
+            self._remove_food_lots(agent_ref, kind, amount)
         deltas = {kind: -amount for kind, amount in materials.items()}
         deltas[recipe] = deltas.get(recipe, 0) + 1
         modify_inventory_batch(self._store, agent_ref, deltas)
+        self._record_food_birth(agent_ref, recipe, 1, hb)
         return {"status": "success", "detail": f"Cooked {recipe} over {obj_id}", "cooked": recipe}
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
