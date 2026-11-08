@@ -5299,19 +5299,21 @@ function focusCiv(pairName) {
     setContinentProjection("cont_a", true);
     setContinentProjection("cont_b", true);
     setOceanProjection(true);
-    // Show both continents side-by-side across the Great Ocean (centers 250 units apart, 50 units ocean gap)
-    continentGroups.cont_a.visible = true;
-    continentGroups.cont_b.visible = true;
-    sceneryGroups.cont_a.visible = true;
-    sceneryGroups.cont_b.visible = true;
-    objectGroups.cont_a.visible = true;
-    objectGroups.cont_b.visible = true;
-    continentGroups.cont_a.position.set(-125, 0, 0);
-    continentGroups.cont_b.position.set(125, 0, 0);
-    sceneryGroups.cont_a.position.set(-125, 0, 0);
-    sceneryGroups.cont_b.position.set(125, 0, 0);
-    objectGroups.cont_a.position.set(-125, 0, 0);
-    objectGroups.cont_b.position.set(125, 0, 0);
+    // World Atlas mode is the planet sphere only. The detailed flat continent
+    // meshes are restored in East/West local modes; showing them here too
+    // caused offset, z-fighting rectangles that read as a blue square.
+    continentGroups.cont_a.visible = false;
+    continentGroups.cont_b.visible = false;
+    sceneryGroups.cont_a.visible = false;
+    sceneryGroups.cont_b.visible = false;
+    objectGroups.cont_a.visible = false;
+    objectGroups.cont_b.visible = false;
+    continentGroups.cont_a.position.set(0, 0, 0);
+    continentGroups.cont_b.position.set(0, 0, 0);
+    sceneryGroups.cont_a.position.set(0, 0, 0);
+    sceneryGroups.cont_b.position.set(0, 0, 0);
+    objectGroups.cont_a.position.set(0, 0, 0);
+    objectGroups.cont_b.position.set(0, 0, 0);
 
     updatePublicObjectsAndClearings("east", (timelineHbs.east && timelineHbs.east.length) ? timelineHbs.east[timelineHbs.east.length - 1] : currentHb);
     updatePublicObjectsAndClearings("west", (timelineHbs.west && timelineHbs.west.length) ? timelineHbs.west[timelineHbs.west.length - 1] : currentHb);

@@ -573,6 +573,9 @@ def test_orbit_globe_labels_mark_both_canonical_continents():
     assert "const radius = GLOBE_RADIUS + 18.0;" in script
     assert "facing > 0.05" in script
     assert "updateGlobeLabels();" in script
+    assert "continentGroups.cont_a.visible = false;" in script
+    assert "sceneryGroups.cont_a.visible = false;" in script
+    assert "objectGroups.cont_a.visible = false;" in script
 
 
 def test_globe_atlas_is_high_resolution_and_biome_driven():
