@@ -549,3 +549,27 @@ def test_orbit_switches_ocean_to_sphere_and_back():
     assert d["local"]["planet"] is False, (
         "local mode must hide the planet surface mesh"
     )
+
+
+def test_orbit_globe_labels_mark_both_canonical_continents():
+    """Orbit labels must identify East and West on the globe itself.
+
+    Regression for the visual defect where the top nav pills named East and
+    West but the globe showed multiple landmasses with no anchored label. The
+    labels must use the same GLOBE_PATCHES centers as the projected continents,
+    show only in orbit, and hide when their point faces away from the camera.
+    """
+    html = PROTOTYPE_HTML.read_text(encoding="utf-8")
+    script = _get_prototype_script()
+
+    assert 'id="globe-label-east"' in html
+    assert 'id="globe-label-west"' in html
+    assert "EAST VALLEY (ALPHA)" in html
+    assert "WEST DAWN (BETA)" in html
+
+    assert "function updateGlobeLabels()" in script
+    assert "selectedPair !== \"orbit\"" in script
+    assert "GLOBE_PATCHES[item.cid]" in script
+    assert "const radius = GLOBE_RADIUS + 18.0;" in script
+    assert "facing > 0.05" in script
+    assert "updateGlobeLabels();" in script

@@ -655,6 +655,66 @@ header {
   border-color: rgba(46, 213, 115, 0.65);
   color: #2ed573;
 }
+
+/* Orbit globe continent labels */
+.globe-label {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -135%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  z-index: 26;
+  white-space: nowrap;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.65);
+}
+.globe-label::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 18px;
+  transform: translateX(-50%);
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.globe-label::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 18px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+.globe-label-title {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: rgba(5, 12, 22, 0.86);
+  border: 1px solid currentColor;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+}
+.globe-label-sub {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(5, 12, 22, 0.82);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.88);
+}
+.globe-label-east { color: var(--east-cyan); }
+.globe-label-west { color: #feca57; }
 </style>
 </head>
 <body>
@@ -703,6 +763,14 @@ header {
         <div class="tag-action" id="tag-act-eve">NO ACTION RECORDED</div>
       </div>
       <div id="fauna-tags-container"></div>
+      <div id="globe-label-east" class="globe-label globe-label-east" aria-hidden="true">
+        <div class="globe-label-title">EAST VALLEY (ALPHA)</div>
+        <div class="globe-label-sub">canonical cont_a</div>
+      </div>
+      <div id="globe-label-west" class="globe-label globe-label-west" aria-hidden="true">
+        <div class="globe-label-title">WEST DAWN (BETA)</div>
+        <div class="globe-label-sub">canonical cont_b</div>
+      </div>
 
       <!-- 3D Camera Controls -->
       <div class="camera-toolbar">
@@ -5636,6 +5704,48 @@ window.onresize = () => {
 // -------------------------------------------------------------
 const tagAdam = document.getElementById("tag-adam");
 const tagEve = document.getElementById("tag-eve");
+const globeLabelEast = document.getElementById("globe-label-east");
+const globeLabelWest = document.getElementById("globe-label-west");
+
+function updateGlobeLabels() {
+  if (selectedPair !== "orbit") {
+    if (globeLabelEast) globeLabelEast.style.display = "none";
+    if (globeLabelWest) globeLabelWest.style.display = "none";
+    return;
+  }
+
+  const labels = [
+    { el: globeLabelEast, cid: "cont_a" },
+    { el: globeLabelWest, cid: "cont_b" },
+  ];
+  for (const item of labels) {
+    if (!item.el) continue;
+    const patch = GLOBE_PATCHES[item.cid];
+    if (!patch) {
+      item.el.style.display = "none";
+      continue;
+    }
+    const radius = GLOBE_RADIUS + 18.0;
+    const pos = new THREE.Vector3(
+      radius * Math.cos(patch.lat) * Math.cos(patch.lon),
+      radius * Math.sin(patch.lat),
+      radius * Math.cos(patch.lat) * Math.sin(patch.lon)
+    );
+    const sPos = toScreenXY(pos, camera, canvas);
+    const outward = pos.clone().normalize();
+    const toCamera = camera.position.clone().sub(pos).normalize();
+    const facing = outward.dot(toCamera);
+    const show = sPos.inFront && facing > 0.05;
+    if (!show) {
+      item.el.style.display = "none";
+      continue;
+    }
+    item.el.style.display = "flex";
+    item.el.style.left = `${sPos.x}px`;
+    item.el.style.top = `${sPos.y}px`;
+    item.el.style.opacity = String(Math.min(1.0, Math.max(0.35, facing)));
+  }
+}
 
 function toScreenXY(position, camera, canvas) {
   const v = position.clone().project(camera);
@@ -5813,6 +5923,7 @@ function animate(time) {
   }
 
   updateAllAgentFigures(time);
+  updateGlobeLabels();
   animateActionParticles(dt, time);
 
   // Phase 10OR: per-frame follow-agent. The figure position above is already
