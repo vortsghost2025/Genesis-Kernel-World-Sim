@@ -4162,10 +4162,10 @@ function rebuildInteriorVolume() {
   }
   const skirtingMat = new THREE.MeshStandardMaterial({ color: (spec.skirting && spec.skirting.stone) || 0x6a6a62, roughness: 0.95 });
   const skirting = [
-    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: -(fd * 0.5 + 0.02) },
-    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: (fd * 0.5 + 0.02) },
-    { w: 0.10, d: fd + 0.16, x: -(fw * 0.5 + 0.02), z: 0 },
-    { w: 0.10, d: fd + 0.16, x: (fw * 0.5 + 0.02), z: 0 }
+    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: -(spec.floor.depth * 0.5 + 0.02) },
+    { w: spec.floor.width + 0.16, d: 0.10, x: 0, z: (spec.floor.depth * 0.5 + 0.02) },
+    { w: 0.10, d: spec.floor.depth + 0.16, x: -(spec.floor.width * 0.5 + 0.02), z: 0 },
+    { w: 0.10, d: spec.floor.depth + 0.16, x: (spec.floor.width * 0.5 + 0.02), z: 0 }
   ];
   for (const s of skirting) {
     const sGeom = new THREE.BoxGeometry(s.w, 0.18, s.d);
