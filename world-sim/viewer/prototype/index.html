@@ -659,15 +659,21 @@ header {
 /* Orbit globe continent labels */
 .globe-label {
   position: absolute;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   transform: translate(-50%, -135%);
   display: none;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   z-index: 26;
   white-space: nowrap;
   text-shadow: 0 2px 8px rgba(0,0,0,0.65);
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+.globe-label:hover {
+  transform: translate(-50%, -140%) scale(1.06);
+  filter: brightness(1.18);
 }
 .globe-label::after {
   content: "";
@@ -685,33 +691,33 @@ header {
   position: absolute;
   left: 50%;
   top: calc(100% + 18px);
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   background: currentColor;
-  box-shadow: 0 0 10px currentColor;
+  box-shadow: 0 0 14px currentColor, 0 0 4px #ffffff;
 }
 .globe-label-title {
   font-family: var(--font-ui);
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.08em;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 7px;
-  background: rgba(5, 12, 22, 0.86);
+  background: rgba(5, 12, 22, 0.88);
   border: 1px solid currentColor;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.65);
 }
 .globe-label-sub {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.06em;
-  padding: 2px 6px;
+  font-size: 0.60rem;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(5, 12, 22, 0.82);
-  border: 1px solid rgba(255,255,255,0.16);
-  color: rgba(255,255,255,0.88);
+  background: rgba(5, 12, 22, 0.86);
+  border: 1px solid rgba(255,255,255,0.22);
+  color: rgba(255,255,255,0.92);
 }
 .globe-label-east { color: var(--east-cyan); }
 .globe-label-west { color: #feca57; }
@@ -763,13 +769,13 @@ header {
         <div class="tag-action" id="tag-act-eve">NO ACTION RECORDED</div>
       </div>
       <div id="fauna-tags-container"></div>
-      <div id="globe-label-east" class="globe-label globe-label-east" aria-hidden="true">
+      <div id="globe-label-east" class="globe-label globe-label-east" title="Click or scroll to zoom into East Valley (Adam &amp; Eve)">
         <div class="globe-label-title">EAST VALLEY (ALPHA)</div>
-        <div class="globe-label-sub">canonical cont_a</div>
+        <div class="globe-label-sub" id="globe-sub-east">🧍 Adam &amp; Eve · Click or Scroll to Zoom In</div>
       </div>
-      <div id="globe-label-west" class="globe-label globe-label-west" aria-hidden="true">
+      <div id="globe-label-west" class="globe-label globe-label-west" title="Click or scroll to zoom into West Dawn (Adam &amp; Eve)">
         <div class="globe-label-title">WEST DAWN (BETA)</div>
-        <div class="globe-label-sub">canonical cont_b</div>
+        <div class="globe-label-sub" id="globe-sub-west">🧍 Adam &amp; Eve · Click or Scroll to Zoom In</div>
       </div>
 
       <!-- 3D Camera Controls -->
@@ -1618,17 +1624,127 @@ function planetLandColor(h, lat) {
 const PLANET_ATLAS_WIDTH = 2048;
 const PLANET_ATLAS_HEIGHT = 1024;
 
+// Normalized [0, 1] wrapper around planetValueNoise(x, y, z, freq, seed).
+function planetNoise01(x, y, z, freq, seed) {
+  return 0.5 + 0.5 * planetValueNoise(x, y, z, freq, seed);
+}
+
+// Domain-warped spherical fBm in [0, 1] for realistic continental coastlines,
+// mountain cordilleras, river basins, and orbital cloud bands.
+function planetWarpedFbm(dx, dy, dz, freq, seedBase = 101) {
+  const w1 = planetValueNoise(dx, dy, dz, 2.4, seedBase);
+  const w2 = planetValueNoise(dx, dy, dz, 2.4, seedBase + 17);
+  const w3 = planetValueNoise(dx, dy, dz, 2.4, seedBase + 37);
+  const wx = dx + w1 * 0.26;
+  const wy = dy + w2 * 0.26;
+  const wz = dz + w3 * 0.26;
+  return (
+    0.50 * planetNoise01(wx, wy, wz, freq, seedBase + 53) +
+    0.28 * planetNoise01(wx, wy, wz, freq * 2.15, seedBase + 71) +
+    0.14 * planetNoise01(wx, wy, wz, freq * 4.5, seedBase + 89) +
+    0.08 * planetNoise01(wx, wy, wz, freq * 9.2, seedBase + 113)
+  );
+}
+
+// Continuous planetary elevation & moisture synthesis for the 2048x1024 orbital
+// atlas. Forms two major tectonic continents anchored on cont_a (Alpha) and
+// cont_b (Beta) plus island archipelagos, continental shelves, and abyssal basins.
+function planetMacroGeography(lon, lat) {
+  const cLat = Math.cos(lat);
+  const dx = cLat * Math.cos(lon);
+  const dy = Math.sin(lat);
+  const dz = cLat * Math.sin(lon);
+
+  // Domain-warped coordinates so tectonic lobes have zero circular artifacts
+  const warpLon = lon + 0.26 * planetValueNoise(dx, dy, dz, 2.2, 31) + 0.11 * planetValueNoise(dx, dy, dz, 5.1, 43);
+  const warpLat = lat + 0.22 * planetValueNoise(dx, dy, dz, 2.2, 59) + 0.09 * planetValueNoise(dx, dy, dz, 5.1, 73);
+
+  const fbmLow = planetWarpedFbm(dx, dy, dz, 3.0, 101);
+  const fbmMid = planetWarpedFbm(dx, dy, dz, 7.5, 211);
+  const fbmHigh = 0.60 * planetNoise01(dx, dy, dz, 22.0, 307) +
+                  0.27 * planetNoise01(dx, dy, dz, 48.0, 353) +
+                  0.13 * planetNoise01(dx, dy, dz, 96.0, 389);
+
+  // Tectonic lobes for Alpha Continent (anchored on cont_a: lon=-0.85, lat=0.30)
+  // and Beta Continent (anchored on cont_b: lon=+0.85, lat=-0.30), plus inner
+  // peninsulas and island arcs across the central visible hemisphere.
+  const lobes = [
+    { lon: -0.85, lat: 0.30, rx: 0.48, ry: 0.38, amp: 0.82 },   // Alpha core (East Valley)
+    { lon: -1.18, lat: 0.54, rx: 0.38, ry: 0.28, amp: 0.68 },   // Alpha NW boreal peninsula
+    { lon: -0.46, lat: 0.18, rx: 0.36, ry: 0.28, amp: 0.66 },   // Alpha West-Central subcontinent
+    { lon: -0.38, lat: 0.48, rx: 0.30, ry: 0.24, amp: 0.58 },   // Alpha NE alpine range
+    { lon: -0.62, lat: -0.08, rx: 0.28, ry: 0.26, amp: 0.54 },  // Alpha southern peninsula
+    { lon: 0.85,  lat: -0.30, rx: 0.50, ry: 0.38, amp: 0.82 },  // Beta core (West Dawn)
+    { lon: 0.44,  lat: -0.18, rx: 0.36, ry: 0.28, amp: 0.66 },  // Beta East-Central subcontinent
+    { lon: 1.18,  lat: -0.02, rx: 0.36, ry: 0.30, amp: 0.64 },  // Beta NE subtropical plateau
+    { lon: 0.50,  lat: -0.58, rx: 0.34, ry: 0.26, amp: 0.60 },  // Beta SW fjordland
+    { lon: 0.22,  lat: 0.22,  rx: 0.24, ry: 0.20, amp: 0.52 },  // Central northern archipelago/island sea
+    { lon: -0.08, lat: -0.24, rx: 0.22, ry: 0.18, amp: 0.50 },  // Central equatorial island chain
+    { lon: 2.35,  lat: 0.24,  rx: 0.48, ry: 0.36, amp: 0.62 },  // Far-hemisphere continent
+    { lon: -2.45, lat: -0.32, rx: 0.42, ry: 0.32, amp: 0.58 }   // Far-hemisphere southern land
+  ];
+
+  // Smoothly blend tectonic lobes and compress plateau tops so continents have
+  // broad green/ochre basins with sharp dendritic mountain spines rather than
+  // wide white snow domes.
+  let tectonic = 0.0;
+  for (let i = 0; i < lobes.length; i++) {
+    const L = lobes[i];
+    let dLon = warpLon - L.lon;
+    while (dLon > Math.PI) dLon -= Math.PI * 2;
+    while (dLon < -Math.PI) dLon += Math.PI * 2;
+    const u = dLon / L.rx;
+    const v = (warpLat - L.lat) / L.ry;
+    const d2 = u * u + v * v;
+    const contrib = L.amp * Math.exp(-d2 * 1.35);
+    tectonic = Math.max(tectonic, contrib) + 0.10 * Math.min(tectonic, contrib);
+  }
+  // Soft-shoulder compression on tectonic interior so lobes form flat/rolling continents
+  const shapedTectonic = Math.tanh(tectonic * 1.45) * 0.48;
+
+  // Combine tectonic mask with multi-scale fractal coastline noise
+  let elev = (shapedTectonic - 0.24) + (fbmLow - 0.5) * 0.42 + (fbmMid - 0.5) * 0.22 + (fbmHigh - 0.5) * 0.11;
+
+  // Guarantee solid land right under the canonical settlement cores so the
+  // canonical valleys sit inside their continents without ocean holes.
+  for (const cid of ["cont_a", "cont_b"]) {
+    const p = GLOBE_PATCHES[cid];
+    if (!p) continue;
+    let dLon = lon - p.lon;
+    while (dLon > Math.PI) dLon -= Math.PI * 2;
+    while (dLon < -Math.PI) dLon += Math.PI * 2;
+    const d = Math.hypot(dLon, lat - p.lat);
+    if (d < 0.20) {
+      const tCore = 1.0 - d / 0.20;
+      const coreBoost = tCore * tCore * (3.0 - 2.0 * tCore) * 0.14;
+      elev = Math.max(elev, 0.05 + coreBoost + (fbmMid - 0.5) * 0.08 + (fbmHigh - 0.5) * 0.05);
+    }
+  }
+
+  // Sharp dendritic alpine cordillera spines on land
+  const r1 = 1.0 - Math.abs(planetValueNoise(dx, dy, dz, 8.5, 409));
+  const r2 = 1.0 - Math.abs(planetValueNoise(dx, dy, dz, 22.0, 433));
+  const r3 = 1.0 - Math.abs(planetValueNoise(dx, dy, dz, 50.0, 461));
+  const ridge = Math.pow(Math.max(0, r1 * 0.54 + r2 * 0.30 + r3 * 0.16), 3.1);
+  if (elev > 0.0) {
+    elev += ridge * Math.min(0.42, 0.10 + elev * 1.35);
+  }
+
+  const moisture = 0.62 * planetWarpedFbm(dx, dy, dz, 4.2, 503) + 0.38 * planetNoise01(dx, dy, dz, 18.0, 547);
+  return { elev, moisture, ridge, fbmMid, fbmHigh };
+}
+
 function planetAtlasOceanColor(field, lat) {
   const absLat = Math.abs(lat);
   const depth = Math.max(0, Math.min(1, (field + 0.55) / 1.1));
-  let r = 3 + (1 - depth) * 20;
-  let g = 18 + (1 - depth) * 70;
-  let b = 42 + (1 - depth) * 105;
+  let r = 4 + (1 - depth) * 22;
+  let g = 20 + (1 - depth) * 76;
+  let b = 48 + (1 - depth) * 112;
   const ice = Math.max(0, Math.min(1, (absLat - 1.20) / 0.18));
   if (ice > 0) {
-    r += (228 - r) * ice;
-    g += (238 - g) * ice;
-    b += (248 - b) * ice;
+    r += (232 - r) * ice;
+    g += (241 - g) * ice;
+    b += (250 - b) * ice;
   }
   return [Math.round(r), Math.round(g), Math.round(b)];
 }
@@ -1654,22 +1770,22 @@ function planetCanonicalAtlasColor(cid, lon, lat) {
 
   if (terr === "ocean" && waterMask === 0) return null;
   if (waterMask > 0 || water === "river" || water === "lake" || water === "stream" || water === "freshwater") {
-    return waterMask === 2 ? [36, 106, 148] : [43, 125, 168];
+    return waterMask === 2 ? [24, 98, 148] : [32, 118, 166];
   }
 
   let r, g, b;
   if (biome.includes("forest") || biome.includes("woodland") || biome.includes("thicket") || terr === "forest") {
-    r = 24; g = 66; b = 34;
+    r = 26; g = 74; b = 36;
   } else if (biome.includes("highland") || terr === "mountain") {
-    r = 122; g = 116; b = 102;
+    r = 124; g = 114; b = 98;
   } else if (biome.includes("hills") || terr === "hill") {
-    r = 112; g = 118; b = 76;
+    r = 104; g = 116; b = 68;
   } else if (biome.includes("coastal") || terr === "coast") {
-    r = 170; g = 158; b = 120;
+    r = 176; g = 162; b = 122;
   } else if (biome.includes("valley") || terr === "grassland") {
-    r = 76; g = 124; b = 50;
+    r = 68; g = 122; b = 48;
   } else {
-    r = 82; g = 118; b = 54;
+    r = 74; g = 116; b = 52;
   }
 
   // Coast sand where any immediate tile neighbour is canonical ocean.
@@ -1677,9 +1793,9 @@ function planetCanonicalAtlasColor(cid, lon, lat) {
   const neighbours = [idx - 1, idx + 1, idx - 200, idx + 200];
   const touchesOcean = neighbours.some((n) => n >= 0 && n < 40000 && String(terrArr[n] || "").toLowerCase() === "ocean");
   if (touchesOcean && terr !== "ocean") {
-    r += (190 - r) * 0.22;
-    g += (172 - g) * 0.22;
-    b += (120 - b) * 0.22;
+    r += (194 - r) * 0.25;
+    g += (176 - g) * 0.25;
+    b += (126 - b) * 0.25;
   }
 
   // Simple canonical hillshade from tile-elevation gradients.
@@ -1690,14 +1806,15 @@ function planetCanonicalAtlasColor(cid, lon, lat) {
   const hD = Number(hArr[Math.min(39999, idx + 200)] || 0);
   const gx = hR - hL;
   const gy = hD - hU;
-  const shade = 0.82 + 0.18 * Math.max(-1, Math.min(1, (-gx * 0.55 + gy * 0.75) / 8.0));
+  const slope = Math.hypot(gx, gy);
+  const shade = 0.78 + 0.26 * Math.max(-1, Math.min(1, (-gx * 0.62 + gy * 0.76) / 6.5));
   r *= shade; g *= shade; b *= shade;
 
-  if (elev > 22) {
-    const snow = Math.min(1, (elev - 22) / 8);
-    r += (232 - r) * snow;
-    g += (238 - g) * snow;
-    b += (246 - b) * snow;
+  if (elev > 25 && slope > 1.8) {
+    const snow = Math.min(0.88, ((elev - 25) / 9) * Math.min(1, (slope - 1.4) / 3.0));
+    r += (236 - r) * snow;
+    g += (242 - g) * snow;
+    b += (248 - b) * snow;
   }
   return [
     Math.max(0, Math.min(255, Math.round(r))),
@@ -1715,46 +1832,151 @@ function generatePlanetTerrainAtlas() {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, "#dfeaf2");
-  grad.addColorStop(0.12, "#0c2d52");
-  grad.addColorStop(0.5, "#0a2a4b");
-  grad.addColorStop(0.88, "#0c2d52");
-  grad.addColorStop(1, "#dfeaf2");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
+  // 1. Synthesize full-planet bathymetry, continental shelves, biomes, mountain
+  // cordilleras, and polar ice caps on a high-detail 1024x512 grid, then upscale.
+  const BW = 1024, BH = 512;
+  const baseCanvas = document.createElement("canvas");
+  baseCanvas.width = BW;
+  baseCanvas.height = BH;
+  const bctx = baseCanvas.getContext("2d");
+  if (bctx) {
+    const bimg = bctx.createImageData(BW, BH);
+    const elevGrid = new Float32Array(BW * BH);
+    const moistGrid = new Float32Array(BW * BH);
+    const ridgeGrid = new Float32Array(BW * BH);
 
-  // Low-frequency ocean variation: a small deterministic noise canvas stretched
-  // smoothly across the full equirectangular ocean.
-  const noiseCanvas = document.createElement("canvas");
-  noiseCanvas.width = 256;
-  noiseCanvas.height = 128;
-  const nctx = noiseCanvas.getContext("2d");
-  if (nctx) {
-    const nimg = nctx.createImageData(256, 128);
-    for (let y = 0; y < 128; y++) {
-      const lat = Math.PI / 2 - ((y + 0.5) / 128) * Math.PI;
-      for (let x = 0; x < 256; x++) {
-        const lon = ((x + 0.5) / 256) * Math.PI * 2;
-        const dx = Math.cos(lat) * Math.cos(lon);
-        const dy = Math.sin(lat);
-        const dz = Math.cos(lat) * Math.sin(lon);
-        const field = planetBaseField(dx, dy, dz);
-        const col = planetAtlasOceanColor(field, lat);
-        const p = (y * 256 + x) * 4;
-        nimg.data[p] = col[0];
-        nimg.data[p + 1] = col[1];
-        nimg.data[p + 2] = col[2];
-        nimg.data[p + 3] = 255;
+    for (let y = 0; y < BH; y++) {
+      const lat = Math.PI / 2 - ((y + 0.5) / BH) * Math.PI;
+      for (let x = 0; x < BW; x++) {
+        const lon = ((x + 0.5) / BW) * Math.PI * 2;
+        const g = planetMacroGeography(lon, lat);
+        const k = y * BW + x;
+        elevGrid[k] = g.elev;
+        moistGrid[k] = g.moisture;
+        ridgeGrid[k] = g.ridge;
       }
     }
-    nctx.putImageData(nimg, 0, 0);
+
+    for (let y = 0; y < BH; y++) {
+      const lat = Math.PI / 2 - ((y + 0.5) / BH) * Math.PI;
+      const absLat = Math.abs(lat);
+      const cLat = Math.cos(lat);
+      for (let x = 0; x < BW; x++) {
+        const lon = ((x + 0.5) / BW) * Math.PI * 2;
+        const k = y * BW + x;
+        const el = elevGrid[k];
+        const moist = moistGrid[k];
+        const ridge = ridgeGrid[k];
+
+        const xL = (x - 1 + BW) % BW;
+        const xR = (x + 1) % BW;
+        const yU = Math.max(0, y - 1);
+        const yD = Math.min(BH - 1, y + 1);
+        const gx = elevGrid[y * BW + xR] - elevGrid[y * BW + xL];
+        const gy = elevGrid[yD * BW + x] - elevGrid[yU * BW + x];
+
+        let r, g, b;
+        // Polar sea ice & glacial caps (jagged, natural coastline at high latitudes)
+        const polarNoise = (moist - 0.5) * 0.16 + (ridge - 0.3) * 0.08;
+        const iceLat = 1.24 + polarNoise;
+        if (absLat > iceLat) {
+          const iceT = Math.min(1, (absLat - iceLat) / 0.14);
+          const shade = 0.88 + 0.12 * Math.max(-1, Math.min(1, (-gx + gy) * 10.0));
+          r = (210 + 30 * iceT) * shade;
+          g = (226 + 22 * iceT) * shade;
+          b = (242 + 12 * iceT) * shade;
+        } else if (el <= 0.0) {
+          // Ocean bathymetry: deep cobalt abyssal -> rich sapphire pelagic -> turquoise coastal shelf
+          const shelf = Math.max(0, Math.min(1, (el + 0.055) / 0.055));
+          const slope = Math.max(0, Math.min(1, (el + 0.18) / 0.18));
+          const deep = Math.max(0, Math.min(1, -el / 0.48));
+          const bWave = ridge * 0.12;
+          r = 3 + (1 - deep) * 10 + slope * 8 + Math.pow(shelf, 2.2) * 28;
+          g = 15 + (1 - deep) * 38 + slope * 24 + Math.pow(shelf, 1.8) * 96 + bWave * 14;
+          b = 38 + (1 - deep) * 68 + slope * 34 + Math.pow(shelf, 1.4) * 68 + bWave * 22;
+
+          // Subtle submarine trench / ridge shading
+          const bathyShade = 0.94 + 0.08 * Math.max(-1, Math.min(1, (-gx + gy) * 16.0));
+          r *= bathyShade; g *= bathyShade; b *= bathyShade;
+        } else {
+          // Land biomes by latitude, moisture, and elevation (tuned to satellite Earth photography)
+          const temp = Math.max(0, Math.min(1, 1.0 - absLat / 1.20 - el * 0.42));
+          if (el < 0.012) {
+            // Littoral sand / barrier beach
+            r = 164; g = 154; b = 114;
+          } else if (absLat > 0.94) {
+            // Sub-polar tundra & dark boreal spruce taiga
+            const tBoreal = Math.max(0, Math.min(1, (1.16 - absLat) / 0.22));
+            r = 96 - 62 * tBoreal;
+            g = 100 - 34 * tBoreal;
+            b = 82 - 44 * tBoreal;
+          } else if (moist < 0.42 && temp > 0.36) {
+            // Arid ochre / terracotta desert & dry steppe rain-shadow
+            const dry = Math.max(0, Math.min(1, (0.42 - moist) / 0.18));
+            r = 88 + 104 * dry;
+            g = 104 + 42 * dry;
+            b = 48 + 44 * dry;
+          } else if (moist > 0.51) {
+            // Deep satellite emerald & pine forest basin
+            const lush = Math.max(0, Math.min(1, (moist - 0.51) / 0.25));
+            r = 36 - 18 * lush;
+            g = 84 - 24 * lush;
+            b = 30 - 10 * lush;
+          } else {
+            // Sunlit temperate valley & olive grassland
+            r = 54 + (0.51 - moist) * 95;
+            g = 98 + (0.51 - moist) * 24;
+            b = 38 + (0.51 - moist) * 18;
+          }
+
+          // Major river networks in low-lying moist valleys
+          if (el > 0.012 && el < 0.18 && moist > 0.48 && ridge < 0.14) {
+            const riverT = Math.max(0, Math.min(1, (0.14 - ridge) / 0.05));
+            r += (28 - r) * riverT * 0.75;
+            g += (104 - g) * riverT * 0.75;
+            b += (148 - b) * riverT * 0.75;
+          }
+
+          // Highland rock & cordillera ridges
+          if (ridge > 0.32 || el > 0.22) {
+            const rockT = Math.max(0, Math.min(1, (ridge - 0.30) * 1.35 + Math.max(0, el - 0.22) * 1.8));
+            r += (112 - r) * rockT;
+            g += (96 - g) * rockT;
+            b += (78 - b) * rockT;
+          }
+
+          // Crisp alpine snow ONLY on narrow high cordillera spines (ridge > 0.58)
+          if (ridge > 0.58 && el > 0.22) {
+            const snowT = Math.max(0, Math.min(0.92, ((ridge - 0.58) / 0.24) * Math.min(1, (el - 0.20) / 0.14)));
+            r += (238 - r) * snowT;
+            g += (244 - g) * snowT;
+            b += (252 - b) * snowT;
+          }
+
+          // Crisp directional orbital hillshading (sun from upper-left)
+          const hill = Math.max(-1, Math.min(1, (-gx * 0.68 + gy * 0.74) * 28.0));
+          const shade = 0.78 + 0.32 * hill;
+          r *= shade; g *= shade; b *= shade;
+        }
+
+        const p = k * 4;
+        bimg.data[p] = Math.max(0, Math.min(255, Math.round(r)));
+        bimg.data[p + 1] = Math.max(0, Math.min(255, Math.round(g)));
+        bimg.data[p + 2] = Math.max(0, Math.min(255, Math.round(b)));
+        bimg.data[p + 3] = 255;
+      }
+    }
+    bctx.putImageData(bimg, 0, 0);
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(noiseCanvas, 0, 0, W, H);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(baseCanvas, 0, 0, W, H);
   }
 
-  // Canonical continents: paint the actual 200x200 biome/elevation/water data
-  // into the equirectangular patch that labels and the planet share.
+  // 2. Canonical continents: blend the actual 200x200 biome/elevation/water data
+  // into the heart of Alpha and Beta Continents with an organic noise-feathered
+  // perimeter so there is never a hard square box edge.
+  const atlasImg = ctx.getImageData(0, 0, W, H);
+  const data = atlasImg.data;
   for (const cid of ["cont_a", "cont_b"]) {
     const patch = GLOBE_PATCHES[cid];
     if (!patch) continue;
@@ -1769,10 +1991,109 @@ function generatePlanetTerrainAtlas() {
         const lon = ((x + 0.5) / W) * Math.PI * 2;
         const col = planetCanonicalAtlasColor(cid, lon, lat);
         if (!col) continue;
-        ctx.fillStyle = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
-        ctx.fillRect(x, y, 1, 1);
+
+        let dLon = lon - patch.lon;
+        while (dLon > Math.PI) dLon -= Math.PI * 2;
+        while (dLon < -Math.PI) dLon += Math.PI * 2;
+        const u = (dLon / GLOBE_CONTINENT_SPAN) * 2.0;   // -1..1
+        const v = ((lat - patch.lat) / GLOBE_CONTINENT_SPAN) * 2.0;
+        const rad = Math.hypot(u, v * 1.05);
+        const wob = 0.5 * planetValueNoise(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon), 12.0, 613);
+        const maxR = 0.88 + wob * 0.24;
+        if (rad >= maxR) continue;
+        const blend = rad < 0.48 ? 1.0 : Math.max(0.0, Math.min(1.0, (maxR - rad) / (maxR - 0.48)));
+        const smoothB = blend * blend * (3.0 - 2.0 * blend);
+
+        const p = (y * W + x) * 4;
+        data[p] = Math.round(data[p] * (1.0 - smoothB) + col[0] * smoothB);
+        data[p + 1] = Math.round(data[p + 1] * (1.0 - smoothB) + col[1] * smoothB);
+        data[p + 2] = Math.round(data[p + 2] * (1.0 - smoothB) + col[2] * smoothB);
       }
     }
+  }
+  ctx.putImageData(atlasImg, 0, 0);
+
+  // 3. High-resolution filamentary orbital cloud wisps & weather fronts
+  const CW = 1024, CH = 512;
+  const cloudCanvas = document.createElement("canvas");
+  cloudCanvas.width = CW;
+  cloudCanvas.height = CH;
+  const cctx = cloudCanvas.getContext("2d");
+  if (cctx) {
+    const cimg = cctx.createImageData(CW, CH);
+    const simg = cctx.createImageData(CW, CH);
+    for (let y = 0; y < CH; y++) {
+      const lat = Math.PI / 2 - ((y + 0.5) / CH) * Math.PI;
+      const cLat = Math.cos(lat);
+      for (let x = 0; x < CW; x++) {
+        const lon = ((x + 0.5) / CW) * Math.PI * 2;
+        // Trade-wind shear & cyclone swirl
+        const shearLon = lon + 0.48 * Math.sin(lat * 3.4) + 0.22 * Math.cos(lat * 7.0);
+        const dx = cLat * Math.cos(shearLon);
+        const dy = Math.sin(lat);
+        const dz = cLat * Math.sin(shearLon);
+        const cMacro = planetWarpedFbm(dx, dy, dz, 3.8, 709);
+        const cWisps = 0.58 * planetNoise01(dx, dy * 1.9, dz, 14.0, 811) +
+                       0.42 * planetNoise01(dx, dy * 2.4, dz, 34.0, 859);
+        const cFilaments = 1.0 - Math.abs(planetValueNoise(dx, dy * 1.6, dz, 22.0, 887));
+        const latBand = 0.94 + 0.22 * Math.cos(lat * 4.2);
+        let density = (cMacro * 0.58 + cWisps * 0.26 + Math.pow(cFilaments, 2.0) * 0.16) * latBand - 0.585;
+
+        // Keep the canonical valley cores & central ocean window clear for crisp visual read
+        for (const cid of ["cont_a", "cont_b"]) {
+          const patch = GLOBE_PATCHES[cid];
+          if (!patch) continue;
+          let dLon = lon - patch.lon;
+          while (dLon > Math.PI) dLon -= Math.PI * 2;
+          while (dLon < -Math.PI) dLon += Math.PI * 2;
+          const dist = Math.hypot(dLon, lat - patch.lat);
+          if (dist < 0.26) {
+            density *= Math.max(0.0, (dist - 0.11) / 0.15);
+          }
+        }
+
+        if (density > 0.0) {
+          const alpha = Math.min(0.86, Math.pow(density / 0.28, 1.25) * 0.85);
+          const p = (y * CW + x) * 4;
+          cimg.data[p] = 250;
+          cimg.data[p + 1] = 253;
+          cimg.data[p + 2] = 255;
+          cimg.data[p + 3] = Math.round(alpha * 255);
+
+          simg.data[p] = 2;
+          simg.data[p + 1] = 8;
+          simg.data[p + 2] = 22;
+          simg.data[p + 3] = Math.round(alpha * 76);
+        }
+      }
+    }
+    cctx.putImageData(simg, 0, 0);
+    ctx.drawImage(cloudCanvas, 3, 3, W, H);
+    cctx.putImageData(cimg, 0, 0);
+    ctx.drawImage(cloudCanvas, 0, 0, W, H);
+  }
+
+  // 4. Subtle glowing orbital settlement rings at East Valley and West Dawn
+  for (const cid of ["cont_a", "cont_b"]) {
+    const patch = GLOBE_PATCHES[cid];
+    if (!patch) continue;
+    const centerLon = ((patch.lon % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const px = (centerLon / (Math.PI * 2)) * W;
+    const py = ((Math.PI / 2 - patch.lat) / Math.PI) * H;
+    const ringGrad = ctx.createRadialGradient(px, py, 2, px, py, 16);
+    if (cid === "cont_a") {
+      ringGrad.addColorStop(0, "rgba(0, 242, 254, 0.75)");
+      ringGrad.addColorStop(0.45, "rgba(0, 242, 254, 0.25)");
+      ringGrad.addColorStop(1, "rgba(0, 242, 254, 0)");
+    } else {
+      ringGrad.addColorStop(0, "rgba(254, 202, 87, 0.75)");
+      ringGrad.addColorStop(0.45, "rgba(254, 202, 87, 0.25)");
+      ringGrad.addColorStop(1, "rgba(254, 202, 87, 0)");
+    }
+    ctx.fillStyle = ringGrad;
+    ctx.beginPath();
+    ctx.arc(px, py, 16, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -1790,24 +2111,6 @@ function createPlanetCloudTexture() {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.clearRect(0, 0, 1024, 512);
-  let seed = 96231;
-  function rand() {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return (seed & 0xffffff) / 0x1000000;
-  }
-  for (let i = 0; i < 720; i++) {
-    const x = rand() * 1024;
-    const y = 512 * Math.pow(rand(), 0.72);
-    const r = 10 + rand() * 42;
-    const alpha = 0.012 + rand() * 0.045;
-    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
-    g.addColorStop(0, `rgba(255,255,255,${alpha})`);
-    g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.anisotropy = 4;
@@ -1835,6 +2138,78 @@ scene.add(globalOceanGlobe);
 const PLANET_LON_STEPS = 360;
 const PLANET_LAT_STEPS = 180;
 
+let globalOrbitStars = null;
+let globalAtmosphereSprite = null;
+
+function buildOrbitAtmosphereAndStars() {
+  // 1. Deep-space starfield surrounding the globe
+  const starCount = 650;
+  const starPos = new Float32Array(starCount * 3);
+  const starCol = new Float32Array(starCount * 3);
+  let sSeed = 41893;
+  function sRand() {
+    sSeed = (sSeed * 1664525 + 1013904223) >>> 0;
+    return (sSeed & 0xffffff) / 0x1000000;
+  }
+  for (let i = 0; i < starCount; i++) {
+    const u = sRand() * 2.0 - 1.0;
+    const lon = sRand() * Math.PI * 2.0;
+    const s = Math.sqrt(Math.max(0, 1.0 - u * u));
+    const r = GLOBE_RADIUS * (5.4 + sRand() * 1.4);
+    starPos[i * 3] = r * s * Math.cos(lon);
+    starPos[i * 3 + 1] = r * u;
+    starPos[i * 3 + 2] = r * s * Math.sin(lon);
+    const bright = 0.55 + sRand() * 0.45;
+    const tint = sRand();
+    starCol[i * 3] = bright * (tint > 0.7 ? 1.0 : 0.88);
+    starCol[i * 3 + 1] = bright * 0.94;
+    starCol[i * 3 + 2] = bright * (tint < 0.4 ? 1.0 : 0.85);
+  }
+  const starGeom = new THREE.BufferGeometry();
+  starGeom.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+  starGeom.setAttribute("color", new THREE.BufferAttribute(starCol, 3));
+  globalOrbitStars = new THREE.Points(
+    starGeom,
+    new THREE.PointsMaterial({ size: 16, vertexColors: true, sizeAttenuation: true, depthWrite: false })
+  );
+  globalOrbitStars.visible = false;
+  scene.add(globalOrbitStars);
+
+  // 2. Rayleigh blue atmospheric limb halo (1 billboard sprite = 2 triangles)
+  const hCanvas = document.createElement("canvas");
+  hCanvas.width = 512;
+  hCanvas.height = 512;
+  const hctx = hCanvas.getContext("2d");
+  if (hctx) {
+    const g = hctx.createRadialGradient(256, 256, 0, 256, 256, 256);
+    // Limb sits at r = 0.8475 of the sprite radius
+    g.addColorStop(0.0, "rgba(40, 130, 245, 0.0)");
+    g.addColorStop(0.62, "rgba(50, 145, 250, 0.03)");
+    g.addColorStop(0.77, "rgba(65, 165, 255, 0.16)");
+    g.addColorStop(0.835, "rgba(95, 195, 255, 0.46)");
+    g.addColorStop(0.855, "rgba(130, 215, 255, 0.54)");
+    g.addColorStop(0.89, "rgba(55, 155, 255, 0.22)");
+    g.addColorStop(0.95, "rgba(20, 85, 200, 0.05)");
+    g.addColorStop(1.0, "rgba(5, 25, 70, 0.0)");
+    hctx.fillStyle = g;
+    hctx.fillRect(0, 0, 512, 512);
+    const hTex = new THREE.CanvasTexture(hCanvas);
+    globalAtmosphereSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: hTex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false
+      })
+    );
+    const initScale = GLOBE_RADIUS * 2.0 * 1.18 * 1.026;
+    globalAtmosphereSprite.scale.set(initScale, initScale, 1);
+    globalAtmosphereSprite.visible = false;
+    scene.add(globalAtmosphereSprite);
+  }
+}
+
 function buildPlanetSurface() {
   const cols = PLANET_LON_STEPS + 1;   // +1 closes the seam with duplicate verts
   const rows = PLANET_LAT_STEPS + 1;   // +1 carries the poles
@@ -1849,7 +2224,10 @@ function buildPlanetSurface() {
       // The last column repeats longitude 0 so the texture/gradient wraps exactly.
       const lon = (ix / PLANET_LON_STEPS) * 6.283185307179586;
       const h = computePlanetHeight(lon, lat);
-      const r = GLOBE_RADIUS + h;
+      // Keep the ocean and polar caps on a true spherical horizon at GLOBE_RADIUS
+      // while giving continental mountain chains subtle orbital relief.
+      const relief = (h > 0.0 && Math.abs(lat) < 1.20) ? Math.min(12.0, h * 0.20) : 0.0;
+      const r = GLOBE_RADIUS + relief;
       const cLat = Math.cos(lat);
       positions[p++] = r * cLat * Math.cos(lon);
       positions[p++] = r * Math.sin(lat);
@@ -1895,16 +2273,16 @@ function buildPlanetSurface() {
     new THREE.MeshPhongMaterial({
       map: planetAtlasTex || undefined,
       vertexColors: !planetAtlasTex,
-      shininess: 8,
-      specular: 0x10151f,
+      shininess: 14,
+      specular: 0x1a283b,
+      emissive: 0x040b16,
+      emissiveIntensity: 0.35,
       side: THREE.DoubleSide
     })
   );
   mesh.visible = false;
 
-  // Crash-safety: no extra cloud or atmosphere shells. The planet material's
-  // atlas is the visual layer; extra transparent spheres cost fill rate and
-  // overdraw for no sim value.
+  buildOrbitAtmosphereAndStars();
   scene.add(mesh);
   return mesh;
 }
@@ -1917,6 +2295,8 @@ function setOceanProjection(useGlobe) {
   globalOcean.visible = (useGlobe === false);
   globalOceanGlobe.visible = (useGlobe === "shell");
   if (globalPlanetMesh) globalPlanetMesh.visible = (useGlobe === true);
+  if (typeof globalOrbitStars !== "undefined" && globalOrbitStars) globalOrbitStars.visible = (useGlobe === true);
+  if (typeof globalAtmosphereSprite !== "undefined" && globalAtmosphereSprite) globalAtmosphereSprite.visible = (useGlobe === true);
 }
 
 // Local (flat) rendering: the identity mapping. Kept as an explicit function
@@ -4962,7 +5342,51 @@ function toggleFollowAgent(agent) {
   applyCameraMode(agent, false);
 }
 
+let lastLocalPair = "east";
+
+function getPatchWorldCenter(cid, radiusOffset = 0.0) {
+  const patch = GLOBE_PATCHES[cid] || GLOBE_PATCHES.cont_a;
+  const r = GLOBE_RADIUS + radiusOffset;
+  const cLat = Math.cos(patch.lat);
+  return new THREE.Vector3(
+    r * cLat * Math.cos(patch.lon),
+    r * Math.sin(patch.lat),
+    r * cLat * Math.sin(patch.lon)
+  );
+}
+
+function getPreferredOrbitPair() {
+  const posA = getPatchWorldCenter("cont_a", 0);
+  const posB = getPatchWorldCenter("cont_b", 0);
+  const dA = camera.position.distanceTo(posA);
+  const dB = camera.position.distanceTo(posB);
+  if (Math.abs(dA - dB) > 40.0) {
+    return dA < dB ? "east" : "west";
+  }
+  return lastLocalPair || "east";
+}
+
+function zoomIntoCivFromOrbit(pairName, camMode = "landscape") {
+  const targetPair = (pairName === "west") ? "west" : "east";
+  lastLocalPair = targetPair;
+  activeCamMode = camMode;
+  focusCiv(targetPair);
+  // Start slightly back in the valley sightline and glide smoothly into the NPC framing
+  const endPos = camTargetPos.clone();
+  const endTarget = controlsTargetPos.clone();
+  camera.position.set(endPos.x - 0.8, endPos.y + 3.2, endPos.z + 7.5);
+  controls.target.set(endTarget.x, endTarget.y + 0.6, endTarget.z);
+  controls.update();
+  smoothMoveCamera(endPos, endTarget, false);
+}
+
 function applyCameraMode(mode, immediate = true) {
+  if (selectedPair === "orbit" && mode && mode !== "orbit") {
+    activeCamMode = mode;
+    focusCiv(getPreferredOrbitPair());
+    applyCameraMode(mode, immediate);
+    return;
+  }
   activeCamMode = mode;
   document.querySelectorAll(".cam-btn:not(.follow-btn)").forEach(b => b.classList.remove("active"));
   // Follow is tied to an agent focus mode. Switching to any other mode (or
@@ -4988,14 +5412,13 @@ function applyCameraMode(mode, immediate = true) {
   const ez = (tEve && tEve.coordinates) ? tEve.coordinates.y : az;
 
   if (mode === "orbit" || selectedPair === "orbit") {
-    // Phase 10NE: the globe needs sky, horizon haze and a much wider framing.
-    // Fog density is derived from the globe radius so distant continents haze
-    // rather than clipping against the near plane.
-    const globeFogDensity = 0.32 / (GLOBE_RADIUS * 3.0);
-    scene.background.setHex(0x0a2a4a);
-    scene.fog.color.setHex(0x0a2a4a);
+    // Phase 10NE: deep space backdrop with zero fog so the planet horizon and
+    // Rayleigh atmospheric limb halo read cleanly against space.
+    const globeFogDensity = 0.0;
+    scene.background.setHex(0x02060f);
+    scene.fog.color.setHex(0x02060f);
     scene.fog.density = globeFogDensity;
-    skyDome.visible = true;
+    skyDome.visible = false;
     // Phase 10NM: planet-scale framing. OrbitControls clamps its own radius to
     // maxDistance on every update(), so the default 550 (sized for the flat
     // 200x200 layout) was dragging the globe camera back to ~550 units and
@@ -5014,7 +5437,7 @@ function applyCameraMode(mode, immediate = true) {
     if (Math.abs(skyDome.scale.x - domeScale) > 1e-6) {
       skyDome.scale.set(domeScale, domeScale, domeScale);
     }
-    camera.fov = 46;
+    camera.fov = 36;
     camera.updateProjectionMatrix();
     // Frame the planet from the +x side. Both continent patches sit at x = +567
     // (mirrored in y and z), so a camera looking down +z puts one of them on the
@@ -5097,8 +5520,8 @@ function applyCameraMode(mode, immediate = true) {
     const cz = settle ? (settle.z * 0.78 + agentCz * 0.22) : agentCz;
 
     const ch = getTerrainHeight(cid, cx, cz);
-    const camX = cx - 2.0;
-    const camZ = cz + 27.5;
+    const camX = (cid === "cont_b") ? (cx - 3.5) : (cx - 2.0);
+    const camZ = (cid === "cont_b") ? (cz + 17.5) : (cz + 27.5);
 
     // Ensure full line-of-sight clearance across every terrain sample between camera and valley target
     let maxPathH = ch;
@@ -5108,9 +5531,11 @@ function applyCameraMode(mode, immediate = true) {
       const sz = cz + (camZ - cz) * t;
       maxPathH = Math.max(maxPathH, getTerrainHeight(cid, sx, sz));
     }
-    const eyeY = Math.max(ch + 7.2, maxPathH + 4.0);
+    const eyeY = (cid === "cont_b") ? Math.max(ch + 6.8, maxPathH + 3.6) : Math.max(ch + 7.2, maxPathH + 4.0);
+    const lookY = (cid === "cont_b") ? (eyeY - 1.9) : (eyeY - 0.4);
+    const lookZ = (cid === "cont_b") ? (cz - 12.0) : (cz - 18.0);
     // Val di Funes / Dolomites framing: village in foreground sunlit pasture (22-38% up, clear of bottom HUD), dark spruce foothills in middle (38-58%), jagged spires + blue sky in upper frame
-    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx - 0.5, eyeY - 0.4, cz - 18.0), immediate);
+    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx - 0.5, lookY, lookZ), immediate);
   } else if (mode === "settlement") {
     // Phase 10OR: dedicated settlement preset. Frame the public-object
     // centroid purely (no agent blend); fall back to the agent midpoint so an
@@ -5300,6 +5725,7 @@ function focusCiv(pairName) {
 
     applyCameraMode("orbit", true);
   } else {
+    lastLocalPair = pairName;
     continentGroups.cont_a.visible = (cid === "cont_a");
     continentGroups.cont_b.visible = (cid === "cont_b");
     sceneryGroups.cont_a.visible = (cid === "cont_a");
@@ -5309,6 +5735,7 @@ function focusCiv(pairName) {
     // Phase 10NE: local views keep the flat 1 unit = 1 metre mapping.
     if (globeProjectionActive[cid]) setContinentProjection(cid, false);
     if (globalOceanGlobe.visible) setOceanProjection(false);
+    setOceanProjection(false);
     continentGroups[cid].position.set(0, 0, 0);
     sceneryGroups[cid].position.set(0, 0, 0);
     objectGroups[cid].position.set(0, 0, 0);
@@ -5915,12 +6342,124 @@ const tagAdam = document.getElementById("tag-adam");
 const tagEve = document.getElementById("tag-eve");
 const globeLabelEast = document.getElementById("globe-label-east");
 const globeLabelWest = document.getElementById("globe-label-west");
+const globeSubEast = document.getElementById("globe-sub-east");
+const globeSubWest = document.getElementById("globe-sub-west");
+
+if (globeLabelEast) {
+  globeLabelEast.onclick = (e) => {
+    e.stopPropagation();
+    zoomIntoCivFromOrbit("east", "landscape");
+  };
+}
+if (globeLabelWest) {
+  globeLabelWest.onclick = (e) => {
+    e.stopPropagation();
+    zoomIntoCivFromOrbit("west", "landscape");
+  };
+}
+
+// Interactive Orbit-to-NPC zoom & click-on-continent handoff
+let orbitPointerDown = null;
+let orbitLastCursor = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
+const orbitRaycaster = new THREE.Raycaster();
+const orbitMouseNDC = new THREE.Vector2();
+
+canvas.addEventListener("pointermove", (e) => {
+  orbitLastCursor.x = e.clientX;
+  orbitLastCursor.y = e.clientY;
+});
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button === 0) {
+    orbitPointerDown = { x: e.clientX, y: e.clientY, t: performance.now() };
+  }
+});
+
+canvas.addEventListener("pointerup", (e) => {
+  if (!orbitPointerDown || selectedPair !== "orbit" || !globalPlanetMesh) return;
+  const dx = e.clientX - orbitPointerDown.x;
+  const dy = e.clientY - orbitPointerDown.y;
+  const dt = performance.now() - orbitPointerDown.t;
+  orbitPointerDown = null;
+  if (Math.hypot(dx, dy) > 6 || dt > 450) return;
+
+  const rect = canvas.getBoundingClientRect();
+  orbitMouseNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  orbitMouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  orbitRaycaster.setFromCamera(orbitMouseNDC, camera);
+  const hits = orbitRaycaster.intersectObject(globalPlanetMesh, false);
+  if (hits && hits.length > 0) {
+    const pt = hits[0].point;
+    const posA = getPatchWorldCenter("cont_a", 0);
+    const posB = getPatchWorldCenter("cont_b", 0);
+    const dA = pt.distanceTo(posA);
+    const dB = pt.distanceTo(posB);
+    if (Math.min(dA, dB) < GLOBE_RADIUS * 0.62) {
+      zoomIntoCivFromOrbit(dA < dB ? "east" : "west", "landscape");
+    }
+  }
+});
+
+canvas.addEventListener("wheel", (e) => {
+  if (selectedPair === "orbit") {
+    // Zooming in from orbit steers toward the continent under the cursor and
+    // transitions into the 3D valley where Adam & Eve are once close enough.
+    if (e.deltaY < 0) {
+      const rect = canvas.getBoundingClientRect();
+      const cx = orbitLastCursor.x - rect.left;
+      const cy = orbitLastCursor.y - rect.top;
+      const sA = toScreenXY(getPatchWorldCenter("cont_a", 18), camera, canvas);
+      const sB = toScreenXY(getPatchWorldCenter("cont_b", 18), camera, canvas);
+      const distCursorA = sA.inFront ? Math.hypot(cx - sA.x, cy - sA.y) : 1e9;
+      const distCursorB = sB.inFront ? Math.hypot(cx - sB.x, cy - sB.y) : 1e9;
+      const targetCid = (distCursorA <= distCursorB) ? "cont_a" : "cont_b";
+      const targetPair = (targetCid === "cont_b") ? "west" : "east";
+      const patchCenter = getPatchWorldCenter(targetCid, 0);
+
+      const camDist = camera.position.length();
+      if (camDist < GLOBE_RADIUS * 3.8) {
+        const pull = Math.min(0.32, Math.max(0.06, (GLOBE_RADIUS * 3.8 - camDist) / (GLOBE_RADIUS * 2.2) * 0.28));
+        controls.target.lerp(patchCenter, pull);
+        controlsTargetPos.copy(controls.target);
+      }
+      const distToSurface = camera.position.distanceTo(patchCenter);
+      if (camDist < GLOBE_RADIUS * 1.68 || distToSurface < GLOBE_RADIUS * 0.82) {
+        zoomIntoCivFromOrbit(targetPair, "landscape");
+      }
+    }
+  } else if (e.deltaY > 0) {
+    // Zooming all the way out past the local valley ceiling returns to Orbit
+    const localDist = camera.position.distanceTo(controls.target);
+    if (localDist >= 515) {
+      focusCiv("orbit");
+    }
+  }
+}, { passive: true });
 
 function updateGlobeLabels() {
   if (selectedPair !== "orbit") {
     if (globeLabelEast) globeLabelEast.style.display = "none";
     if (globeLabelWest) globeLabelWest.style.display = "none";
     return;
+  }
+
+  // Keep the Rayleigh atmospheric halo aligned with the planet's apparent perspective limb
+  if (globalAtmosphereSprite && globalAtmosphereSprite.visible) {
+    const camDist = Math.max(GLOBE_RADIUS * 1.08, camera.position.length());
+    const limbProj = (GLOBE_RADIUS * camDist) / Math.sqrt(Math.max(1.0, camDist * camDist - GLOBE_RADIUS * GLOBE_RADIUS));
+    const haloScale = limbProj * 2.0 * 1.18;
+    globalAtmosphereSprite.scale.set(haloScale, haloScale, 1);
+  }
+
+  if (globeSubEast) {
+    const tA = tilesById.get(getAgentRecordedPos("east", "east_adam", currentHb));
+    const coordStr = (tA && tA.coordinates) ? `(${tA.coordinates.x}, ${tA.coordinates.y})` : "Valley";
+    globeSubEast.textContent = `🧍 Adam & Eve @ ${coordStr} · Click or Zoom In`;
+  }
+  if (globeSubWest) {
+    const tW = tilesById.get(getAgentRecordedPos("west", "west_adam", currentHb));
+    const coordStr = (tW && tW.coordinates) ? `(${tW.coordinates.x}, ${tW.coordinates.y})` : "Valley";
+    globeSubWest.textContent = `🧍 Adam & Eve @ ${coordStr} · Click or Zoom In`;
   }
 
   const labels = [
@@ -6236,6 +6775,12 @@ window.__GENESIS_PROTO__ = {
   },
   focusCiv(pairName) {
     focusCiv(pairName);
+    updateAllAgentFigures(performance.now());
+    renderer.render(scene, camera);
+    return this.getState();
+  },
+  zoomIntoCivFromOrbit(pairName, camMode = "landscape") {
+    zoomIntoCivFromOrbit(pairName, camMode);
     updateAllAgentFigures(performance.now());
     renderer.render(scene, camera);
     return this.getState();

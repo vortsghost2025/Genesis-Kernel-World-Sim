@@ -610,3 +610,24 @@ def test_globe_atlas_is_high_resolution_and_biome_driven():
     assert "const PLANET_SEA_LEVEL = 0.74;" in script
     assert "const PLANET_HEIGHT_SCALE = 46.0;" in script
     assert "The canonical atlas is the only playable land" in script
+
+
+def test_orbit_to_npc_zoom_handoff_and_space_backdrop():
+    """Orbit mode must hide the local skyDome, show Rayleigh limb glow, and zoom into NPCs."""
+    html = PROTOTYPE_HTML.read_text(encoding="utf-8")
+    script = _get_prototype_script()
+
+    assert "pointer-events: auto;" in html
+    assert "function zoomIntoCivFromOrbit(" in script
+    assert 'globeLabelEast.onclick' in script
+    assert 'globeLabelWest.onclick' in script
+    assert 'canvas.addEventListener("wheel"' in script
+    assert "globalAtmosphereSprite" in script
+    assert "globalOrbitStars" in script
+
+    orbit_branch = _extract_js_block(
+        script,
+        'if (mode === "orbit" || selectedPair === "orbit") {',
+        "// Local views: undo the planet-scale",
+    )
+    assert "skyDome.visible = false;" in orbit_branch
