@@ -2601,28 +2601,52 @@ class FirstPairRuntime:
             del obj["materials"][best_kind]
         return best_sat
 
+    # Tokens an agent naturally writes for "drink here". The tile-id and
+    # free-phrase forms were rejected outright, which produced 150+ rejected
+    # drinks in the live lanes even when the agent was standing on a river.
+    _DRINK_HERE_TOKENS = (
+        "", "tile", "environment", "current_tile", "current tile", "here",
+        "river", "lake", "rivers", "water", "fresh water", "freshwater",
+        "river water", "stream", "pond", "ground", "this tile",
+    )
+    _TILE_ID_RE = re.compile(r"^cont_[a-z]+_[a-z0-9_]+$")
+
     def _execute_drink(self, agent_ref: str, action: dict,
                        heartbeat_number: int) -> dict:
-        """Drink on a drinkable tile, from belongings, or from a pottery
-        object on the same/adjacent tile. Rain is not a source."""
-        source = str(action.get("source") or action.get("resource_kind") or "").strip().lower()
+        """Drink from the ground, from carried water, or from a vessel.
+
+        Accepts the phrasings agents actually write: no source, "tile",
+        "river"/"water", a tile id, resource_kind fresh_water, or a
+        target_object_id holding fresh_water. Rain is never a source.
+        """
+        raw_source = action.get("source")
+        source = str(raw_source or "").strip().lower()
         target_object_id = action.get("target_object_id")
+        if not source:
+            rk = str(action.get("resource_kind") or "").strip().lower()
+            if rk in ("fresh_water", "fresh water", "freshwater",
+                      "river", "water", "river water"):
+                source = rk
+        # A tile id passed as target_object_id names a place, not an object.
+        if isinstance(target_object_id, str):
+            tid = target_object_id.strip()
+            if self._TILE_ID_RE.match(tid) or tid not in (self._world_state.public_objects or {}):
+                if not tid or self._TILE_ID_RE.match(tid):
+                    if not source:
+                        source = tid if tid else "tile"
+                    target_object_id = None
         position = self._world_state.tile_occupancy.get(agent_ref)
         vitals = self._vitals_for(agent_ref)
         thirst_now = float(vitals.get("thirst", 18.0))
         satisfaction = 0.0
         outcome_source = None
 
+        # 1. Named vessel or well: any adjacent object holding fresh_water.
         if target_object_id:
-            if not isinstance(target_object_id, str) or not target_object_id.strip():
-                return {"status": "rejected", "reason": "Missing target_object_id for drink"}
             obj = self._world_state.public_objects.get(target_object_id)
             if not isinstance(obj, dict):
                 return {"status": "rejected",
                         "reason": f"Drink target not found: {target_object_id}"}
-            if "pot" not in str(obj.get("object_type", "")).casefold():
-                return {"status": "rejected",
-                        "reason": f"Cannot drink from a {obj.get('object_type', 'object')}; use a clay_pot vessel"}
             contents = obj.get("contents")
             if not isinstance(contents, dict) or int(contents.get("fresh_water", 0) or 0) < 1:
                 return {"status": "rejected",
@@ -2639,17 +2663,39 @@ class FirstPairRuntime:
                 del contents["fresh_water"]
             satisfaction = survival.DRINK_SATISFACTION["vessel"]
             outcome_source = "vessel"
-        elif source in ("", "tile", "environment", "current_tile"):
-            if not self._current_tile_water_drinkable(str(position or "")):
+        # 2. A named tile: current or adjacent, and it must be drinkable.
+        elif source and self._TILE_ID_RE.match(source):
+            named = source
+            pos_xy = self._tile_xy(position or "")
+            named_xy = self._tile_xy(named)
+            if named != str(position or "") and (
+                named_xy is None or pos_xy is None
+                or max(abs(named_xy[0] - pos_xy[0]), abs(named_xy[1] - pos_xy[1])) > 1
+            ):
                 return {"status": "rejected",
-                        "reason": "This tile is not drinkable; the drink action names a drinkable source"}
+                        "reason": f"Cannot drink from {named}: you are at {position}"}
+            if not self._current_tile_water_drinkable(named):
+                return {"status": "rejected",
+                        "reason": f"{named} is not drinkable"}
             satisfaction = survival.DRINK_SATISFACTION["tile"]
             outcome_source = "tile"
-        elif source in ("carried", "belongings", "fresh_water", "fresh water", "inventory"):
-            kind = str(action.get("resource_kind") or "fresh_water").strip().lower()
-            if kind not in ("fresh_water", "fresh water", "freshwater"):
-                return {"status": "rejected",
-                        "reason": "Drink from belongings requires resource_kind fresh_water"}
+        # 3. "Here" / river / water / bare: the current tile if drinkable,
+        #    otherwise carried water instead of a dead end.
+        elif source in self._DRINK_HERE_TOKENS:
+            if self._current_tile_water_drinkable(str(position or "")):
+                satisfaction = survival.DRINK_SATISFACTION["tile"]
+                outcome_source = "tile"
+            else:
+                inventory = self._get_agent_inventory(agent_ref)
+                if int(inventory.get("fresh_water", 0) or 0) >= 1:
+                    add_to_inventory(self._store, agent_ref, "fresh_water", -1)
+                    satisfaction = survival.DRINK_SATISFACTION["carried"]
+                    outcome_source = "carried"
+                else:
+                    return {"status": "rejected",
+                            "reason": "This tile is not drinkable and you hold no fresh_water"}
+        # 4. Carried water.
+        elif source in ("carried", "belongings", "inventory"):
             inventory = self._get_agent_inventory(agent_ref)
             if int(inventory.get("fresh_water", 0) or 0) < 1:
                 return {"status": "rejected",
@@ -2659,7 +2705,8 @@ class FirstPairRuntime:
             outcome_source = "carried"
         else:
             return {"status": "rejected",
-                    "reason": "Invalid drink source; use tile, carried fresh_water, or a clay_pot object"}
+                    "reason": f"Unknown drink source {raw_source!r}; use the current "
+                              "tile, carried fresh_water, or a vessel holding fresh_water"}
 
         vitals["thirst"] = round(
             max(0.0, min(survival.THIRST_CAP, thirst_now - satisfaction)), 2
