@@ -111,6 +111,10 @@ class AgentContext:
     # oldest tracked freshness lot per food kind; both empty in old contexts.
     tool_condition: dict = field(default_factory=dict)
     food_freshness: dict = field(default_factory=dict)
+    # Partner holdings (Phase 10PT): the other agent's persisted belongings,
+    # projected to the bounded settlement resource kinds. Facts only; the
+    # prompt renders what is true and never who should move.
+    partner_holdings: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -1249,6 +1249,51 @@ class FirstPairRuntime:
         )
 
 
+    # Phase 10PT: the resource kinds disclosed about the partner. Same bounded
+    # vocabulary the settlement section already uses for the agent's own
+    # holdings, so the two lines stay comparable and neither can balloon.
+    _PARTNER_HOLDINGS_KINDS = (
+        "timber", "wood", "stone", "clay", "fiber_plants", "flint",
+        "iron_ore", "iron", "fresh_water",
+    )
+    _PARTNER_TOOL_KINDS = (
+        "stone_axe", "iron_axe", "flint_knife", "flint_spear", "iron_spear",
+        "woven_basket", "knapped_flint",
+    )
+
+    def _partner_holdings_for(self, agent_ref: str) -> dict:
+        """The other agent's persisted belongings, projected and bounded.
+
+        Facts from the store only. Empty when the partner holds nothing in
+        the disclosed vocabulary, so a fresh store renders no line at all.
+        """
+        partner_ref = None
+        for ref in (self._adam_ref, self._eve_ref):
+            if ref != agent_ref:
+                partner_ref = ref
+                break
+        if not partner_ref:
+            return {}
+        try:
+            holdings = load_inventory(self._store).get(partner_ref, {}) or {}
+        except Exception:
+            return {}
+        if not isinstance(holdings, dict):
+            return {}
+        out: dict = {}
+        for kind in self._PARTNER_HOLDINGS_KINDS:
+            value = holdings.get(kind, 0)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                out[kind] = value
+        tools = {}
+        for kind in self._PARTNER_TOOL_KINDS:
+            value = holdings.get(kind, 0)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                tools[kind] = value
+        if tools:
+            out["tools"] = tools
+        return out
+
     def retire_stale_goals(self, agent_ref: str, heartbeat_number: int) -> list[GoalRecord]:
         """Phase 10KX/10KZ: Retire goals whose satisfying condition has objectively ceased to hold."""
         view = self._agent_view(agent_ref)
@@ -1969,6 +2014,7 @@ class FirstPairRuntime:
             observed_resource_rollup=self._rollup_for(agent_ref),
             tool_condition=self._tool_states_for(agent_ref),
             food_freshness=self._food_freshness_for(agent_ref),
+            partner_holdings=self._partner_holdings_for(agent_ref),
         )
 
     # ------------------------------------------------------------------
@@ -3111,11 +3157,30 @@ class FirstPairRuntime:
         has_axe = inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0 or inv.get("axe", 0) > 0
         has_knife = inv.get("flint_knife", 0) > 0 or inv.get("knife", 0) > 0 or inv.get("knapped_flint", 0) > 0
 
+        # Phase 10PT: knapping fallback. A worn-out axe retired East Adam's only
+        # blade and left him unable to produce any timber at all, which starved
+        # the whole lane's build loop. With no blade held, 2 stone + 1 wood knap
+        # a throwaway blade -- the exact cost of a flint_knife -- and the hew
+        # proceeds at blade yield. This is never cheaper than owning a knife,
+        # so it does not make axes redundant; it removes the dead end.
+        knapped = False
         if not (has_axe or has_knife):
-            return {
-                "status": "rejected",
-                "reason": "Cannot hew timber bare-handed. Requires an axe (stone_axe, iron_axe) or knapped blade (flint_knife) to fell trees into structural logs.",
-            }
+            stone_held = int(inv.get("stone", 0) or 0)
+            wood_held = int(inv.get("wood", 0) or 0)
+            if stone_held >= 2 and wood_held >= 1:
+                add_to_inventory(self._store, agent_ref, "stone", -2)
+                add_to_inventory(self._store, agent_ref, "wood", -1)
+                # The blade is consumed by this single hew: it is spent, not
+                # carried, so it never enters the durability ledger.
+                knapped = True
+                has_knife = True
+                inv = self._get_agent_inventory(agent_ref)
+            else:
+                return {
+                    "status": "rejected",
+                    "reason": "Cannot hew timber bare-handed. Holds no axe or knapped blade; "
+                              "with 2 stone and 1 wood a blade can be knapped on the spot.",
+                }
 
         tile_res = [r for r in self._current_tile_resources.get(position, []) if r.get("kind") in ("wood", "timber") and r.get("amount", 0) > 0]
         if tile_res:
@@ -3124,13 +3189,17 @@ class FirstPairRuntime:
 
         timber_yield = 2 if has_axe else 1
         add_to_inventory(self._store, agent_ref, "timber", timber_yield)
-        tool_kind = (
-            "iron_axe" if inv.get("iron_axe", 0) > 0
-            else "stone_axe" if has_axe
-            else "flint_knife"
-        )
-        wear = self._use_best_tool(agent_ref, (tool_kind,))
         detail = f"Hewn {timber_yield} structural timber logs from tree."
+        if knapped:
+            detail = "Knapped a throwaway blade from 2 stone and 1 wood. " + detail
+            wear = {"used": None, "remaining": 0, "broke": False}
+        else:
+            tool_kind = (
+                "iron_axe" if inv.get("iron_axe", 0) > 0
+                else "stone_axe" if has_axe
+                else "flint_knife"
+            )
+            wear = self._use_best_tool(agent_ref, (tool_kind,))
         if wear.get("used"):
             detail += (
                 f" {wear['used']} condition left {wear['remaining']} use(s)"
@@ -3714,6 +3783,18 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
         return {"status": "success", "object": obj}
 
+    # Phase 10PT: object types that hold shared stores. Adjacency-tolerant
+    # deposit/extract applies to these and nothing else.
+    _CONTAINER_TYPE_TERMS = (
+        "container", "storage", "cache", "chest", "barrel", "crate",
+        "box", "well", "cellar", "basket", "pot", "urn", "cask",
+    )
+
+    @classmethod
+    def _is_container_type(cls, object_type: str) -> bool:
+        otype = str(object_type or "").casefold()
+        return any(term in otype for term in cls._CONTAINER_TYPE_TERMS)
+
     def _execute_use_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         """Interact with a public object on the agent's tile.
 
@@ -3732,9 +3813,35 @@ class FirstPairRuntime:
             return {"status": "rejected", "reason": f"Object not found: {obj_id}"}
 
         position = (self._world_state.tile_occupancy or {}).get(agent_ref)
-        if position and obj.get("tile_id") != position:
+        obj_tile = obj.get("tile_id", "")
+        # Phase 10PT: containers reachable from an adjacent tile. deposit and
+        # extract are the ONLY inventory-to-inventory channel between the two
+        # agents, and requiring the agent to stand on the container tile made
+        # the partner's hoard unreachable in practice. Same Chebyshev <= 1
+        # rule the drink path already uses for vessels. Every other operation
+        # keeps the original on-your-tile requirement.
+        operation_for_gate = action.get("operation", "inspect")
+        adjacency_eligible = (
+            operation_for_gate in ("deposit", "extract")
+            and self._is_container_type(str(obj.get("object_type", "")))
+        )
+        reachable = True
+        if position and obj_tile != position:
+            if adjacency_eligible:
+                pos_xy = self._tile_xy(position)
+                obj_xy = self._entity_xy(obj_tile) or self._tile_xy(str(obj_tile))
+                if pos_xy is None or obj_xy is None or max(
+                    abs(obj_xy[0] - pos_xy[0]), abs(obj_xy[1] - pos_xy[1])
+                ) > 1:
+                    reachable = False
+            else:
+                reachable = False
+        if not reachable:
+            if adjacency_eligible:
+                return {"status": "rejected",
+                        "reason": f"Object {obj_id} is on {obj_tile}, not your tile or a tile beside it"}
             return {"status": "rejected",
-                    "reason": f"Object is on {obj.get('tile_id')}, not your current tile"}
+                    "reason": f"Object is on {obj_tile}, not your current tile"}
 
         operation = action.get("operation", "inspect")
         if operation not in ("deposit", "extract", "inspect", "smelt", "craft", "cook"):

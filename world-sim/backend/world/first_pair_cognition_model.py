@@ -1973,6 +1973,29 @@ def build_system_prompt(context: AgentContext) -> str:
             f"Fact: you hold {stone} stone and {wood} wood in your belongings."
         )
 
+    # Phase 10PT: the partner's hoard, as a fact. West Eve hit 218
+    # "Insufficient timber: need 2, hold 0" rejections while West Adam held
+    # 198 timber she could not see. Rendering it changes nothing about the
+    # rules -- it removes an information gap, exactly like the 10OU roll-up.
+    # Never a directive: it names holdings, never who should move or ask.
+    partner = getattr(context, "partner_holdings", {}) or {}
+    if isinstance(partner, dict) and partner:
+        parts = []
+        for kind in ("timber", "wood", "stone", "clay", "fiber_plants",
+                     "flint", "iron_ore", "iron", "fresh_water"):
+            value = partner.get(kind, 0)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                parts.append(f"{kind} {value}")
+        tools = partner.get("tools")
+        if isinstance(tools, dict):
+            for kind, value in sorted(tools.items()):
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                    parts.append(f"{kind} {value}")
+        if parts:
+            settlement_lines.append(
+                "Fact: your companion holds " + ", ".join(parts) + "."
+            )
+
     settlement_section = ""
     if settlement_lines:
         settlement_section = (
