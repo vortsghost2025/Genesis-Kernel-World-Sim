@@ -3440,122 +3440,187 @@ function createConstructionSprite(x, z, h, stage, rung = 1, scale = 1.0, tintHex
   const s = EXTERIOR_SHELTER_SCALE * scale;
   const group = new THREE.Group();
   group.position.set(x, h, z);
+  group.rotation.y = -0.32;
 
-  const wood = _woodMat(tintHex);
-  const stone = new THREE.MeshStandardMaterial({ color: 0x8d8578, roughness: 0.94, metalness: 0.0 });
-  const thatch = new THREE.MeshStandardMaterial({ color: 0xa8894f, roughness: 0.95, metalness: 0.0 });
+  // Warm cedar & walnut log palette matching the finished cabin sprite under ACESFilmic tone mapping
+  const wood = _woodMat(0x8a5629);
+  const darkWood = _woodMat(0x462912);
+  const midWood = _woodMat(0x6e411d);
+  const stoneBase = new THREE.MeshStandardMaterial({ color: 0x5c554b, roughness: 0.96, metalness: 0.0 });
+  const stoneCurb = new THREE.MeshStandardMaterial({ color: 0x7d7467, roughness: 0.92, metalness: 0.0 });
+  const thatch = new THREE.MeshStandardMaterial({ color: 0x7d602b, roughness: 0.95, metalness: 0.0 });
+  const thatchMoss = new THREE.MeshStandardMaterial({ color: 0x536927, roughness: 0.95, metalness: 0.0 });
 
-  // Nominal 3.35 x 2.75 footprint, matching the finished exterior sprite.
-  const fw = 5.4 * s;
-  const fd = 4.4 * s;
-  const wallH = 1.9 * s;
-  const postR = 0.09 * s;
+  // The sprite's extent, so a completing build never pops wider or taller.
+  const SPRITE_W = 5.4 * s;
+  const SPRITE_H = 4.4 * s;
+  // The wall logs define the cabin's visible body: wallLenX = fw * 0.45 * 2.16
+  // = fw * 0.972. Sizing fw so that body equals the billboard's width means a
+  // finishing build lands on the footprint it was already showing, instead of
+  // jumping. Depth is ~0.85 of width, which is how a real cabin reads.
+  const EXTENT_MATCH_W = 1.03;
+  const EXTENT_MATCH_D = 0.88;
+  const fw = SPRITE_W * EXTENT_MATCH_W;
+  const fd = SPRITE_W * EXTENT_MATCH_D;
+  const hx = fw * 0.45;
+  const hz = fd * 0.45;
+  const baseH = 0.16 * s;
+  const wallH = SPRITE_H * 0.55;
+  const postR = 0.105 * s;
 
   const addBox = (mat, sx, sy, sz, px, py, pz) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
     mesh.position.set(px, py, pz);
     mesh.castShadow = true;
+    mesh.receiveShadow = true;
     group.add(mesh);
     return mesh;
   };
-  const addPost = (px, pz, height) => {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(postR, postR * 1.05, height, 7), wood);
-    post.position.set(px, height / 2, pz);
+  const addPost = (px, pz, height, radius = postR, mat = darkWood) => {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.95, radius * 1.05, height, 8), mat);
+    post.position.set(px, baseH + height * 0.5, pz);
     post.castShadow = true;
+    post.receiveShadow = true;
     group.add(post);
     return post;
   };
 
-  // --- stage 0: foundation. A stone pad and a low perimeter footing. -------
-  const pad = new THREE.Mesh(
-    new THREE.CylinderGeometry(fw * 0.62, fw * 0.66, 0.10 * s, 12),
-    stone
-  );
-  pad.position.y = 0.05 * s;
-  pad.receiveShadow = true;
-  group.add(pad);
-
-  const footing = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.56, 0.055 * s, 6, 16), stone);
-  footing.rotation.x = Math.PI / 2;
-  footing.position.y = 0.13 * s;
-  footing.receiveShadow = true;
-  group.add(footing);
+  // --- stage 0: foundation. Rectangular stone plinth + perimeter footing curb. ---
+  addBox(stoneBase, fw * 1.08, 0.12 * s, fd * 1.08, 0, 0.06 * s, 0);
+  addBox(stoneCurb, fw * 0.98, 0.10 * s, 0.22 * s, 0, 0.14 * s, -hz);
+  addBox(stoneCurb, fw * 0.98, 0.10 * s, 0.22 * s, 0, 0.14 * s, hz);
+  addBox(stoneCurb, 0.22 * s, 0.10 * s, fd * 0.98, -hx, 0.14 * s, 0);
+  addBox(stoneCurb, 0.22 * s, 0.10 * s, fd * 0.98, hx, 0.14 * s, 0);
 
   if (stage === "foundation") {
     return group;
   }
 
-  // --- stage 1: frame. Four corner posts and a ridge beam. -----------------
-  const hx = fw * 0.44;
-  const hz = fd * 0.44;
+  // --- stage 1: frame. Corner posts, doorway jambs, and top wall plates. -----
   const postH = wallH;
   const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
   for (const [cx, cz] of corners) {
-    addPost(cx, cz, postH);
+    addPost(cx, cz, postH, postR, darkWood);
   }
-  const ridge = addBox(wood, fw * 1.02, 0.13 * s, 0.13 * s, 0, postH + 0.06 * s, 0);
-  ridge.castShadow = true;
+  const doorHalf = 0.28 * s;
+  addPost(-doorHalf, hz, postH * 0.90, postR * 0.85, darkWood);
+  addPost(doorHalf, hz, postH * 0.90, postR * 0.85, darkWood);
+
+  // Rectangular top wall-plate ring connecting all 4 corner posts
+  const plateY = baseH + postH + 0.05 * s;
+  addBox(darkWood, fw * 0.98, 0.12 * s, 0.13 * s, 0, plateY, -hz);
+  addBox(darkWood, fw * 0.98, 0.12 * s, 0.13 * s, 0, plateY, hz);
+  addBox(darkWood, 0.13 * s, 0.12 * s, fd * 0.98, -hx, plateY, 0);
+  addBox(darkWood, 0.13 * s, 0.12 * s, fd * 0.98, hx, plateY, 0);
 
   if (stage === "frame") {
     return group;
   }
 
-  // --- stage 2: walls. Part-height logs on three sides, front left open. ----
-  const logR = 0.085 * s;
-  const logsPerSide = 4;
-  const logH = (postH * 0.72) / logsPerSide;
-  const sides = [
-    { from: [-hx, -hz], to: [hx, -hz] },   // back
-    { from: [-hx, hz], to: [hx, hz] },     // front (door will be cut later)
-    { from: [-hx, -hz], to: [-hx, hz] },   // left
-    { from: [hx, -hz], to: [hx, hz] },     // right
-  ];
-  for (const side of sides) {
-    const length = Math.hypot(side.to[0] - side.from[0], side.to[1] - side.from[1]);
-    const isZ = Math.abs(side.to[0] - side.from[0]) < 1e-6;
-    for (let i = 0; i < logsPerSide; i++) {
-      const t = (i + 0.5) / logsPerSide;
-      const lx = side.from[0] + (side.to[0] - side.from[0]) * t;
-      const lz = side.from[1] + (side.to[1] - side.from[1]) * t;
-      const log = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, length, 8), wood);
-      if (isZ) {
-        log.rotation.z = Math.PI / 2;
-        log.position.set(lx, logH * (i + 0.5), lz);
-      } else {
-        log.rotation.x = Math.PI / 2;
-        log.position.set(lx, logH * (i + 0.5), lz);
-      }
-      log.castShadow = true;
-      group.add(log);
+  // --- stage 2: walls. Horizontal log courses stacked vertically on all 4 sides.
+  const logsPerSide = 5;
+  const courseSpan = postH * 0.88;
+  const logStep = courseSpan / logsPerSide;
+  const logR = logStep * 0.55;
+  const wallLenX = hx * 2.16;
+  const wallLenZ = hz * 2.16;
+  const frontLeafW = Math.max(0.22 * s, hx * 1.08 - doorHalf);
+  const frontLeftCx = -hx * 1.08 + frontLeafW * 0.5;
+  const frontRightCx = doorHalf + frontLeafW * 0.5;
+
+  for (let i = 0; i < logsPerSide; i++) {
+    const ly = baseH + logStep * (i + 0.5);
+    const courseMat = (i % 2 === 0) ? wood : midWood;
+
+    // Back wall (runs along X -> rotate cylinder around Z)
+    const backLog = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, wallLenX, 8), courseMat);
+    backLog.rotation.z = Math.PI / 2;
+    backLog.position.set(0, ly, -hz);
+    backLog.castShadow = true;
+    group.add(backLog);
+
+    // Left & right walls (run along Z -> rotate cylinder around X)
+    for (const sx of [-hx, hx]) {
+      const sideLog = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, wallLenZ, 8), courseMat);
+      sideLog.rotation.x = Math.PI / 2;
+      sideLog.position.set(sx, ly, 0);
+      sideLog.castShadow = true;
+      group.add(sideLog);
+    }
+
+    // Front wall split around doorway opening (runs along X -> rotate around Z)
+    for (const fcx of [frontLeftCx, frontRightCx]) {
+      const frontLog = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, frontLeafW, 8), courseMat);
+      frontLog.rotation.z = Math.PI / 2;
+      frontLog.position.set(fcx, ly, hz);
+      frontLog.castShadow = true;
+      group.add(frontLog);
     }
   }
+  // Doorway header lintel beam
+  addBox(darkWood, doorHalf * 2.35, 0.12 * s, 0.17 * s, 0, baseH + courseSpan + 0.05 * s, hz);
 
   if (stage === "walls") {
     return group;
   }
 
-  // --- stage 3: roofed. A pitched thatch roof; this is where shelter begins.
-  const roofPitch = 0.62;
-  const roofDeep = fd / 2 + 0.16 * s;
-  const roofWide = fw / 2 + 0.2 * s;
-  for (const sign of [-1, 1]) {
-    const slope = new THREE.Mesh(new THREE.BoxGeometry(fw + 0.4 * s, 0.07 * s, roofDeep), thatch);
-    const angle = Math.atan2(postH * roofPitch, roofDeep);
-    slope.rotation.x = sign * angle;
-    slope.position.set(0, postH + postH * roofPitch * 0.55, sign * roofDeep * 0.5);
-    slope.castShadow = true;
-    group.add(slope);
+  // --- stage 3: roofed. Front-to-back A-frame gable roof (/\) over the front door. ---
+  const roofRise = postH * 0.76;
+  const roofRun = hx + 0.30 * s;
+  const roofSpanZ = fd + 0.42 * s;
+  const rafterLen = Math.hypot(roofRun, roofRise) + 0.14 * s;
+  const roofAngle = Math.atan2(roofRise, roofRun);
+  const eaveBaseY = plateY + 0.02 * s;
+
+  // Stepped horizontal gable logs filling the front (+hz) and back (-hz) triangular peaks
+  for (const gz of [-hz, hz]) {
+    for (let g = 0; g < 3; g++) {
+      const frac = (g + 0.5) / 3.2;
+      const gw = Math.max(0.25 * s, (hx * 2.0) * (1.0 - frac * 0.85));
+      const gy = eaveBaseY + roofRise * frac * 0.88;
+      addBox(midWood, gw, (roofRise / 3.3), 0.13 * s, 0, gy, gz);
+    }
   }
-  const ridgeCap = addBox(thatch, fw + 0.42 * s, 0.12 * s, 0.2 * s, 0, postH + postH * roofPitch + 0.06 * s, 0);
+
+  // Left (-X) and right (+X) pitched thatch slopes + mossy upper thatch layer
+  for (const sign of [-1, 1]) {
+    const slope = new THREE.Mesh(new THREE.BoxGeometry(rafterLen, 0.13 * s, roofSpanZ), thatch);
+    slope.rotation.z = -sign * roofAngle;
+    slope.position.set(sign * (roofRun * 0.48), eaveBaseY + roofRise * 0.5, 0);
+    slope.castShadow = true;
+    slope.receiveShadow = true;
+    group.add(slope);
+
+    const mossOverlay = new THREE.Mesh(new THREE.BoxGeometry(rafterLen * 0.64, 0.15 * s, roofSpanZ * 0.86), thatchMoss);
+    mossOverlay.rotation.z = -sign * roofAngle;
+    mossOverlay.position.set(sign * (roofRun * 0.34), eaveBaseY + roofRise * 0.66 + 0.02 * s, 0);
+    group.add(mossOverlay);
+
+    // Front gable bargeboard rafter trim so the /\ silhouette reads crisply
+    const barge = new THREE.Mesh(new THREE.BoxGeometry(rafterLen * 1.02, 0.15 * s, 0.11 * s), darkWood);
+    barge.rotation.z = -sign * roofAngle;
+    barge.position.set(sign * (roofRun * 0.48), eaveBaseY + roofRise * 0.5, roofSpanZ * 0.5 + 0.02 * s);
+    group.add(barge);
+  }
+  const ridgeCap = addBox(
+    thatchMoss,
+    0.28 * s,
+    0.16 * s,
+    roofSpanZ + 0.10 * s,
+    0,
+    eaveBaseY + roofRise + 0.08 * s,
+    0
+  );
+  ridgeCap.castShadow = true;
 
   // A higher rung earns visible finish work even before the final stage.
   if (rung >= 3) {
-    const door = addBox(wood, 0.34 * s, 0.95 * s, 0.07 * s, 0, 0.48 * s, hz + 0.02 * s);
+    const door = addBox(darkWood, doorHalf * 1.75, postH * 0.80, 0.08 * s, 0, baseH + postH * 0.40, hz + 0.02 * s);
     door.castShadow = true;
   }
   if (rung >= 4) {
     for (const sign of [-1, 1]) {
-      addBox(wood, 0.1 * s, wallH * 0.7, 0.1 * s, sign * hx, wallH * 0.35, sign * hz);
+      addBox(darkWood, 0.14 * s, wallH * 0.88, 0.14 * s, sign * (hx + 0.03 * s), baseH + wallH * 0.44, sign * (hz + 0.03 * s));
     }
   }
 
@@ -3679,7 +3744,7 @@ function getObjectVisualProfile(rec) {
 
 function classifyPublicObjectCategory(objectType) {
   const otype = String(objectType || "").toLowerCase();
-  if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("lean-to") || otype.includes("lean_to") || otype.includes("thatch") || otype.includes("roof") || otype.includes("wall") || otype.includes("door") || otype.includes("floor") || otype.includes("fence") || otype.includes("tent")) {
+  if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("house") || otype.includes("lean-to") || otype.includes("lean_to") || otype.includes("thatch") || otype.includes("roof") || otype.includes("wall") || otype.includes("door") || otype.includes("floor") || otype.includes("fence") || otype.includes("tent")) {
     return "shelter";
   }
   if (otype.includes("fire") || otype.includes("hearth") || otype.includes("forge") || otype.includes("furnace") || otype.includes("oven")) {
@@ -3797,7 +3862,11 @@ function buildHistoricalObjectRegistry(pn) {
       endDateKnown: !endDateUncertainty,
       provenance: provenance,
       inCurrentSnapshot: !isDestroyedStatus,
-      public_description: String(obj.public_description || obj.description || "")
+      public_description: String(obj.public_description || obj.description || ""),
+      construction_project: obj.construction_project === true || obj.construction_project === "true",
+      construction_stage: (typeof obj.construction_stage === "string") ? obj.construction_stage : null,
+      construction_progress: obj.construction_progress != null ? Number(obj.construction_progress) : null,
+      structure_rung: obj.structure_rung != null ? Number(obj.structure_rung) : null
     });
   }
 
@@ -3892,7 +3961,7 @@ function updatePublicObjectsAndClearings(pn, hb) {
 
   // Build signature from actual active object set (avoid rebuilding GPU objects if active object set is unchanged!)
   const objSig = activeObjects
-    .map(o => `${o.object_id}@${o.tile_id}:${o.category}:${o.provenance}:${o.destroyed_heartbeat}`)
+    .map(o => `${o.object_id}@${o.tile_id}:${o.category}:${o.provenance}:${o.destroyed_heartbeat}:${o.construction_project ? (o.construction_stage || "") : ""}:${o.structure_rung || ""}`)
     .sort()
     .join("|");
   const stateKey = `${pn}:${objSig}`;
@@ -4053,7 +4122,7 @@ function updatePublicObjectsAndClearings(pn, hb) {
     let clearForObject = false;
     for (let i = 0; i < activeObjCoords.length; i++) {
       const [ox, oz] = activeObjCoords[i];
-      if (Math.hypot(wx - ox, wz - oz) <= 1.25) {
+      if (Math.hypot(wx - ox, wz - oz) <= 1.75) {
         clearForObject = true;
         break;
       }
@@ -7133,6 +7202,12 @@ window.__GENESIS_PROTO__ = {
   getHistoricalObjectRegistry(pn = "east") {
     return (historicalObjectRegistry[pn] || []).map(r => ({ ...r }));
   },
+  buildHistoricalObjectRegistry(pn = "east") {
+    buildHistoricalObjectRegistry(pn);
+    lastRenderedObjectsState.cont_a = "";
+    lastRenderedObjectsState.cont_b = "";
+    return (historicalObjectRegistry[pn] || []).map(r => ({ ...r }));
+  },
   reconstructPublicObjectsAtHb(pn, hb) {
     return reconstructPublicObjectsAtHb(pn, hb);
   },
@@ -7173,7 +7248,11 @@ window.__GENESIS_PROTO__ = {
         ? "verified-historical-object"
         : "historical-object-uncertain-end-date",
       inCurrentSnapshot: Boolean(objDef.inCurrentSnapshot),
-      public_description: objDef.public_description || "Test historical object"
+      public_description: objDef.public_description || "Test historical object",
+      construction_project: objDef.construction_project === true || objDef.construction_project === "true",
+      construction_stage: (typeof objDef.construction_stage === "string") ? objDef.construction_stage : null,
+      construction_progress: objDef.construction_progress != null ? Number(objDef.construction_progress) : null,
+      structure_rung: objDef.structure_rung != null ? Number(objDef.structure_rung) : null
     });
     lastRenderedObjectsState.cont_a = "";
     lastRenderedObjectsState.cont_b = "";
