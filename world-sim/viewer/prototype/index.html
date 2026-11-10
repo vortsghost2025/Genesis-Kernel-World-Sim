@@ -802,6 +802,7 @@ header {
         </div>
         <div style="font-size:0.64rem; color:var(--text-tertiary); margin-top:2px;" id="hud-zoom-label">HUMAN SCALE // CANONICAL GEOGRAPHY & SETTLEMENTS</div>
         <div style="font-size:0.62rem; color:var(--east-cyan); margin-top:2px; font-family:var(--font-mono); letter-spacing:0.04em;" id="hud-compression-label">TIMELAPSE: ~3,600× EPOCH RATE (1 HB = 1 FULL ACTION CYCLE · REGION: 91×17 TILES)</div>
+        <div style="font-size:0.6rem; color:#feca57; margin-top:2px; font-family:var(--font-mono); letter-spacing:0.04em; display:none;" id="hud-build-label"></div>
       </div>
 
       <!-- Playback Deck -->
@@ -3419,6 +3420,155 @@ function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 
   return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * s : 0, withShadow ? 2.2 * s : 0, 0.18 * s, tintHex);
 }
 
+// ---------------------------------------------------------------------------
+// Phase 10PX: staged construction.
+//
+// A roofed build in the world now advances foundation -> frame -> walls ->
+// roofed -> finished, and the viewer must grow with it instead of the finished
+// sprite appearing whole. Pure procedural geometry from primitives -- the same
+// technique as the interior diorama -- so the picture can never disagree with
+// the physics: only a `roofed` or `finished` structure shelters, and only those
+// two stages draw a roof.
+// ---------------------------------------------------------------------------
+const CONSTRUCTION_STAGES_ORDER = ["foundation", "frame", "walls", "roofed", "finished"];
+
+function _woodMat(tintHex) {
+  return new THREE.MeshStandardMaterial({ color: tintHex, roughness: 0.86, metalness: 0.02 });
+}
+
+function createConstructionSprite(x, z, h, stage, rung = 1, scale = 1.0, tintHex = 0xb58b5a) {
+  const s = EXTERIOR_SHELTER_SCALE * scale;
+  const group = new THREE.Group();
+  group.position.set(x, h, z);
+
+  const wood = _woodMat(tintHex);
+  const stone = new THREE.MeshStandardMaterial({ color: 0x8d8578, roughness: 0.94, metalness: 0.0 });
+  const thatch = new THREE.MeshStandardMaterial({ color: 0xa8894f, roughness: 0.95, metalness: 0.0 });
+
+  // Nominal 3.35 x 2.75 footprint, matching the finished exterior sprite.
+  const fw = 5.4 * s;
+  const fd = 4.4 * s;
+  const wallH = 1.9 * s;
+  const postR = 0.09 * s;
+
+  const addBox = (mat, sx, sy, sz, px, py, pz) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+    mesh.position.set(px, py, pz);
+    mesh.castShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  const addPost = (px, pz, height) => {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(postR, postR * 1.05, height, 7), wood);
+    post.position.set(px, height / 2, pz);
+    post.castShadow = true;
+    group.add(post);
+    return post;
+  };
+
+  // --- stage 0: foundation. A stone pad and a low perimeter footing. -------
+  const pad = new THREE.Mesh(
+    new THREE.CylinderGeometry(fw * 0.62, fw * 0.66, 0.10 * s, 12),
+    stone
+  );
+  pad.position.y = 0.05 * s;
+  pad.receiveShadow = true;
+  group.add(pad);
+
+  const footing = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.56, 0.055 * s, 6, 16), stone);
+  footing.rotation.x = Math.PI / 2;
+  footing.position.y = 0.13 * s;
+  footing.receiveShadow = true;
+  group.add(footing);
+
+  if (stage === "foundation") {
+    return group;
+  }
+
+  // --- stage 1: frame. Four corner posts and a ridge beam. -----------------
+  const hx = fw * 0.44;
+  const hz = fd * 0.44;
+  const postH = wallH;
+  const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+  for (const [cx, cz] of corners) {
+    addPost(cx, cz, postH);
+  }
+  const ridge = addBox(wood, fw * 1.02, 0.13 * s, 0.13 * s, 0, postH + 0.06 * s, 0);
+  ridge.castShadow = true;
+
+  if (stage === "frame") {
+    return group;
+  }
+
+  // --- stage 2: walls. Part-height logs on three sides, front left open. ----
+  const logR = 0.085 * s;
+  const logsPerSide = 4;
+  const logH = (postH * 0.72) / logsPerSide;
+  const sides = [
+    { from: [-hx, -hz], to: [hx, -hz] },   // back
+    { from: [-hx, hz], to: [hx, hz] },     // front (door will be cut later)
+    { from: [-hx, -hz], to: [-hx, hz] },   // left
+    { from: [hx, -hz], to: [hx, hz] },     // right
+  ];
+  for (const side of sides) {
+    const length = Math.hypot(side.to[0] - side.from[0], side.to[1] - side.from[1]);
+    const isZ = Math.abs(side.to[0] - side.from[0]) < 1e-6;
+    for (let i = 0; i < logsPerSide; i++) {
+      const t = (i + 0.5) / logsPerSide;
+      const lx = side.from[0] + (side.to[0] - side.from[0]) * t;
+      const lz = side.from[1] + (side.to[1] - side.from[1]) * t;
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, length, 8), wood);
+      if (isZ) {
+        log.rotation.z = Math.PI / 2;
+        log.position.set(lx, logH * (i + 0.5), lz);
+      } else {
+        log.rotation.x = Math.PI / 2;
+        log.position.set(lx, logH * (i + 0.5), lz);
+      }
+      log.castShadow = true;
+      group.add(log);
+    }
+  }
+
+  if (stage === "walls") {
+    return group;
+  }
+
+  // --- stage 3: roofed. A pitched thatch roof; this is where shelter begins.
+  const roofPitch = 0.62;
+  const roofDeep = fd / 2 + 0.16 * s;
+  const roofWide = fw / 2 + 0.2 * s;
+  for (const sign of [-1, 1]) {
+    const slope = new THREE.Mesh(new THREE.BoxGeometry(fw + 0.4 * s, 0.07 * s, roofDeep), thatch);
+    const angle = Math.atan2(postH * roofPitch, roofDeep);
+    slope.rotation.x = sign * angle;
+    slope.position.set(0, postH + postH * roofPitch * 0.55, sign * roofDeep * 0.5);
+    slope.castShadow = true;
+    group.add(slope);
+  }
+  const ridgeCap = addBox(thatch, fw + 0.42 * s, 0.12 * s, 0.2 * s, 0, postH + postH * roofPitch + 0.06 * s, 0);
+
+  // A higher rung earns visible finish work even before the final stage.
+  if (rung >= 3) {
+    const door = addBox(wood, 0.34 * s, 0.95 * s, 0.07 * s, 0, 0.48 * s, hz + 0.02 * s);
+    door.castShadow = true;
+  }
+  if (rung >= 4) {
+    for (const sign of [-1, 1]) {
+      addBox(wood, 0.1 * s, wallH * 0.7, 0.1 * s, sign * hx, wallH * 0.35, sign * hz);
+    }
+  }
+
+  if (stage === "roofed") {
+    return group;
+  }
+
+  // --- stage 4: finished. Nothing extra is drawn here: the caller swaps in
+  // the finished sprite so the rung props (windows, chimney, skirting) that
+  // the interior/exterior work already builds are reused, not duplicated.
+  return group;
+}
+
 function createStorageSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
   const w = 0.92 * scale;
   const ht = 0.86 * scale;
@@ -3434,6 +3584,41 @@ function createLandmarkSprite(x, z, h, scale = 1.0, withShadow = true, tintHex =
 function getObjectVisualProfile(rec) {
   if (!rec) return null;
   const rawType = String(rec.object_type || rec.category || rec.id || "").toLowerCase();
+
+  // Phase 10PX: a structure under construction reports its stage so the
+  // renderer grows it instead of showing a finished sprite. Only `roofed`
+  // and `finished` shelter, and only those two draw a roof -- the picture
+  // cannot claim shelter the physics has not granted.
+  // reject a malformed stage rather than rendering "[object Object]"
+  const stageRaw = rec.construction_stage;
+  const stage = (typeof stageRaw === "string" && stageRaw.trim()) ? stageRaw : null;
+  const inProject = rec.construction_project === true || rec.construction_project === "true";
+  if (inProject && stage && stage !== "finished") {
+    const order = CONSTRUCTION_STAGES_ORDER.indexOf(stage);
+    if (order >= 0) {
+      const rawProg = Number(rec.construction_progress);
+      const progress = Number.isFinite(rawProg) && rawProg >= 0 ? rawProg : order;
+      const rung = Number(rec.structure_rung);
+      const rungNum = (Number.isFinite(rung) && rung >= 1) ? Math.floor(rung) : 1;
+      return {
+        id: "vis_constructing",
+        category: "shelter",
+        label: `Building ${rawType || "structure"} — ${stage} (${Math.floor(progress) + 1}/5)`,
+        color: 0xc9a06a,
+        scale: 1.0,
+        construction: true,
+        construction_stage: stage,
+        construction_progress: progress,
+        structure_rung: rungNum,
+      };
+    }
+  }
+  if (rawType === "longhouse") {
+    return { id: "vis_longhouse", category: "shelter", label: "Longhouse", color: 0xd2a86b, scale: 1.25 };
+  }
+  if (rawType === "house") {
+    return { id: "vis_house", category: "shelter", label: "House", color: 0xc29b68, scale: 1.12 };
+  }
 
   if (rawType.includes("fire") || rawType.includes("hearth") || rawType === "campfire") {
     return { id: "vis_campfire", category: "campfire", label: "Campfire / Hearth", color: 0xffaa44, scale: 1.0 };
@@ -3789,7 +3974,13 @@ function updatePublicObjectsAndClearings(pn, hb) {
           const effScale = scale * profScale;
 
           let propMesh = null;
-          if (cat === "shelter") {
+          if (prof && prof.construction) {
+            // Phase 10PX: grow the structure with the world's own stage.
+            propMesh = createConstructionSprite(
+              ox, oz, oh, prof.construction_stage, prof.structure_rung,
+              effScale, profTint
+            );
+          } else if (cat === "shelter") {
             propMesh = createShelterSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else if (cat === "campfire") {
             const addLight = !tileHasLight && (i === 0);
@@ -6047,6 +6238,41 @@ function updateHUD() {
       const civColor = isEast ? "var(--east-cyan)" : "var(--west-amber)";
       compLabel.style.color = civColor;
       compLabel.textContent = `TIMELAPSE: ~${(spd * 1800).toLocaleString()}× EPOCH RATE (1 HB = 1 FULL ACTION CYCLE · REGION: 91×17 TILES)`;
+    }
+  }
+
+  // Phase 10PX: the live build readout. Shows what is actually under
+  // construction in the viewed lane, straight from the world state, so the
+  // settlement growing is legible rather than inferred. Type-guarded: a
+  // malformed stage must never render as "[object Object]".
+  const buildLabel = document.getElementById("hud-build-label");
+  if (buildLabel) {
+    const pairName = isOrbit ? "east" : selectedPair;
+    const pairData = PAIRS[pairName] || {};
+    const projects = [];
+    for (const rec of Object.values(pairData.public_objects || {})) {
+      if (!rec) continue;
+      const rawStage = rec.construction_stage;
+      const stage = (typeof rawStage === "string") ? rawStage : null;
+      if (!stage || rec.construction_project !== true) continue;
+      const order = CONSTRUCTION_STAGES_ORDER.indexOf(stage);
+      if (order < 0) continue;
+      const rawProg = Number(rec.construction_progress);
+      const prog = Number.isFinite(rawProg) && rawProg >= 0 ? rawProg : order;
+      const otype = (typeof rec.object_type === "string" && rec.object_type.trim())
+        ? rec.object_type : "structure";
+      projects.push({ type: otype, stage, step: Math.min(4, Math.max(0, Math.floor(prog))) + 1 });
+    }
+    if (!isOrbit && projects.length) {
+      projects.sort((a, b) => a.step - b.step || a.type.localeCompare(b.type));
+      const shown = projects.slice(0, 3);
+      const extra = projects.length - shown.length;
+      buildLabel.textContent = "BUILDING "
+        + shown.map(p => `${p.type}: ${p.stage} (${p.step}/5)`).join(" · ")
+        + (extra > 0 ? ` · +${extra} more` : "");
+      buildLabel.style.display = "block";
+    } else {
+      buildLabel.style.display = "none";
     }
   }
 

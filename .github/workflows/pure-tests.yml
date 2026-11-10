@@ -117,6 +117,7 @@ jobs:
             tests/test_drink_action_phrasing.py \
             tests/test_timber_access_wall.py \
             tests/test_structure_rungs.py \
+            tests/test_construction_staging_visual.py \
             tests/test_planetary_globe.py \
             tests/test_cultivation.py \
             -v
