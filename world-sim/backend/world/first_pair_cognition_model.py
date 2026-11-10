@@ -1973,6 +1973,38 @@ def build_system_prompt(context: AgentContext) -> str:
             f"Fact: you hold {stone} stone and {wood} wood in your belongings."
         )
 
+    # Phase 10PW: the home you are standing in, as a fact. Warmth floor, rest
+    # recovery and cellar budget were all real (10PJ) but invisible, so neither
+    # the agent nor the operator could see a house level up.
+    home = getattr(context, "home_rung", {}) or {}
+    if isinstance(home, dict) and home:
+        settlement_lines.append(
+            f"Fact: you are inside a {home.get('object_type', 'shelter')} "
+            f"(rung {home.get('rung', 1)}) with footprint {home.get('footprint', 1)}; "
+            f"comfort floor is {home.get('comfort_floor', 45):g}; "
+            f"cold decay factor is {home.get('cold_decay', 0.45):g}; "
+            f"rest recovery is {home.get('rest_regen', 1.0):g} per heartbeat; "
+            f"cellar food budget is {home.get('cellar_budget', 20)} units."
+        )
+
+    build_here = getattr(context, "construction_here", {}) or {}
+    if isinstance(build_here, dict) and build_here:
+        stage = build_here.get("stage", "foundation")
+        progress = build_here.get("progress", 0)
+        total = build_here.get("stages_total", 5)
+        remaining = build_here.get("remaining_floor") or {}
+        remaining_txt = ", ".join(
+            f"{k} {v}" for k, v in sorted(remaining.items())
+            if isinstance(v, int) and v > 0
+        )
+        tail = f"; still needed: {remaining_txt}" if remaining_txt else ""
+        settlement_lines.append(
+            f"Fact: {build_here.get('object_type', 'structure')} "
+            f"{build_here.get('object_id', '')} on this tile is under "
+            f"construction at stage {stage} ({progress}/{total}){tail}. "
+            "Building the same object_id again advances it one stage."
+        )
+
     # Phase 10PT: the partner's hoard, as a fact. West Eve hit 218
     # "Insufficient timber: need 2, hold 0" rejections while West Adam held
     # 198 timber she could not see. Rendering it changes nothing about the

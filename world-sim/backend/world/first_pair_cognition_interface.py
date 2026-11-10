@@ -115,6 +115,11 @@ class AgentContext:
     # projected to the bounded settlement resource kinds. Facts only; the
     # prompt renders what is true and never who should move.
     partner_holdings: dict = field(default_factory=dict)
+    # Home rung (Phase 10PW): the structure this agent stands in, its rung,
+    # footprint and effects, and any in-progress build on this tile. All empty
+    # when the agent is not inside or beside a structure. Facts only.
+    home_rung: dict = field(default_factory=dict)
+    construction_here: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -27,6 +27,7 @@ from backend.world.first_pair_persistence import (
 from backend.world.first_pair_runtime import (
     FirstPairRuntime,
     _BANNED_DIRECTIVE_PHRASES,
+    _stage_material_plan,
 )
 
 
@@ -157,7 +158,13 @@ def test_shelter_requires_timber(tmp_path: Path):
 
 
 def test_shelter_succeeds_with_timber(tmp_path: Path):
-    """A structural build with sufficient timber succeeds and deducts it."""
+    """A structural build with sufficient timber starts and deducts its first stage.
+
+    Phase 10PW: a roofed build is now a staged project, so the FIRST stage is
+    spent here and the rest as the agent advances it. The full floor is still
+    required to be declared and held -- that is 10KM's honest-materials rule,
+    unchanged.
+    """
     runtime = _setup_runtime(tmp_path)
     agent = "east_adam"
     pos = runtime._world_state.tile_occupancy[agent]
@@ -176,8 +183,34 @@ def test_shelter_succeeds_with_timber(tmp_path: Path):
         heartbeat_number=3,
     )
     assert result.get("status") == "success", result
+    obj = runtime._world_state.public_objects["hut-002"]
+    assert obj.get("construction_project") is True
+    assert obj.get("construction_stage") == "foundation"
     after = runtime._get_agent_inventory(agent).get("timber", 0)
-    assert after == before - 2, (before, after)
+    # the legacy shelter floor is 2 timber; only the foundation share is spent
+    foundation = _stage_material_plan({"timber": 2})["foundation"]
+    assert after == before - foundation.get("timber", 0), (before, after)
+
+    # advancing to the end spends exactly the declared floor in total
+    total_before = before
+    for _hb in range(4, 9):
+        step = runtime._execute_build(
+            agent,
+            {
+                "object_id": "hut-002",
+                "object_type": "shelter",
+                "description": "A timber-framed shelter.",
+                "tile_id": pos,
+                "materials": {},
+            },
+            heartbeat_number=_hb,
+        )
+        assert step.get("status") in ("success", "rejected"), step
+        if step.get("status") == "rejected":
+            assert "already finished" in str(step.get("reason")), step
+            break
+    assert obj.get("construction_stage") == "finished", obj
+    assert runtime._get_agent_inventory(agent).get("timber", 0) == total_before - 2
 
 
 def test_campfire_still_cheap(tmp_path: Path):
@@ -336,7 +369,17 @@ def test_addon_costs_less_than_freestanding(tmp_path: Path):
         start_timber2 - runtime2._get_agent_inventory(agent).get("timber", 0)
     )
 
-    assert compound_spent < freestanding_spent, (
-        f"compound spent {compound_spent} timber but freestanding spent "
-        f"{freestanding_spent}; attaching a room must be cheaper"
-    )
+    # Phase 10PW: a build now starts a staged project, so the SPENT figures
+    # above are first-stage shares (legacy shelter floor 2 timber -> 1 at the
+    # foundation stage). The 10LM discount still bites on the DECLARED floor:
+    # the attached room validates against 1 timber where the freestanding one
+    # needs 2, which is the actual "cheaper to attach" invariant.
+    addon_floor = runtime2._world_state.public_objects["hut-addon"]["materials"]
+    standalone_floor = runtime2._world_state.public_objects["hut-root"]["materials"]
+    assert int(addon_floor.get("timber", 0)) <= 1, addon_floor
+    assert int(standalone_floor.get("timber", 0)) >= 1, standalone_floor
+    # the addon also lands at a discounted remaining floor
+    addon_remaining = runtime2._world_state.public_objects["hut-addon"][
+        "remaining_floor"
+    ]
+    assert int(addon_remaining.get("timber", 0)) <= 1, addon_remaining

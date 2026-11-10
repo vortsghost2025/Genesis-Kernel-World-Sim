@@ -6764,6 +6764,44 @@ window.__GENESIS_PROTO__ = {
       prevExportedHb: { ...prevExportedHb }
     };
   },
+  getHomeRungReport() {
+    // Phase 10PW: the structure the viewed pair stands in, its rung, its
+    // connected footprint, and every in-progress build on the active continent.
+    // Facts for the HUD so a house growing is something you can watch.
+    const pairName = (selectedPair === "orbit") ? "east" : selectedPair;
+    const cid = (pairName === "west") ? "cont_b" : "cont_a";
+    const centroids = getSettlementCentroid(pairName);
+    const pos = [];
+    const pairData = PAIRS[pairName] || {};
+    for (const tid of Object.values(pairData.current_positions || {})) {
+      const t = tilesById.get(tid);
+      if (t && t.coordinates) pos.push({ x: t.coordinates.x, y: t.coordinates.y, tile: tid });
+    }
+    const projects = [];
+    for (const obj of Object.values(pairData.public_objects || {})) {
+      if (!obj) continue;
+      const stage = obj.construction_stage || obj.constructionStage;
+      if (!stage) continue;
+      const t = obj.tile_id ? tilesById.get(obj.tile_id) : null;
+      projects.push({
+        object_id: obj.object_id,
+        object_type: obj.object_type,
+        stage,
+        progress: obj.construction_progress != null ? obj.construction_progress : null,
+        rung: obj.structure_rung != null ? obj.structure_rung : null,
+        tile: obj.tile_id,
+        coordinates: t && t.coordinates ? t.coordinates : null,
+      });
+    }
+    return {
+      pair: pairName,
+      continent: cid,
+      centroid: centroids,
+      agents: pos,
+      projects,
+      project_count: projects.length,
+    };
+  },
   setHeartbeat(hb, mode = "replay", immediateCam = true) {
     isPlaying = false;
     playbackMode = mode;

@@ -348,6 +348,162 @@ _STRUCTURAL_TIMBER_MIN = {
 # component is discounted. Half the timber minimum, rounding up.
 _ADDON_STRUCTURAL_DISCOUNT_DIVISOR = 2
 
+# ---------------------------------------------------------------------------
+# Phase 10PW: structure rungs and staged construction.
+#
+# `object_type` used to be a free-form string matched by substring against
+# `_STRUCTURAL_TIMBER_MIN`, so an agent could declare "house" and pay one wood
+# for a full shelter. These tables close that hole: a small closed vocabulary
+# of roofed structures, each with a real material floor, a footprint weight,
+# and an exact per-stage spend plan so construction is watchable.
+#
+# `floor` is a MINIMUM DECLARED amount (10KM's honest-materials seam), not a
+# spend list: the agent may declare more, and every stage still validates
+# against holdings before anything is applied.
+# ---------------------------------------------------------------------------
+
+_CONSTRUCTION_STAGES = ("foundation", "frame", "walls", "roofed", "finished")
+# A project shelters from `roofed` onward; `foundation`/`frame`/`walls` do not.
+_SHELTERING_STAGES = frozenset({"roofed", "finished"})
+
+_STAGE_MATERIAL_SHARE = {
+    "foundation": 0.30,
+    "frame": 0.25,
+    "walls": 0.20,
+    "roofed": 0.15,
+    "finished": 0.10,
+}
+
+_STRUCTURE_RUNGS = {
+    "lean-to": {
+        "rung": 1, "weight": 1, "floor": {"timber": 1},
+        "effects": "shelter from cold",
+    },
+    "hut": {
+        "rung": 2, "weight": 2, "floor": {"timber": 2, "wood": 2},
+        "effects": "walls: predators refuse the tile",
+    },
+    "cabin": {
+        "rung": 3, "weight": 2, "floor": {"timber": 3, "stone": 4},
+        "effects": "door and interior; one cellar slot",
+    },
+    "house": {
+        "rung": 4, "weight": 3, "floor": {"timber": 4, "stone": 6, "clay": 4},
+        "effects": "hearth slot: cooking on the tile",
+    },
+    "longhouse": {
+        "rung": 5, "weight": 4, "floor": {"timber": 8, "stone": 10, "wood": 6},
+        "effects": "campaign build: cellar budget doubled",
+    },
+}
+
+# Names already in the live lanes. Mapped to their rung so existing objects are
+# grandfathered rather than retroactively re-priced; their floors stay the ones
+# `_STRUCTURAL_TIMBER_MIN` has always enforced.
+_LEGACY_TYPE_RUNG = {
+    "shelter": 1, "roof": 1, "tent": 1, "lean": 1, "lean_to": 1,
+    "leanto": 1, "wall": 1, "shack": 1, "hut": 2, "cabin": 3,
+}
+
+_LEGACY_TYPE_FLOOR = {
+    "shelter": {"timber": 2}, "hut": {"timber": 2},
+    "cabin": {"timber": 3}, "roof": {"timber": 1},
+    "tent": {"timber": 1}, "lean": {"timber": 1}, "lean_to": {"timber": 1},
+    "leanto": {"timber": 1}, "wall": {"timber": 1}, "shack": {"timber": 1},
+}
+
+
+# Types the world already accepts as NOT roofed structures (census of both live
+# lanes, 2026-11-10). These keep their existing rules: fire and containers stay
+# cheap. Anything outside BOTH this set and the rung table is a novel free
+# string and is rejected naming the legal structure set -- that is the hole
+# where "house" with one wood bought a full shelter.
+_NON_STRUCTURAL_TYPE_TERMS = (
+    "campfire", "fire", "hearth", "forge", "furnace", "oven", "brazier",
+    "crafting_surface", "workbench", "workshop", "anvil",
+    "garden", "storage", "container", "cache", "chest", "barrel", "crate",
+    "box", "basket", "well", "cellar_pot", "landmark", "road", "pathway",
+    "fence", "wall_post", "ladder", "tool", "furniture", "bed", "table",
+    "chair", "cart", "signpost", "monument", "cairn", "tower_foundation",
+    "food_processor", "processor", "rack", "shelf", "planter", "field",
+    "pen", "corral", "stable_post", "bridge_post", "dock",
+)
+
+
+def _is_roofed_type(object_type: str) -> bool:
+    """True when a declared type is a roofed structure.
+
+    Phase 10PW: the rung table is the authority, so `house` and `longhouse`
+    are recognised as roofed without every caller carrying its own substring
+    list. The legacy kinds keep working for objects that predate the rungs.
+    """
+    if _structure_rung_of(object_type) is not None:
+        return True
+    otype = str(object_type or "").lower()
+    return any(kind in otype for kind in (
+        "shelter", "hut", "wall", "roof", "cabin", "tent", "lean",
+        "cave", "cavern", "overhang", "grotto", "burrow", "stable", "cellar",
+    ))
+
+
+def _is_non_structural_type(object_type: str) -> bool:
+    lowered = str(object_type or "").strip().lower()
+    if not lowered:
+        return True
+    return any(term in lowered for term in _NON_STRUCTURAL_TYPE_TERMS)
+
+_STRUCTURE_RUNG_NAMES = ", ".join(sorted(_STRUCTURE_RUNGS))
+
+
+def _stage_material_plan(floor: dict) -> dict:
+    """Exact per-stage split of a rung floor.
+
+    Integer floors per kind with the remainder handed to the earliest stages,
+    so the stages always sum to exactly the floor: the campaign costs the
+    advertised amount, spread across visible steps.
+    """
+    plan = {stage: {} for stage in _CONSTRUCTION_STAGES}
+    for kind, total in (floor or {}).items():
+        total = int(total or 0)
+        if total <= 0:
+            continue
+        raw = {stage: int(total * _STAGE_MATERIAL_SHARE[stage])
+               for stage in _CONSTRUCTION_STAGES}
+        left = total - sum(raw.values())
+        for stage in _CONSTRUCTION_STAGES:
+            if left <= 0:
+                break
+            raw[stage] += 1
+            left -= 1
+        for stage, amount in raw.items():
+            if amount:
+                plan[stage][kind] = amount
+    return plan
+
+
+def _structure_rung_of(object_type: str) -> dict | None:
+    """Rung record for a declared structure type, or None if unrecognised."""
+    lowered = str(object_type or "").strip().lower()
+    if not lowered:
+        return None
+    for name, record in _STRUCTURE_RUNGS.items():
+        if lowered == name or lowered.replace("_", "-") == name:
+            out = dict(record)
+            out["legacy"] = False
+            return out
+    for name, rung in _LEGACY_TYPE_RUNG.items():
+        if lowered == name or lowered.replace("_", "-") == name.replace("_", "-"):
+            out = dict(_STRUCTURE_RUNGS.get(
+                next((n for n, r in _STRUCTURE_RUNGS.items() if r["rung"] == rung),
+                     "lean-to")))
+            out["rung"] = rung
+            out["floor"] = dict(_LEGACY_TYPE_FLOOR.get(name, {"timber": 1}))
+            out["legacy"] = True
+            out["declared_name"] = name
+            return out
+    return None
+
+
 # Phase 10PJ: thermal physics scale with a roofed footprint network, not
 # with the raw number of shelter objects. One compact roofed line is one
 # larger home; scattered duplicates remain small.
@@ -372,14 +528,24 @@ def _home_network_tier(footprint: int) -> tuple[float, float, float, float, floa
     return params
 
 
-def _roofed_structure_weight(object_type: str) -> int:
+def _roofed_structure_weight(object_type: str, record: dict | None = None) -> int:
     """Roofed footprint weight for a public object type.
 
-    A `cabin` occupies a larger roofed volume than a lean-to or hut.
-    Duplicate structures on one tile do not multiply in the caller, which
-    keeps the largest weight per tile instead of summing all records.
+    A `cabin` occupies a larger roofed volume than a lean-to or hut, and a
+    rung-4 `house` weighs more than either (Phase 10PW). Duplicate structures
+    on one tile do not multiply in the caller, which keeps the largest weight
+    per tile instead of summing all records. An unfinished structure is not
+    roofed and contributes nothing.
     """
+    if isinstance(record, dict):
+        if record.get("construction_project") is True and str(
+            record.get("construction_stage", "")
+        ) not in _SHELTERING_STAGES:
+            return 0
     otype = str(object_type or "").lower()
+    rung = _structure_rung_of(otype)
+    if rung:
+        return int(rung.get("weight", 1))
     if "cabin" in otype:
         return 2
     if any(kind in otype for kind in (
@@ -1294,6 +1460,81 @@ class FirstPairRuntime:
             out["tools"] = tools
         return out
 
+    def _record_shelters(self, record: dict) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if not _is_roofed_type(record.get("object_type", "")):
+            return False
+        if record.get("construction_project") is True:
+            return str(record.get("construction_stage", "")) in _SHELTERING_STAGES
+        return True
+
+    def _home_rung_for(self, position: str | None) -> dict:
+        """The structure this agent stands in, with rung and live effects.
+
+        Empty when the agent is not in a shelter. Facts from the world state
+        only -- this is the number that makes a proper house legible.
+        """
+        if not position:
+            return {}
+        footprint, _ids = self._connected_home_network(position)
+        tier = _home_network_tier(footprint)
+        here = None
+        pos_xy = self._tile_xy(position)
+        for record in (self._world_state.public_objects or {}).values():
+            if not self._record_shelters(record):
+                continue
+            other = self._tile_xy(str(record.get("tile_id", "")))
+            if other is None or pos_xy is None:
+                continue
+            if max(abs(other[0] - pos_xy[0]), abs(other[1] - pos_xy[1])) <= 1:
+                here = record
+                break
+        if here is None:
+            return {}
+        rung = here.get("structure_rung")
+        weight = here.get("rung_weight")
+        if not isinstance(rung, int):
+            rung_record = _structure_rung_of(str(here.get("object_type", "")))
+            rung = int(rung_record["rung"]) if rung_record else 1
+        if not isinstance(weight, int):
+            rung_record = _structure_rung_of(str(here.get("object_type", "")))
+            weight = int(rung_record["weight"]) if rung_record else 1
+        return {
+            "object_id": here.get("object_id"),
+            "object_type": here.get("object_type"),
+            "rung": rung,
+            "weight": weight,
+            "footprint": footprint,
+            "comfort_floor": tier[0],
+            "cold_decay": tier[1],
+            "rest_regen": tier[2],
+            "downed_regen": tier[3],
+            "cellar_budget": _CELLAR_FOOD_BUDGET_PER_FOOTPRINT * max(1, footprint),
+        }
+
+    def _construction_here_for(self, agent_ref: str, position: str | None) -> dict:
+        """Any structure under construction on the agent's own tile."""
+        if not position:
+            return {}
+        for oid, record in (self._world_state.public_objects or {}).items():
+            if not isinstance(record, dict):
+                continue
+            if record.get("tile_id") != position:
+                continue
+            if record.get("construction_project") is not True:
+                continue
+            return {
+                "object_id": oid,
+                "object_type": record.get("object_type"),
+                "stage": record.get("construction_stage"),
+                "progress": record.get("construction_progress"),
+                "stages_total": len(_CONSTRUCTION_STAGES),
+                "rung": record.get("structure_rung"),
+                "remaining_floor": dict(record.get("remaining_floor") or {}),
+            }
+        return {}
+
     def retire_stale_goals(self, agent_ref: str, heartbeat_number: int) -> list[GoalRecord]:
         """Phase 10KX/10KZ: Retire goals whose satisfying condition has objectively ceased to hold."""
         view = self._agent_view(agent_ref)
@@ -2015,6 +2256,8 @@ class FirstPairRuntime:
             tool_condition=self._tool_states_for(agent_ref),
             food_freshness=self._food_freshness_for(agent_ref),
             partner_holdings=self._partner_holdings_for(agent_ref),
+            home_rung=self._home_rung_for(position),
+            construction_here=self._construction_here_for(agent_ref, position),
         )
 
     # ------------------------------------------------------------------
@@ -2190,7 +2433,7 @@ class FirstPairRuntime:
             xy = self._tile_xy(rec_tid)
             if xy is None:
                 continue
-            weight = _roofed_structure_weight(str(record.get("object_type", "")))
+            weight = _roofed_structure_weight(str(record.get("object_type", "")), record)
             if weight <= 0:
                 continue
             current_weight, ids = nodes.get(xy, (0, []))
@@ -2263,17 +2506,17 @@ class FirstPairRuntime:
             return False
         px, py = pos
         continent = self._tile_continent(tile_id)
-        shelter_kinds = ("shelter", "hut", "wall", "roof", "cabin", "tent",
-                         "lean", "cave", "cavern", "overhang", "grotto", "burrow",
-                         "stable", "cellar")
         for record in self._world_state.public_objects.values():
             if not isinstance(record, dict):
                 continue
             rec_tid = record.get("tile_id", "")
             if self._tile_continent(rec_tid) != continent:
                 continue
-            otype = str(record.get("object_type", "")).lower()
-            if not any(k in otype for k in shelter_kinds):
+            if not _is_roofed_type(record.get("object_type", "")):
+                continue
+            # Phase 10PW: an unfinished structure does not shelter yet.
+            in_progress = record.get("construction_project") is True
+            if in_progress and str(record.get("construction_stage", "")) not in _SHELTERING_STAGES:
                 continue
             other = self._tile_xy(rec_tid)
             if other is None:
@@ -3447,6 +3690,104 @@ class FirstPairRuntime:
             "heartbeat": heartbeat_number,
         }
 
+    def _advance_construction(self, agent_ref: str, action: dict, object_id: str,
+                             record: dict, rung_record: dict,
+                             heartbeat_number: int) -> dict:
+        """Advance an in-progress structure by one stage (Phase 10PW).
+
+        Same object_id, same agent, and the stage plan is spent a step at a
+        time. Each step validates against holdings before anything is applied,
+        so abandoning a project leaves an honest partial structure.
+        """
+        view = self._agent_view(agent_ref)
+        stages = _CONSTRUCTION_STAGES
+        current = str(record.get("construction_stage") or stages[0])
+        if current not in stages:
+            current = stages[0]
+        index = stages.index(current)
+        if current == "finished":
+            return {
+                "status": "rejected",
+                "reason": f"{object_id} is already finished; a new object_id starts a new build",
+            }
+        if index + 1 >= len(stages):
+            next_stage = "finished"
+        else:
+            next_stage = stages[index + 1]
+
+        tile_id = action.get("tile_id") or record.get("tile_id")
+        position = self._world_state.tile_occupancy.get(
+            agent_ref, self._habitat["starting_tile_ids"][agent_ref]
+        )
+        if tile_id != position:
+            return {
+                "status": "rejected",
+                "reason": f"Cannot build on tile {tile_id}: you are at {position}",
+            }
+
+        plan = record.get("stage_plan")
+        if not isinstance(plan, dict):
+            plan = _stage_material_plan(rung_record["floor"])
+        stage_materials = plan.get(next_stage)
+        if not isinstance(stage_materials, dict):
+            stage_materials = {}
+
+        holdings = self._get_agent_inventory(agent_ref)
+        for kind, amount in stage_materials.items():
+            amount = int(amount or 0)
+            if amount <= 0:
+                continue
+            if holdings.get(kind, 0) < amount:
+                summary = _holdings_summary(holdings, exclude=kind)
+                reason = (f"Insufficient {kind} for the {next_stage} stage of "
+                          f"{object_id}: need {amount}, hold {holdings.get(kind, 0)}")
+                if summary:
+                    reason += f"; {summary}"
+                return {"status": "rejected", "reason": reason}
+
+        for kind, amount in stage_materials.items():
+            amount = int(amount or 0)
+            if amount > 0:
+                add_to_inventory(self._store, agent_ref, kind, -amount)
+
+        remaining = dict(record.get("remaining_floor") or {})
+        for kind, amount in stage_materials.items():
+            if kind in remaining:
+                remaining[kind] = max(0, int(remaining.get(kind, 0)) - int(amount or 0))
+
+        record["construction_stage"] = next_stage
+        record["construction_progress"] = stages.index(next_stage)
+        record["remaining_floor"] = remaining
+        materials_now = record.get("materials")
+        if not isinstance(materials_now, dict):
+            materials_now = {}
+        for kind, amount in stage_materials.items():
+            if int(amount or 0) > 0:
+                materials_now[kind] = int(materials_now.get(kind, 0)) + int(amount)
+        record["materials"] = materials_now
+        if next_stage == "finished":
+            record["construction_project"] = False
+            record["finished_heartbeat"] = heartbeat_number
+
+        self._world_state.public_objects[object_id] = record
+
+        detail = (f"{object_id}: {next_stage}"
+                  + (f" (spent {stage_materials})" if any(
+                      int(v or 0) > 0 for v in stage_materials.values()) else ""))
+        return {
+            "status": "success",
+            "action_type": "build",
+            "object_id": object_id,
+            "object_type": record.get("object_type"),
+            "stage": next_stage,
+            "progress": stages.index(next_stage),
+            "stages_total": len(stages),
+            "shelters": next_stage in _SHELTERING_STAGES,
+            "rung": record.get("structure_rung"),
+            "remaining_floor": dict(remaining),
+            "detail": detail,
+        }
+
     def _execute_build(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         """Construct an agent-defined object from persisted holdings.
 
@@ -3467,6 +3808,22 @@ class FirstPairRuntime:
         # withholds construction from an agent for lacking food.
         if not _is_safe_object_id(str(object_id or "")):
             return {"status": "rejected", "reason": "Invalid object_id"}
+
+        # Phase 10PW: a build naming THIS agent's in-progress project on this
+        # tile is a continuation, not a duplicate. Checked before the duplicate
+        # branch so a half-built house can be advanced with the same object_id.
+        rung_record = _structure_rung_of(object_type)
+        structural_build = bool(rung_record)
+        if structural_build and object_id in self._world_state.public_objects:
+            existing_obj = self._world_state.public_objects.get(object_id)
+            if (isinstance(existing_obj, dict)
+                    and existing_obj.get("tile_id") == tile_id
+                    and existing_obj.get("creator_agent_id") == view["agent_id"]):
+                return self._advance_construction(
+                    agent_ref, action, object_id, existing_obj,
+                    rung_record, heartbeat_number,
+                )
+
         if object_id in self._world_state.public_objects:
             existing_obj = self._world_state.public_objects.get(object_id)
             existing_tile = existing_obj.get("tile_id") if isinstance(existing_obj, dict) else None
@@ -3559,6 +3916,21 @@ class FirstPairRuntime:
                     ),
                 }
 
+        # Phase 10PW: the closed structure vocabulary. A roofed structure must
+        # name one of the five canonical rungs (or a legacy name already in the
+        # lanes, grandfathered to its rung). This closes the free-string hole
+        # where "house" with one wood was a legal shelter. Non-roofed types --
+        # campfire, crafting_surface, garden, storage, and the like -- are not
+        # structures at all and keep their existing rules: fire stays cheap.
+        if not structural_build and not _is_non_structural_type(object_type):
+            return {
+                "status": "rejected",
+                "reason": (
+                    f"A {object_type} is not a structure this world knows how to "
+                    f"raise. Legal roofed structures: {_STRUCTURE_RUNG_NAMES}."
+                ),
+            }
+
         sanitized = sanitize_public_text(raw_description)
         if not sanitized.strip():
             return {"status": "rejected", "reason": "Empty public_description after sanitization"}
@@ -3589,7 +3961,59 @@ class FirstPairRuntime:
                 effective_materials[kind] = amount
 
         holdings = self._get_agent_inventory(agent_ref)
-        for kind, amount in effective_materials.items():
+
+        # Phase 10PW: a roofed structure starts as a visible project. Only the
+        # FIRST stage's materials are spent now; the rest are spent as the
+        # agent advances it, so a half-built house is an honest half-built
+        # house rather than a debt. Non-structural builds keep the 10KM rule:
+        # the whole declaration is validated, then spent, atomically.
+        stage_floor = dict(rung_record["floor"]) if structural_build else {}
+        if structural_build and is_discounted_structural_addon:
+            stage_floor = {
+                kind: (
+                    (amount + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1)
+                    // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
+                    if kind == "timber" else amount
+                )
+                for kind, amount in stage_floor.items()
+            }
+        stage_plan = _stage_material_plan(stage_floor) if structural_build else None
+        first_stage = _CONSTRUCTION_STAGES[0] if structural_build else None
+
+        if structural_build:
+            # 10KM's structural timber floor still applies to the FIRST stage,
+            # so a build cannot begin without hewn timber for its frame work.
+            # An attached room shares walls, so the floor is discounted by the
+            # same 10LM divisor the legacy check already applied.
+            stage_materials = dict(stage_plan[first_stage])
+            floor_timber = int(rung_record["floor"].get("timber", 0) or 0)
+            if is_discounted_structural_addon:
+                floor_timber = (
+                    floor_timber + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1
+                ) // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
+            declared_timber = 0
+            if isinstance(materials, dict):
+                try:
+                    declared_timber = int(materials.get("timber", 0) or 0)
+                except (TypeError, ValueError):
+                    declared_timber = 0
+            if floor_timber and declared_timber < floor_timber:
+                return {
+                    "status": "rejected",
+                    "reason": (
+                        f"A {object_type} needs at least {floor_timber} structural "
+                        f"timber to bear its own weight; you declared "
+                        f"{declared_timber}. Fell trees with hew_timber once you "
+                        f"hold an axe (stone_axe, iron_axe) or knapped blade "
+                        f"(flint_knife)."
+                    ),
+                }
+            spend = stage_materials
+        else:
+            spend = dict(effective_materials)
+
+
+        for kind, amount in spend.items():
             if holdings.get(kind, 0) < amount:
                 summary = _holdings_summary(holdings, exclude=kind)
                 reason = f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}"
@@ -3597,19 +4021,30 @@ class FirstPairRuntime:
                     reason += f"; {summary}"
                 return {"status": "rejected", "reason": reason}
 
-        for kind, amount in effective_materials.items():
+        for kind, amount in spend.items():
             add_to_inventory(self._store, agent_ref, kind, -amount)
 
-        record = PublicObjectRecord(
+        envelope = PublicObjectRecord(
             object_id=object_id,
             creator_agent_id=view["agent_id"],
             tile_id=tile_id,
             object_type=object_type,
             public_description=sanitized,
             created_heartbeat=heartbeat_number,
-            materials=dict(effective_materials),
-        )
-        self._world_state.public_objects[object_id] = record.to_envelope()
+            materials=dict(spend),
+        ).to_envelope()
+        if structural_build:
+            envelope["construction_project"] = True
+            envelope["structure_rung"] = rung_record["rung"]
+            envelope["rung_weight"] = rung_record["weight"]
+            envelope["construction_stage"] = first_stage
+            envelope["construction_progress"] = 0
+            envelope["stage_plan"] = stage_plan
+            envelope["remaining_floor"] = {
+                kind: int(stage_floor.get(kind, 0) or 0) - int(spend.get(kind, 0))
+                for kind in stage_floor
+            }
+        self._world_state.public_objects[object_id] = envelope
 
         # Phase 10JX: Compound network tracking
         if addon_to and parent_record:

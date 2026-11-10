@@ -116,6 +116,7 @@ jobs:
             tests/test_thirst_spoilage_tool_condition.py \
             tests/test_drink_action_phrasing.py \
             tests/test_timber_access_wall.py \
+            tests/test_structure_rungs.py \
             tests/test_planetary_globe.py \
             tests/test_cultivation.py \
             -v
