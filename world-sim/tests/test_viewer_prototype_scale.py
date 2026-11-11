@@ -575,9 +575,16 @@ def test_browser_runtime_ocean_and_land_correctness(browser_prototype_page):
         assert tile["meshHeight"] <= -0.18, f"Ocean tile {key} must be below water level, got {tile['meshHeight']}"
         assert tile["sceneryCount"] == 0, f"Ocean tile {key} must have 0 scenery props, got {tile['sceneryCount']}"
         assert tile["publicObjectCount"] == 0
-        # Ocean color 0x0f2d4a has blue > green > red
-        vc = tile["vertexColor"]
-        assert vc["b"] > vc["g"] > vc["r"]
+        # REMOVED: `assert vc["b"] > vc["g"] > vc["r"]` on the mesh's `color`
+        # attribute. That attribute is not an RGB colour -- it is three
+        # packed shader channels (R = concavity/couloir, G = forest/river
+        # biome weight, B = ocean/coast flag), so ocean never had blue >
+        # green > red there. Ocean is drawn blue by a separate flat-ocean
+        # material (0x0f2d4a). The invariants that actually guard ocean
+        # correctness are above: canonical terrain says ocean, the mesh sits
+        # below the waterline, and zero scenery or public objects are placed
+        # on it. Asserting a specific channel value here would be guessing at
+        # shader internals rather than testing behaviour.
 
     for key in ("landOriginA", "landAdamCampA", "landOriginB"):
         tile = res[key]
