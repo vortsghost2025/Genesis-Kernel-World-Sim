@@ -124,14 +124,34 @@ def test_stage_plan_is_exact_and_deterministic():
 
 def test_legacy_names_map_to_their_rung():
     # The five canonical rung names map legacy=False; the rest of the live
-    # vocabulary are legacy aliases, grandfathered to their rung.
+    # dwelling vocabulary are legacy aliases, grandfathered to their rung.
     canonical = set(_STRUCTURE_RUNGS)
     for name, expected in (("shelter", 1), ("hut", 2), ("cabin", 3),
-                           ("roof", 1), ("lean-to", 1), ("tent", 1)):
+                           ("lean-to", 1), ("tent", 1)):
         record = _structure_rung_of(name)
         assert record is not None, name
         assert record["rung"] == expected, name
         assert record.get("legacy") is (name not in canonical), name
+
+
+def test_components_are_not_runged_dwellings():
+    """wall/roof are load-bearing components, not dwellings.
+
+    They keep the atomic build contract (declared materials are the whole
+    cost) and `_STRUCTURAL_TIMBER_MIN`'s floor, and are never staged. This is
+    what lets `tests/test_world_pressure.py` build a dry-stone wall out of
+    stone alone.
+    """
+    from backend.world.first_pair_runtime import (
+        _is_structural_component_type,
+        _STRUCTURAL_COMPONENT_TYPES,
+    )
+    for name in _STRUCTURAL_COMPONENT_TYPES:
+        assert _structure_rung_of(name) is None, name
+        assert _is_structural_component_type(name) is True, name
+    # a runged dwelling is not a component
+    assert _is_structural_component_type("house") is False
+    assert _is_structural_component_type("campfire") is False
 
 
 def test_canonical_names_map_to_their_rung():

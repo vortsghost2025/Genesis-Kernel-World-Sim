@@ -397,19 +397,26 @@ _STRUCTURE_RUNGS = {
     },
 }
 
-# Names already in the live lanes. Mapped to their rung so existing objects are
-# grandfathered rather than retroactively re-priced; their floors stay the ones
-# `_STRUCTURAL_TIMBER_MIN` has always enforced.
+# Dwellings already in the live lanes. Mapped to their rung so existing objects
+# are grandfathered rather than retroactively re-priced; their floors stay the
+# ones `_STRUCTURAL_TIMBER_MIN` has always enforced.
+#
+# `wall` and `roof` are deliberately NOT here. They are structural COMPONENTS,
+# not dwellings: a dry-stone wall spends exactly the materials it declares and
+# atomic, and `roof`'s load-bearing timber floor is enforced by
+# `_STRUCTURAL_TIMBER_MIN`. Making them runged staged projects broke the build
+# layer's contract (tests/test_world_pressure.py) that a declared materials
+# dict is what an object costs.
 _LEGACY_TYPE_RUNG = {
-    "shelter": 1, "roof": 1, "tent": 1, "lean": 1, "lean_to": 1,
-    "leanto": 1, "wall": 1, "shack": 1, "hut": 2, "cabin": 3,
+    "shelter": 1, "tent": 1, "lean": 1, "lean_to": 1,
+    "leanto": 1, "shack": 1, "hut": 2, "cabin": 3,
 }
 
 _LEGACY_TYPE_FLOOR = {
     "shelter": {"timber": 2}, "hut": {"timber": 2},
-    "cabin": {"timber": 3}, "roof": {"timber": 1},
+    "cabin": {"timber": 3},
     "tent": {"timber": 1}, "lean": {"timber": 1}, "lean_to": {"timber": 1},
-    "leanto": {"timber": 1}, "wall": {"timber": 1}, "shack": {"timber": 1},
+    "leanto": {"timber": 1}, "shack": {"timber": 1},
 }
 
 
@@ -446,6 +453,19 @@ def _is_roofed_type(object_type: str) -> bool:
     ))
 
 
+def _is_structural_component_type(object_type: str) -> bool:
+    """True for a load-bearing component that is not a dwelling.
+
+    Walls, roofs and their kin keep the atomic build contract: the agent
+    declares a materials dict and pays exactly that, with no rung, no staging
+    and no effects. `roof` still faces `_STRUCTURAL_TIMBER_MIN`.
+    """
+    lowered = str(object_type or "").strip().lower()
+    if not lowered:
+        return False
+    return any(term in lowered for term in _STRUCTURAL_COMPONENT_TYPES)
+
+
 def _is_non_structural_type(object_type: str) -> bool:
     lowered = str(object_type or "").strip().lower()
     if not lowered:
@@ -453,6 +473,14 @@ def _is_non_structural_type(object_type: str) -> bool:
     return any(term in lowered for term in _NON_STRUCTURAL_TYPE_TERMS)
 
 _STRUCTURE_RUNG_NAMES = ", ".join(sorted(_STRUCTURE_RUNGS))
+
+# Structural COMPONENTS: load-bearing parts an agent builds, but not dwellings.
+# They pass the rung gate, keep their existing atomic build contract (declared
+# materials are the whole cost), and keep `_STRUCTURAL_TIMBER_MIN`'s floor
+# (`roof` needs 1 timber). They are not staged and have no rung effects.
+_STRUCTURAL_COMPONENT_TYPES = (
+    "wall", "roof", "fence", "door", "floor", "thatch",
+)
 
 
 def _stage_material_plan(floor: dict) -> dict:
@@ -3916,13 +3944,17 @@ class FirstPairRuntime:
                     ),
                 }
 
-        # Phase 10PW: the closed structure vocabulary. A roofed structure must
+        # Phase 10PW: the closed structure vocabulary. A roofed DWELLING must
         # name one of the five canonical rungs (or a legacy name already in the
         # lanes, grandfathered to its rung). This closes the free-string hole
         # where "house" with one wood was a legal shelter. Non-roofed types --
         # campfire, crafting_surface, garden, storage, and the like -- are not
         # structures at all and keep their existing rules: fire stays cheap.
-        if not structural_build and not _is_non_structural_type(object_type):
+        # Load-bearing components (wall, roof, fence, ...) pass through and
+        # keep the atomic build contract.
+        if (not structural_build
+                and not _is_non_structural_type(object_type)
+                and not _is_structural_component_type(object_type)):
             return {
                 "status": "rejected",
                 "reason": (
@@ -3969,11 +4001,14 @@ class FirstPairRuntime:
         # the whole declaration is validated, then spent, atomically.
         stage_floor = dict(rung_record["floor"]) if structural_build else {}
         if structural_build and is_discounted_structural_addon:
+            # An attached room shares walls, so EVERY structural component is
+            # discounted, not only the timber (docs/10LM: the structural
+            # component and all declared structural materials are halved).
             stage_floor = {
-                kind: (
+                kind: max(
+                    1,
                     (amount + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1)
-                    // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
-                    if kind == "timber" else amount
+                    // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR,
                 )
                 for kind, amount in stage_floor.items()
             }
