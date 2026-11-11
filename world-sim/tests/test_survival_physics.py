@@ -139,13 +139,33 @@ class TestVitalityAndCollapse:
             vitals = sv.apply_heartbeat(vitals, hb, by_fire=False,
                                         in_shelter=False)
         assert vitals["downed"] is True
-        # rescued: partner's fire + brought food
+        # rescued: partner's fire + brought food.
+        #
+        # 10PM added thirst, so a rescue is food AND water: a body that only
+        # eats stands up and then collapses again from dehydration. The test
+        # predates thirst; drinking is the correct update, not a weakening.
         for hb in range(400, 800):
             vitals = sv.apply_heartbeat(vitals, hb, by_fire=True,
                                         in_shelter=True,
-                                        ate_satisfaction=30.0)
+                                        ate_satisfaction=30.0,
+                                        drank_satisfaction=45.0)
         assert vitals["downed"] is False
         assert vitals["vitality"] > sv.RECOVERY_STAND_AT
+        # and a rescue that brings only food is NOT enough: the body stands
+        # and falls again. This is the thirst mechanic doing its job.
+        only_food = sv.initial_vitals()
+        only_food["hunger"] = 99.0
+        only_food["warmth"] = 0.0
+        for hb in range(400):
+            only_food = sv.apply_heartbeat(only_food, hb, by_fire=False,
+                                          in_shelter=False)
+        assert only_food["downed"] is True
+        for hb in range(400, 800):
+            only_food = sv.apply_heartbeat(only_food, hb, by_fire=True,
+                                           in_shelter=True,
+                                           ate_satisfaction=30.0)
+        assert only_food["downed"] is True, (
+            "a rescue without water must not stick")
 
 
 class TestLabels:

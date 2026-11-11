@@ -125,7 +125,9 @@ class TestElementsAndPrimitiveSurvival:
         assert "exposed to the open sky without fire or shelter" in prompt
         assert "Facts of the elements" in prompt
         assert "A lit campfire or hearth within three tiles restores warmth" in prompt
-        assert "cave shelter" in prompt
+        # natural shelters are disclosed as facts; the numbered-item phrasing
+        # capitalises the label, so match case-insensitively
+        assert "cave shelter" in prompt.lower()
         assert "Storing gathered provisions into containers" in prompt
 
     def test_sheltered_by_fire_states_protection(self):

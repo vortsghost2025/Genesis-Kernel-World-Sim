@@ -1118,10 +1118,20 @@ class FirstPairRuntime:
             self._current_tile_resources = {}
 
     def _get_agent_inventory(self, agent_ref: str) -> dict:
-        """Return the agent's gathered-resource inventory (persisted)."""
-        if not hasattr(self._store, "_read_json"):
+        """Return the agent's gathered-resource inventory (persisted).
+
+        Fail-closed on a runtime carrying no store (a minimal seam stub, or a
+        partially constructed runtime): `hasattr(self._store, ...)` evaluates
+        `self._store` FIRST, so a missing attribute raises before hasattr can
+        catch anything. Read the attribute through getattr instead.
+        """
+        store = getattr(self, "_store", None)
+        if store is None or not hasattr(store, "_read_json"):
             return {}
-        return dict(load_inventory(self._store).get(agent_ref, {}))
+        try:
+            return dict(load_inventory(store).get(agent_ref, {}))
+        except Exception:
+            return {}
 
     def _ensure_life_state(self, agent_ref: str, heartbeat_number: int | None = None) -> None:
         """Seed Phase 10PM custody records without disturbing existing stock.
@@ -1320,7 +1330,7 @@ class FirstPairRuntime:
         """Remove oldest lots first and return the lots taken."""
         if quantity <= 0:
             return []
-        freshness = dict(self._world_state.food_freshness or {})
+        freshness = dict(getattr(self._world_state, "food_freshness", None) or {})
         agent_freshness = dict(freshness.get(agent_ref) or {})
         lots = self._clean_food_lots(agent_freshness.get(kind))
         taken = []
@@ -1746,8 +1756,13 @@ class FirstPairRuntime:
         # "continue systematic survey ... along the y=-5 boundary" every heartbeat
         # and logged 435 moves in 250 heartbeats. One goal per signature keeps the
         # same 8-slot budget while showing up to eight distinct intents.
+        # `deduped_rev` was built newest-first, so reversing it restores
+        # chronological order. Passing it unreversed handed the selector a
+        # newest-first list, and its `chosen[-MAX:]` slice then took the
+        # OLDEST goals instead of the newest -- a 20-distinct-goal agent saw
+        # its 8 oldest intents. Reversing (10KX/10KZ ordering) is correct.
         agent_goals = _select_diverse_active_goals(
-            list(reversed(deduped_rev)), heartbeat_number
+            list(deduped_rev), heartbeat_number
         )
         agent_pending_questions = [
             q
@@ -4052,6 +4067,14 @@ class FirstPairRuntime:
             if holdings.get(kind, 0) < amount:
                 summary = _holdings_summary(holdings, exclude=kind)
                 reason = f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}"
+                # Phase 10PW: a staged build's first action costs only its own
+                # stage, so name the whole project too. Otherwise an agent
+                # reads "need 1" and believes one log raises a house.
+                if structural_build and amount < int(stage_floor.get(kind, amount) or amount):
+                    total = sum(stage_plan[stage].get(kind, 0)
+                                for stage in _CONSTRUCTION_STAGES)
+                    reason += (f" for the {first_stage} stage "
+                               f"({total} for the whole {object_type})")
                 if summary:
                     reason += f"; {summary}"
                 return {"status": "rejected", "reason": reason}

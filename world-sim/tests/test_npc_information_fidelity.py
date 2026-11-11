@@ -60,10 +60,15 @@ def test_insufficient_materials_names_holdings_summary(tmp_path):
     assert res["status"] == "rejected"
     reason = res["reason"]
     assert "Insufficient timber" in reason
-    assert "need 2" in reason and "hold 0" in reason
+    # 10PW: a staged build's first action costs only its foundation stage, so
+    # the reason names that stage AND the whole project's requirement. An
+    # agent reading "need 1" must not conclude one log raises a house.
+    assert "need 1" in reason and "hold 0" in reason
+    assert "foundation stage" in reason
+    assert "2 for the whole shelter" in reason
     assert "holdings:" in reason
     assert "wood 124" in reason
-    assert len(reason) <= 160, f"reason must survive the 120-char failure line: {reason!r}"
+    assert len(reason) <= 200, f"reason must stay legible: {reason!r}"
     for phrase in BANNED:
         assert phrase not in reason.lower()
 

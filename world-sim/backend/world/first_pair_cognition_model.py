@@ -1694,6 +1694,9 @@ def build_system_prompt(context: AgentContext) -> str:
     _env = (context.observation or {}).get("environment") or {}
     body_section = ""
     _lines = []
+    # World-scale facts (Phase 10JV/10JX), rendered in their own section so a
+    # well body stays silent.
+    scale_lines: list[str] = []
     if _sb:
         if _sb.get("downed"):
             _lines.append(
@@ -1822,7 +1825,8 @@ def build_system_prompt(context: AgentContext) -> str:
                         "Facts of the elements: "
                         "(1) Fire: A lit campfire or hearth within three tiles restores warmth fast (+9 per heartbeat), unless snuffed by rain. "
                         "(2) Shelter: A constructed shelter (lean-to, hut, cabin, roof, or wall) protects fires from rain and cuts warmth loss by more than half. "
-                        "(3) Storage: Storing gathered provisions into containers (baskets, chests, caches, storage objects) on your tile creates shared reserves with your companion via use_object deposit and extract."
+                        "(3) Cave shelter: A cave mouth, cavern, overhang, grotto or burrow shelters exactly as a built structure does - it is the pre-built shelter the world gives away. "
+                        "(4) Storage: Storing gathered provisions into containers (baskets, chests, caches, storage objects) on your tile creates shared reserves with your companion via use_object deposit and extract."
                     )
 
             # Sky forecast warning for upcoming rain/storms
@@ -1880,11 +1884,16 @@ def build_system_prompt(context: AgentContext) -> str:
         _lines.extend(_format_fauna_lines((context.observation or {}).get("fauna") or {}))
 
 
-        # Permanent continental scale grounding and active embodiment (Phase 10JV/10JX)
-        _lines.append(
+        # Permanent continental scale grounding and active embodiment (Phase 10JV/10JX).
+        # These are world-scale facts, not the body speaking at a moment of need,
+        # so they belong to their own section. Appending them to `_lines` made a
+        # perfectly well body emit a YOUR BODY header every heartbeat -- the
+        # exact nagging the section was designed to avoid
+        # (tests/test_body_section.py::test_well_body_is_silent).
+        scale_lines.append(
             "Fact: The continent is a vast, continuous landmass spanning 40,000 tiles (200x200). Your explored territory covers only a tiny fraction (<2%) of the world. Beyond your immediate sight lie high mountain ridges, river valleys, unexplored biomes, wild and domestic animals, and unmined resources. The world is never exhausted."
         )
-        _lines.append(
+        scale_lines.append(
             "Fact: Part of being an embodied inhabitant is active learning: exploring the frontier, hewing timber, building modular compound shelters, and experimenting with physical materials to survive and thrive."
         )
 
@@ -2035,6 +2044,13 @@ def build_system_prompt(context: AgentContext) -> str:
             + "\n".join("- " + line for line in settlement_lines)
         )
 
+    scale_section = ""
+    if scale_lines:
+        scale_section = (
+            "--- THE WORLD (scale and embodiment) ---\n"
+            + "\n".join("- " + line for line in scale_lines)
+        )
+
     # Phase 10OU-C: resources the agent has personally observed on visited
     # tiles, from its own known map. Same factual register — absent when
     # empty, never the true map, never a suggestion.
@@ -2083,6 +2099,7 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {belongings_section}
 
 {settlement_section}
+{scale_section}
 
 {resource_section}
 

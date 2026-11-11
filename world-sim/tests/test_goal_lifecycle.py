@@ -88,17 +88,35 @@ def test_build_context_deduplicates_goal_descriptions(tmp_path: Path):
 
 def test_build_context_still_slices_most_recent_when_all_distinct(tmp_path: Path):
     """When an agent holds 20 genuinely distinct goals, dedup preserves all and slices the 8 most recent."""
+    # 20 goals that are distinct in INTENT, not merely by an index.
+    # `_goal_signature` stems content words, so "Unique Goal 1..20" collapses
+    # to a single intent and the 10NX dedup correctly keeps only the newest.
+    distinct = [
+        "survey the northern ridge", "gather flint from the riverbed",
+        "fell timber for framing", "dig clay near the stream",
+        "harvest berries before winter", "track deer across the valley",
+        "mend the broken wall", "stack firewood under the overhang",
+        "weave fiber into rope", "knap a blade from raw flint",
+        "draw water every dawn", "cache nuts in the cellar",
+        "explore the eastern cave mouth", "hunt wolves at dusk",
+        "plant grain in the garden", "smelt iron from ore",
+        "thatched the leaking roof", "tend the campfire through rain",
+        "map the southern ravine", "bring food to my partner",
+    ]
     goals = [
-        GoalRecord(f"g-{i:02d}", "", f"Unique Goal {i}", "in_progress", 1000 + i)
-        for i in range(1, 21)
+        GoalRecord(f"g-{i:02d}", "", desc, "in_progress", 1000 + i)
+        for i, desc in enumerate(distinct, start=1)
     ]
     runtime, _ = _make_runtime_with_goals(tmp_path, goals)
     ctx = runtime._build_context("east_adam", 2000)
 
     exposed_descs = [g["description"] for g in ctx.goals]
+    # 20 distinct intents, MAX_ACTIVE_GOALS_EXPOSED is 8: the slice must keep
+    # the 8 most RECENT (chronological order, oldest of the eight first).
     assert len(exposed_descs) == 8, f"Expected 8 exposed goals, got {len(exposed_descs)}"
-    expected = [f"Unique Goal {i}" for i in range(13, 21)]
-    assert exposed_descs == expected, f"Expected most recent 8 distinct goals, got {exposed_descs}"
+    expected = distinct[-8:]
+    assert exposed_descs == expected, (
+        f"Expected the 8 most recent distinct goals, got {exposed_descs}")
 
 
 def test_dedupe_preserves_all_records_on_disk(tmp_path: Path):
