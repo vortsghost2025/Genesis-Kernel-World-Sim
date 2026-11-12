@@ -2984,8 +2984,10 @@ class FirstPairRuntime:
                        if position else False)
             in_shelter = self._in_shelter(position) if position else False
             ate = 0.0
+            drank = 0.0
             if vitals.get("downed"):
                 ate = self._downed_tile_feed(agent_ref, position)
+                drank = self._downed_tile_drink(agent_ref, position)
 
             comfort_floor = survival.SHELTER_COMFORT_FLOOR
             shelter_decay = survival.SHELTER_DECAY_FACTOR
@@ -3003,6 +3005,7 @@ class FirstPairRuntime:
             self._world_state.vitals[agent_ref] = survival.apply_heartbeat(
                 vitals, heartbeat_number, by_fire=by_fire,
                 in_shelter=in_shelter, ate_satisfaction=ate,
+                drank_satisfaction=drank,
                 weather=weather,
                 comfort_floor=comfort_floor,
                 shelter_decay_factor=shelter_decay,
@@ -3044,6 +3047,44 @@ class FirstPairRuntime:
         else:
             del obj["materials"][best_kind]
         return best_sat
+
+    def _downed_tile_drink(self, agent_ref: str, position: str | None) -> float:
+        """A collapsed body drinks from a vessel on its own tile.
+
+        The collapsed-action rejection has always promised: "If food or water
+        is brought to your tile you will drink and eat and recover". The food
+        half went in with 10PM (`_downed_tile_feed`); the water half never
+        existed, so a pot left on a collapsed body's tile was never drunk and
+        thirst could only fall through the `drink` action -- which a downed
+        body is forbidden to take. With `vitality_next` also voiding the
+        home tier's downed regen once thirst reaches THIRST_WEAKEN, a
+        dehydrated collapsed agent was left with DOWNED_PASSIVE_REGEN
+        (0.15/hb) and a rescue path that half-worked.
+
+        Measured on the live lanes, 2026-11-12: three of four agents
+        collapsed at thirst 100, and zero objects in either lane held
+        fresh_water, so nobody had ever been able to hand a collapsed
+        partner a drink even when they were carrying five units of it.
+
+        One unit per heartbeat from any object on THIS tile, mirroring the
+        food path exactly. An adjacent pot is not "brought to your tile".
+        """
+        if not position:
+            return 0.0
+        for oid, record in self._world_state.public_objects.items():
+            if not isinstance(record, dict) or record.get("tile_id") != position:
+                continue
+            contents = record.get("contents")
+            if not isinstance(contents, dict):
+                continue
+            held = int(contents.get("fresh_water", 0) or 0)
+            if held < 1:
+                continue
+            contents["fresh_water"] = held - 1
+            if contents["fresh_water"] <= 0:
+                del contents["fresh_water"]
+            return float(survival.DRINK_SATISFACTION["vessel"])
+        return 0.0
 
     # Tokens an agent naturally writes for "drink here". The tile-id and
     # free-phrase forms were rejected outright, which produced 150+ rejected
