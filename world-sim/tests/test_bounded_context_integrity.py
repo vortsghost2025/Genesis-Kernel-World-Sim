@@ -1,6 +1,6 @@
-"""Unit and Integration Tests for Bounded Context Integrity (Genesis Phase Path A).
+"""Bounded Context Integrity (Genesis Phase Path A).
 
-Verifies all seven constitutional properties mandated by the Operator:
+Verifies the constitutional properties of bounded selection:
 1. Strict selection caps (messages <= 35, relationship events <= 25)
 2. Historical evidence integrity (fields, IDs, timestamps untampered)
 3. Correct agent visibility (no cross-agent private message leaks)
@@ -8,11 +8,21 @@ Verifies all seven constitutional properties mandated by the Operator:
 5. Preservation of important older events (first contact, creations, questions)
 6. Unchanged full history on disk (no disk mutation from selection)
 7. No alteration to cognition action semantics (validate_model_output unchanged)
+
+Historically this suite read a scratch store under a hard-coded absolute
+path from a prior tooling session, so it could only ever run on one
+machine. The selection functions it exercises are pure, and the invariants
+it asserts are about THOSE functions, not about that particular store --
+so a committed fixture stands in for the scratch store and the suite is
+now portable.
 """
+from __future__ import annotations
+
 import copy
 import json
 import pathlib
 import sys
+
 import pytest
 
 REPO_SIM = pathlib.Path(__file__).resolve().parents[1]
@@ -25,23 +35,128 @@ from backend.world.first_pair_persistence import (
 )
 from backend.world.first_pair_cognition_model import validate_model_output
 
-ISOLATED_STORE = pathlib.Path(r"C:\Users\seand\.gemini\antigravity\brain\ef6607e4-f06f-4d3a-af0b-67d2ea6e848a\scratch\isolated_east_store")
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+FIXTURE_STORE = FIXTURES / "bounded_context_store"
+
+ADAM_ID = "genesis-agent-" + "a" * 56
+EVE_ID = "genesis-agent-" + "b" * 56
+
+# A committed stand-in for the scratch store this suite used to require.
+# Shaped exactly like the real store's files: an envelope with a `data`
+# key holding the records. The assertions below target specific landmark
+# records, so the fixture carries the same ones by ID.
+_WORLD_STATE = {
+    "type": "world_state_record",
+    "schema_version": "world_state.1",
+    "data": {
+        "tick": 4000,
+        "public_messages": [
+            # Founding exchange at HB 2 (both directions).
+            {"message_id": "msg-92a268d86c38", "heartbeat": 2, "recipient": "east_eve",
+             "sender_agent_id": ADAM_ID, "message": "I see you.",
+             "sent_at_utc": "2026-10-01T00:00:02+00:00"},
+            {"message_id": "msg-b5105215af59", "heartbeat": 2, "recipient": "east_adam",
+             "sender_agent_id": EVE_ID, "message": "I see you too.",
+             "sent_at_utc": "2026-10-01T00:00:02+00:00"},
+            # Historical operator appeals: private to their authoring agent.
+            {"message_id": "msg-fee573ae1fb7", "heartbeat": 830, "recipient": "the operator",
+             "sender_agent_id": ADAM_ID, "message": "How do I make fire?",
+             "sent_at_utc": "2026-10-01T00:00:00+00:00"},
+            {"message_id": "msg-bac436451ea9", "heartbeat": 937, "recipient": "the operator",
+             "sender_agent_id": EVE_ID, "message": "Where is stone?",
+             "sent_at_utc": "2026-10-01T00:00:00+00:00"},
+            # The crucial partner inquiry at HB 3594.
+            {"message_id": "msg-6051b436bac5", "heartbeat": 3594, "recipient": "east_adam",
+             "sender_agent_id": EVE_ID, "message": "Can you see the river?",
+             "sent_at_utc": "2026-10-01T00:00:00+00:00"},
+            # Filler so the 35-message cap is genuinely exercised. Addressed
+            # BOTH ways so each agent's selection has enough to fill its cap.
+            *[
+                {"message_id": f"msg-fill-a-{i:04d}", "heartbeat": 100 + i,
+                 "recipient": "east_adam", "sender_agent_id": ADAM_ID,
+                 "message": f"adam note {i}", "sent_at_utc": "2026-10-01T00:00:00+00:00"}
+                for i in range(40)
+            ],
+            *[
+                {"message_id": f"msg-fill-e-{i:04d}", "heartbeat": 100 + i,
+                 "recipient": "east_eve", "sender_agent_id": EVE_ID,
+                 "message": f"eve note {i}", "sent_at_utc": "2026-10-01T00:00:00+00:00"}
+                for i in range(40)
+            ],
+        ],
+    },
+}
+
+_RELATIONSHIP_LEDGER = {
+    "type": "relationship_ledger",
+    "schema_version": "relationship_ledger.1",
+    "data": [
+        # Foundational meeting co-location at HB 1.
+        {"event_id": "16463155fcdf7275", "heartbeat": 1, "event_type": "co_location",
+         "actor_agent_id": ADAM_ID, "other_agent_id": EVE_ID,
+         "created_at_utc": "2026-10-01T00:00:01+00:00"},
+        # Meeting stone creation at HB 10. The real event type is
+        # `public_object_creation` (see first_pair_persistence.py ~1150):
+        # `select_bounded_relationship_events` preserves founders by TYPE, so
+        # a fixture using plain "creation" would be correctly ignored and the
+        # preservation test would fail for the wrong reason.
+        {"event_id": "38afea75f195f40c", "heartbeat": 10, "event_type": "public_object_creation",
+         "actor_agent_id": ADAM_ID, "other_agent_id": EVE_ID,
+         "created_at_utc": "2026-10-01T00:00:10+00:00"},
+        # Filler so the 25-event cap is genuinely exercised. These sit at
+        # HIGHER heartbeats than the founders, and `select_bounded_relationship_events`
+        # prefers recent events -- so the preservation test below is what
+        # proves the founders survive the cap rather than being crowded out.
+        *[
+            {"event_id": f"evt-fill-{i:04d}", "heartbeat": 3000 + i,
+             "event_type": "co_location", "actor_agent_id": ADAM_ID,
+             "other_agent_id": EVE_ID, "created_at_utc": "2026-10-01T00:00:00+00:00"}
+            for i in range(40)
+        ],
+    ],
+}
+
+_IDENTITY = {
+    "type": "identity_record",
+    "schema_version": "first_pair_identity.1",
+    "data": {
+        "adam_agent_id": ADAM_ID,
+        "eve_agent_id": EVE_ID,
+        "birth_candidate": {
+            "adam_identity": {"canonical_name": "Adam", "canonical_agent_ref": "east_adam"},
+            "eve_identity": {"canonical_name": "Eve", "canonical_agent_ref": "east_eve"},
+        },
+    },
+}
+
+
+@pytest.fixture(scope="module")
+def isolated_store(tmp_path_factory):
+    """Materialize the fixture store once. Uses a platform-native temp dir,
+    never a hardcoded path."""
+    root = tmp_path_factory.mktemp("bounded_context_store")
+    (root / "world_state.json").write_text(
+        json.dumps(_WORLD_STATE), encoding="utf-8", newline="\n")
+    (root / "relationship_ledger.json").write_text(
+        json.dumps(_RELATIONSHIP_LEDGER), encoding="utf-8", newline="\n")
+    (root / "identity.json").write_text(
+        json.dumps(_IDENTITY), encoding="utf-8", newline="\n")
+    return root
 
 
 @pytest.fixture
-def isolated_data():
-    with open(ISOLATED_STORE / "world_state.json", "r", encoding="utf-8") as f:
+def isolated_data(isolated_store):
+    with open(isolated_store / "world_state.json", "r", encoding="utf-8") as f:
         ws = json.load(f)
     msgs = ws.get("data", {}).get("public_messages", [])
 
-    with open(ISOLATED_STORE / "relationship_ledger.json", "r", encoding="utf-8") as f:
+    with open(isolated_store / "relationship_ledger.json", "r", encoding="utf-8") as f:
         rel_data = json.load(f)
     events = rel_data.get("data", [])
 
-    with open(ISOLATED_STORE / "identity.json", "r", encoding="utf-8") as f:
+    with open(isolated_store / "identity.json", "r", encoding="utf-8") as f:
         ident = json.load(f).get("data", {})
     return msgs, events, ident
-
 
 def test_strict_selection_caps(isolated_data):
     msgs, events, ident = isolated_data
@@ -197,9 +312,9 @@ def test_preservation_of_important_older_events(isolated_data):
     assert "msg-6051b436bac5" in adam_msg_ids, "Crucial partner inquiry at HB 3594 missing from public messages!"
 
 
-def test_unchanged_full_history_on_disk(isolated_data):
-    before_ws_bytes = (ISOLATED_STORE / "world_state.json").read_bytes()
-    before_rel_bytes = (ISOLATED_STORE / "relationship_ledger.json").read_bytes()
+def test_unchanged_full_history_on_disk(isolated_store, isolated_data):
+    before_ws_bytes = (isolated_store / "world_state.json").read_bytes()
+    before_rel_bytes = (isolated_store / "relationship_ledger.json").read_bytes()
 
     msgs, events, ident = isolated_data
     adam_id = ident.get("adam_agent_id")
@@ -209,8 +324,8 @@ def test_unchanged_full_history_on_disk(isolated_data):
         _ = select_bounded_public_messages(msgs, agent_ref="east_adam", max_total_messages=35)
         _ = select_bounded_relationship_events(events, agent_id=adam_id, max_total_events=25)
 
-    after_ws_bytes = (ISOLATED_STORE / "world_state.json").read_bytes()
-    after_rel_bytes = (ISOLATED_STORE / "relationship_ledger.json").read_bytes()
+    after_ws_bytes = (isolated_store / "world_state.json").read_bytes()
+    after_rel_bytes = (isolated_store / "relationship_ledger.json").read_bytes()
 
     assert before_ws_bytes == after_ws_bytes, "world_state.json on disk was modified by selection!"
     assert before_rel_bytes == after_rel_bytes, "relationship_ledger.json on disk was modified by selection!"
