@@ -41,10 +41,26 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# `creationflags` is a Windows-only subprocess argument: passing it on Linux
+# raises ValueError, which is why the runner's own suite could never execute
+# on a POSIX runner. The full CI suite runs on ubuntu, so every spawn site
+# must build its flags through this helper rather than hardcoding them.
+_IS_WINDOWS = sys.platform.startswith("win")
+
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 CREATE_NO_WINDOW = 0x08000000
+
+
+def _spawn_flags(*flags: int) -> int | None:
+    """OR the given Windows creation flags, or None off Windows."""
+    if not _IS_WINDOWS:
+        return None
+    value = 0
+    for flag in flags:
+        value |= flag
+    return value or None
 
 # Provider policy. These four constants are the single source of truth:
 # build_clean_env() writes them and resolution_proof() asserts the resolver
@@ -231,7 +247,7 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=60,
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=_spawn_flags(CREATE_NO_WINDOW),
         )
     except Exception as exc:
         return False, f"resolution proof process failed: {type(exc).__name__}"
@@ -314,7 +330,7 @@ def export_state_evidence(
             capture_output=True,
             text=True,
             timeout=120,
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=_spawn_flags(CREATE_NO_WINDOW),
         )
     except Exception as exc:
         return False, f"evidence export process failed: {type(exc).__name__}"
@@ -469,7 +485,7 @@ def runner_main(argv=None) -> int:
             ],
             cwd=str(world_sim_root),
             env=env,
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=_spawn_flags(CREATE_NO_WINDOW),
         )
         if already_persisted(store_root, expect):
             _write_status(
@@ -604,21 +620,23 @@ def launcher_main(argv=None) -> int:
     ]
 
     log_fh = open(log_path, "ab", buffering=0)
-    flags = (
-        DETACHED_PROCESS
-        | CREATE_NEW_PROCESS_GROUP
-        | CREATE_BREAKAWAY_FROM_JOB
-        | CREATE_NO_WINDOW
+    full_flags = _spawn_flags(
+        DETACHED_PROCESS,
+        CREATE_NEW_PROCESS_GROUP,
+        CREATE_BREAKAWAY_FROM_JOB,
+        CREATE_NO_WINDOW,
+    )
+    plain_flags = _spawn_flags(
+        DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW
     )
     try:
         proc = subprocess.Popen(
-            cmd, stdout=log_fh, stderr=log_fh, creationflags=flags, close_fds=True
+            cmd, stdout=log_fh, stderr=log_fh, creationflags=full_flags, close_fds=True
         )
         breakaway = True
     except (PermissionError, OSError):
-        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
         proc = subprocess.Popen(
-            cmd, stdout=log_fh, stderr=log_fh, creationflags=flags, close_fds=True
+            cmd, stdout=log_fh, stderr=log_fh, creationflags=plain_flags, close_fds=True
         )
         breakaway = False
     log_fh.close()

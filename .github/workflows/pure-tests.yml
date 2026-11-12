@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest openai==2.24.0
-          python -m pip install pytest-asyncio playwright
+          python -m pip install pytest-asyncio playwright cryptography
           python -m playwright install chromium
       - name: Run the pure test suite (whole tests/ except import-exit modules)
         run: |

@@ -191,16 +191,28 @@ def test_multistep_cow_taming_and_milking_lifecycle(tmp_path: Path):
     assert outcome_eat["status"] == "success"
 
 
-def test_github_ci_workflow_fauna_suites_present():
+def test_github_ci_workflow_runs_the_fauna_suites():
+    """The workflow must actually execute the fauna suites.
+
+    Originally this asserted the four suite filenames were listed verbatim in
+    the workflow. That silently passed while the workflow ran a curated subset
+    of roughly 40 files, and it broke the moment the workflow moved to running
+    the whole tests/ directory (where the files are covered by `tests/`, not
+    by name). Assert the stronger invariant: the whole suite runs, so every
+    fauna suite runs with it.
+    """
     workflow_path = WORLD_SIM.parent / ".github" / "workflows" / "pure-tests.yml"
     assert workflow_path.exists()
     content = workflow_path.read_text(encoding="utf-8")
 
-    expected_suites = [
-        "tests/test_fauna_pure.py",
-        "tests/test_fauna_interactions.py",
-        "tests/test_fauna_runtime.py",
-        "tests/test_fauna_cognition.py",
-    ]
-    for suite in expected_suites:
-        assert suite in content, f"Missing suite {suite} in pure-tests.yml"
+    assert "python -m pytest tests/" in content, (
+        "CI must run the whole tests/ directory, not a curated subset that "
+        "can hide failures (see docs/phase_index.md 10QB)"
+    )
+    for suite in ("tests/test_fauna_pure.py", "tests/test_fauna_interactions.py",
+                  "tests/test_fauna_runtime.py", "tests/test_fauna_cognition.py"):
+        assert (WORLD_SIM / suite).exists(), f"{suite} must exist"
+    # The two import-exit modules must still be excluded, and that exclusion
+    # must be visible rather than a silent curation.
+    assert "--ignore=tests/test_canonical_gather_6g.py" in content
+    assert "--ignore=tests/test_gather_copy_6f.py" in content
