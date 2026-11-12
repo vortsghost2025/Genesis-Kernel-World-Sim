@@ -23,20 +23,51 @@ jobs:
           python -m pip install pytest openai==2.24.0
           python -m pip install pytest-asyncio playwright cryptography
           python -m playwright install chromium
-      - name: Run the pure test suite (whole tests/ except import-exit modules)
+      - name: Run the portable test subset
         run: |
-          # The two legacy suites below call sys.exit(1) during module import,
-          # which pytest treats as an INTERNALERROR and aborts collection for
-          # the whole run regardless of --continue-on-collection-errors. They
-          # are, and have always been, dead weight; excluding them is the only
-          # way to get a real verdict from the rest.
-          #   tests/test_canonical_gather_6g.py
-          #   tests/test_gather_copy_6f.py
+          # WHY A SUBSET: running all ~200 test files was the right diagnostic
+          # (it exposed 34 failures this subset had been hiding for months --
+          # see docs/phase_index.md 10QB) but the wrong standing gate. Roughly
+          # 30 suites are irreducibly tied to one Windows workstation: Windows
+          # process creationflags, a TELEGRAM token in the operator's user
+          # environment, gitignored live data (.runtime/, data/world/), the
+          # built viewer artifact, and absolute C:\ paths. On a Linux runner
+          # they fail or skip forever, and a permanently red CI is what you
+          # stop reading. Those suites run locally via
+          # scripts/run_full_suite.py; this gate runs what is portable.
           #
-          # This deliberately runs EVERY other test file. A curated subset
-          # (what this workflow used to do) hid 34 failures for months while
-          # per-phase commits reported green -- see docs/phase_index.md 10QB.
+          # Explicitly excluded, with reason:
+          #   test_canonical_gather_6f.py    sys.exit(1) at import aborts collection
+          #   test_gather_copy_6f.py         sys.exit(1) at import aborts collection
+          #   test_canonical_gather_6g.py    sys.exit(1) at import aborts collection
+          #   test_executor_gather_validation_6h.py  same import-exit family
+          #   test_observe_wiring_6c.py      same import-exit family
+          #   test_rest_wiring_6e.py         same import-exit family
+          #   test_canonical_heartbeat_runner.py     Windows creationflags
+          #   test_spawn_windowless.py                Windows creationflags
+          #   test_chain_watch.py                     operator user-env credentials
+          #   test_streaming_count.py                 gitignored .runtime/ store
+          #   test_lockstep_pair_filter.py            gitignored .runtime/ store
+          #   test_operator_desk.py                   gitignored live store data
+          #   test_steward_instance_lock.py           local lock-file semantics
+          #   test_viewer_fidelity.py                 hardcoded operator temp path
+          #   test_viewer_legibility.py               built viewer_data.js artifact
+          #   test_viewer_prototype_scale.py          built viewer_data.js artifact
           python -m pytest tests/ -q \
             --continue-on-collection-errors \
+            --ignore=tests/test_canonical_gather_6f.py \
+            --ignore=tests/test_gather_copy_6f.py \
             --ignore=tests/test_canonical_gather_6g.py \
-            --ignore=tests/test_gather_copy_6f.py -v
+            --ignore=tests/test_executor_gather_validation_6h.py \
+            --ignore=tests/test_observe_wiring_6c.py \
+            --ignore=tests/test_rest_wiring_6e.py \
+            --ignore=tests/test_canonical_heartbeat_runner.py \
+            --ignore=tests/test_spawn_windowless.py \
+            --ignore=tests/test_chain_watch.py \
+            --ignore=tests/test_streaming_count.py \
+            --ignore=tests/test_lockstep_pair_filter.py \
+            --ignore=tests/test_operator_desk.py \
+            --ignore=tests/test_steward_instance_lock.py \
+            --ignore=tests/test_viewer_fidelity.py \
+            --ignore=tests/test_viewer_legibility.py \
+            --ignore=tests/test_viewer_prototype_scale.py -v
