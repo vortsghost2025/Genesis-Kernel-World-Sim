@@ -350,7 +350,11 @@ def test_runtime_disclosure_projection(tmp_path):
     assert home["rung"] == 4
     assert home["object_type"] == "house"
     assert home["footprint"] == 3
-    assert home["cellar_budget"] == 60
+    # 10QC: the cellar budget follows the tier weight, so a lone house reads
+    # footprint 3 plus its rung-4 bonus of 7 = 10, i.e. 200 units rather than
+    # the 3 x 20 = 60 a footprint-only count gave.
+    assert home["tier_weight"] == 10
+    assert home["cellar_budget"] == 200
     # still under construction at 'roofed' (it shelters, but is not finished)
     here = rt._construction_here_for("east_adam", "cont_a_gen_0_0")
     assert here["stage"] == "roofed"

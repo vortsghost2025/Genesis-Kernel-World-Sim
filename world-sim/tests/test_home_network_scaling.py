@@ -82,20 +82,25 @@ def test_cellar_capacity_sees_connected_footprint(tmp_path):
         "s2": _obj("shelter", 2, 0),
         "s3": _obj("cabin", 3, 0),
     }
-    assert rt._cellar_food_capacity("c") == 100
+    # 10QC repriced this. The network is the same 1 + 1 + 2 + 1 (cellar)
+    # roofed units, but the tier weight is now what the budget reads:
+    # footprint 5 saturating at 12, plus the bonus for the network's best
+    # rung (cabin = 4), so 9 units and a 180-unit budget.
+    assert rt._home_tier_weight("cont_a_gen_0_0") == 9
+    assert rt._cellar_food_capacity("c") == 180
 
-    add_to_inventory(rt._store, "east_adam", "wild_berries", 100)
+    add_to_inventory(rt._store, "east_adam", "wild_berries", 200)
     rejected = rt._execute_use_object("east_adam", {
         "target_object_id": "c",
         "operation": "deposit",
-        "materials": {"wild_berries": 86},
+        "materials": {"wild_berries": 166},
     }, 1)
     assert rejected["status"] == "rejected"
-    assert "100" in rejected["reason"]
+    assert "180" in rejected["reason"]
     accepted = rt._execute_use_object("east_adam", {
         "target_object_id": "c",
         "operation": "deposit",
-        "materials": {"wild_berries": 85},
+        "materials": {"wild_berries": 165},
     }, 1)
     assert accepted["status"] == "success"
-    assert rt._world_state.public_objects["c"]["contents"]["wild_berries"] == 100
+    assert rt._world_state.public_objects["c"]["contents"]["wild_berries"] == 180

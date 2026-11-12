@@ -7088,6 +7088,31 @@ window.__GENESIS_PROTO__ = {
         coordinates: t && t.coordinates ? t.coordinates : null,
       });
     }
+    // Phase 10QC: the ladder itself, so a HUD can name the next rung instead
+    // of a bare footprint. Counts what this pair has actually raised, per
+    // rung, and names the rung above the best one -- the one that had never
+    // been built in either lane because the prompt never disclosed it.
+    const RUNG_TABLE = [
+      { name: "lean-to", rung: 1, weight: 1 },
+      { name: "hut", rung: 2, weight: 2 },
+      { name: "cabin", rung: 3, weight: 2 },
+      { name: "house", rung: 4, weight: 3 },
+      { name: "longhouse", rung: 5, weight: 4 },
+    ];
+    const rungCounts = {};
+    let bestRung = 0;
+    for (const entry of RUNG_TABLE) rungCounts[entry.name] = 0;
+    for (const obj of Object.values(pairData.public_objects || {})) {
+      if (!obj) continue;
+      const r = Number(obj.structure_rung);
+      if (!Number.isFinite(r) || r < 1) continue;
+      const type = String(obj.object_type || "").toLowerCase();
+      const entry = RUNG_TABLE.find(
+        (e) => e.rung === Math.floor(r) && (type === e.name || type.replace(/_/g, "-") === e.name));
+      if (entry) rungCounts[entry.name] += 1;
+      if (Math.floor(r) > bestRung) bestRung = Math.floor(r);
+    }
+    const nextRung = RUNG_TABLE.find((e) => e.rung > bestRung) || null;
     return {
       pair: pairName,
       continent: cid,
@@ -7095,6 +7120,11 @@ window.__GENESIS_PROTO__ = {
       agents: pos,
       projects,
       project_count: projects.length,
+      best_rung: bestRung,
+      rung_counts: rungCounts,
+      next_rung: nextRung ? nextRung.name : null,
+      next_rung_number: nextRung ? nextRung.rung : null,
+      ladder: RUNG_TABLE,
     };
   },
   setHeartbeat(hb, mode = "replay", immediateCam = true) {

@@ -381,7 +381,7 @@ _STRUCTURE_RUNGS = {
     },
     "hut": {
         "rung": 2, "weight": 2, "floor": {"timber": 2, "wood": 2},
-        "effects": "walls: predators refuse the tile",
+        "effects": "walls and a doorway; an attached room shares them",
     },
     "cabin": {
         "rung": 3, "weight": 2, "floor": {"timber": 3, "stone": 4},
@@ -535,14 +535,51 @@ def _structure_rung_of(object_type: str) -> dict | None:
 # Phase 10PJ: thermal physics scale with a roofed footprint network, not
 # with the raw number of shelter objects. One compact roofed line is one
 # larger home; scattered duplicates remain small.
+#
+# Phase 10QC: the table used to END at footprint 8, which meant West's
+# 46-structure settlement had already collected the final answer and no
+# further building could change anything. Four rows are appended; the five
+# 10PJ rows are untouched and pinned verbatim by tests/test_rung_payoff.py.
 _HOME_NETWORK_TIERS = (
     (1, 45.0, 0.45, 1.00, 0.40, 0.10),
     (2, 52.0, 0.30, 1.25, 0.55, 0.12),
     (3, 62.0, 0.18, 1.50, 0.70, 0.15),
     (5, 68.0, 0.14, 1.75, 0.90, 0.18),
     (8, 75.0, 0.10, 2.00, 1.10, 0.22),
+    (12, 80.0, 0.09, 2.20, 1.25, 0.24),
+    (18, 84.0, 0.08, 2.40, 1.40, 0.26),
+    (26, 88.0, 0.07, 2.60, 1.55, 0.28),
+    (36, 92.0, 0.06, 2.80, 1.70, 0.30),
 )
 _CELLAR_FOOD_BUDGET_PER_FOOTPRINT = 20
+
+# Phase 10QC: roofed tiles past this many stop adding warmth. The operator
+# has been rejecting the "15 single houses beside each other" settlement
+# shape since 10PH; until now an extra shack always paid +1 footprint
+# forever, so the rational build stayed a shack. A rung upgrade still pays.
+_FOOTPRINT_SATURATION = 12
+
+# Phase 10QC: the tier bonus for the network's HIGHEST rung. 10PU section 5
+# promised `max(footprint_units, rung_weight)` and 10PW shipped `rung_weight`
+# written into the envelope and read by nothing, so a house and the three
+# lean-tos it replaces were worth exactly the same roofed units. These make
+# one proper home outrank the shacks it displaces:
+#   lean-to 1 + 0 = 1    hut 1 + 2 = 3     cabin 2 + 4 = 6
+#   house   3 + 7 = 10   longhouse 4 + 11 = 15
+# One house (tier weight 10, comfort floor 75) clears seven lean-tos
+# (7 units, floor 68), which is the whole point of the change.
+_RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11}
+
+
+def _home_tier_weight(footprint: int, best_rung: int) -> int:
+    """Map roofed footprint and the network's best rung to a tier weight.
+
+    What a home IS dominates over how many tiles it covers, and the tile
+    count saturates. Both halves are deliberate; see _RUNG_TIER_BONUS.
+    """
+    footprint = max(0, int(footprint or 0))
+    best_rung = max(1, min(5, int(best_rung or 1)))
+    return min(footprint, _FOOTPRINT_SATURATION) + _RUNG_TIER_BONUS[best_rung]
 
 
 def _home_network_tier(footprint: int) -> tuple[float, float, float, float, float]:
@@ -1515,8 +1552,8 @@ class FirstPairRuntime:
         """
         if not position:
             return {}
-        footprint, _ids = self._connected_home_network(position)
-        tier = _home_network_tier(footprint)
+        footprint, best_rung, _ids = self._home_network_detail(position)
+        tier = _home_network_tier(_home_tier_weight(footprint, best_rung))
         here = None
         pos_xy = self._tile_xy(position)
         for record in (self._world_state.public_objects or {}).values():
@@ -1544,11 +1581,13 @@ class FirstPairRuntime:
             "rung": rung,
             "weight": weight,
             "footprint": footprint,
+            "tier_weight": _home_tier_weight(footprint, best_rung),
+            "best_rung": best_rung,
             "comfort_floor": tier[0],
             "cold_decay": tier[1],
             "rest_regen": tier[2],
             "downed_regen": tier[3],
-            "cellar_budget": _CELLAR_FOOD_BUDGET_PER_FOOTPRINT * max(1, footprint),
+            "cellar_budget": self._cellar_food_capacity(str(here.get("object_id", ""))),
         }
 
     def _construction_here_for(self, agent_ref: str, position: str | None) -> dict:
@@ -2454,19 +2493,20 @@ class FirstPairRuntime:
                 return True
         return False
 
-    def _connected_home_network(self, tile_id: str) -> tuple[int, set[str]]:
-        """One connected roofed footprint and its object IDs.
+    def _home_network_detail(self, tile_id: str) -> tuple[int, int, set[str]]:
+        """Roofed footprint, the network's best rung, and its object IDs.
 
-        Adjacent structures form one home network; duplicates sharing a
-        tile do not add footprint. Returns footprint units (weighted)
-        and IDs of roofed objects in the network reached from the target
-        tile, if any.
+        One walk serves every consumer, so footprint and rung can never
+        disagree about which structures are connected. Adjacent structures
+        form one home network; duplicates sharing a tile do not add
+        footprint.
         """
         pos = self._tile_xy(str(tile_id or ""))
         if pos is None:
-            return 0, set()
+            return 0, 0, set()
         continent = self._tile_continent(str(tile_id or ""))
         nodes: dict[tuple[int, int], tuple[int, list[str]]] = {}
+        rungs: dict[tuple[int, int], int] = {}
         for oid, record in list(((self._world_state.public_objects or {}).items())):
             if not isinstance(record, dict):
                 continue
@@ -2482,8 +2522,10 @@ class FirstPairRuntime:
             current_weight, ids = nodes.get(xy, (0, []))
             ids.append(oid)
             nodes[xy] = (max(current_weight, weight), ids)
+            rungs[xy] = max(rungs.get(xy, 0), self._record_rung(record))
+
         if not nodes:
-            return 0, set()
+            return 0, 0, set()
 
         px, py = pos
         seeds = [
@@ -2491,7 +2533,7 @@ class FirstPairRuntime:
             if max(abs(xy[0] - px), abs(xy[1] - py)) <= 1
         ]
         if not seeds:
-            return 0, set()
+            return 0, 0, set()
 
         visited: set[tuple[int, int]] = set()
         stack = list(seeds)
@@ -2505,15 +2547,56 @@ class FirstPairRuntime:
                     stack.append(other)
 
         footprint = sum(nodes[xy][0] for xy in visited)
-        object_ids = set()
+        best_rung = max((rungs.get(xy, 0) for xy in visited), default=0)
+        object_ids: set[str] = set()
         for xy in visited:
             _w, ids = nodes[xy]
             object_ids.update(ids)
+        return footprint, best_rung, object_ids
+
+    def _is_hearth_dwelling(self, record: dict) -> bool:
+        """True when a structure's own hearth can be cooked on.
+
+        Phase 10QC rung 4: a finished house or longhouse carries a built-in
+        hearth, so it cooks indoors in any weather. A cabin does not, and
+        neither does a foundation, a frame, or bare walls -- a half-built
+        house has no hearth yet, only a hole where one will go.
+        """
+        if not isinstance(record, dict):
+            return False
+        if record.get("construction_project") is True and str(
+            record.get("construction_stage", "")
+        ) not in _SHELTERING_STAGES:
+            return False
+        return self._record_rung(record) >= 4
+
+    @staticmethod
+    def _record_rung(record: dict) -> int:
+        """The rung a persisted object belongs to; 0 when it is not a runged
+        dwelling. Reads the stored field first so a legacy object keeps the
+        rung it was built with, and falls back to the vocabulary."""
+        if not isinstance(record, dict):
+            return 0
+        rung = record.get("structure_rung")
+        if isinstance(rung, int) and not isinstance(rung, bool) and rung >= 1:
+            return rung
+        found = _structure_rung_of(str(record.get("object_type", "")))
+        return int(found["rung"]) if found else 0
+
+    def _connected_home_network(self, tile_id: str) -> tuple[int, set[str]]:
+        footprint, _rung, object_ids = self._home_network_detail(str(tile_id or ""))
         return footprint, object_ids
 
     def _home_network_footprint(self, tile_id: str) -> int:
         footprint, _ = self._connected_home_network(str(tile_id or ""))
         return footprint
+
+    def _home_tier_weight(self, tile_id: str) -> int:
+        """What the comfort physics actually reads: saturated footprint plus
+        the network's rung bonus. This is the number 10QC finally made real.
+        """
+        footprint, best_rung, _ids = self._home_network_detail(str(tile_id or ""))
+        return _home_tier_weight(footprint, best_rung)
 
     def _shelter_params_for(self, tile_id: str) -> dict:
         footprint = self._home_network_footprint(tile_id)
@@ -2525,10 +2608,20 @@ class FirstPairRuntime:
             rooms = comp.get("rooms") or {}
             if any(isinstance(r, dict) and r.get("tile_id") == tile_id and r.get("roofed") for r in rooms.values()):
                 explicit = max(explicit, int(comp.get("thermal_mass", 0) or 0))
+        # Phase 10QC: the tier weight, not the raw tile count. A 46-tile
+        # settlement of cabins used to read as "past the end of the table";
+        # what the home IS now counts as much as what it spans.
+        #
+        # The explicit `addon_to` compound record is still honoured as a
+        # floor for BOTH numbers (10PJ's backward-compatible fallback): a
+        # compound whose thermal_mass says 2 must not read worse because the
+        # derived walk found nothing.
         footprint = max(footprint, explicit)
-        floor, decay, regen, downed_regen, approach = _home_network_tier(footprint)
+        tier_weight = max(self._home_tier_weight(tile_id), explicit)
+        floor, decay, regen, downed_regen, approach = _home_network_tier(tier_weight)
         return {
             "footprint": footprint,
+            "tier_weight": tier_weight,
             "comfort_floor": floor,
             "shelter_decay_factor": decay,
             "regen_rate": regen,
@@ -2539,8 +2632,27 @@ class FirstPairRuntime:
     def _cellar_food_capacity(self, obj_id: str) -> int:
         record = (self._world_state.public_objects or {}).get(obj_id) or {}
         tile_id = record.get("tile_id", "")
-        footprint, _ = self._connected_home_network(str(tile_id))
-        return _CELLAR_FOOD_BUDGET_PER_FOOTPRINT * max(1, footprint)
+        tier_weight = self._home_tier_weight(str(tile_id))
+        # Phase 10QC: rung 5's promised effect finally exists. A longhouse is
+        # the campaign build 10PU called it, and its connected cellars hold
+        # double.
+        longhouse_here = any(
+            self._record_rung(rec) >= 5 for rec in self._network_dwellings(str(tile_id))
+        )
+        capacity = _CELLAR_FOOD_BUDGET_PER_FOOTPRINT * max(1, tier_weight)
+        if longhouse_here:
+            capacity *= 2
+        return capacity
+
+    def _network_dwellings(self, tile_id: str) -> list[dict]:
+        """Roofed records in the connected home network reached from a tile."""
+        _footprint, _rung, ids = self._home_network_detail(str(tile_id or ""))
+        out = []
+        for oid in ids:
+            rec = (self._world_state.public_objects or {}).get(oid)
+            if isinstance(rec, dict):
+                out.append(rec)
+        return out
 
     def _in_shelter(self, tile_id: str) -> bool:
         """Shelter here or adjacent: the cold drains less than half as fast."""
@@ -4352,17 +4464,23 @@ class FirstPairRuntime:
             return {"status": "rejected",
                     "reason": f"Crafting requires a crafting surface, not a {obj.get('object_type')}"}
         if operation == "cook":
-            valid_cooking_types = ("fire", "campfire", "hearth", "cooker", "oven")
-            if not any(term in obj_type for term in valid_cooking_types):
-                return {"status": "rejected",
-                        "reason": f"Cooking requires a fire, campfire, or hearth, not a {obj.get('object_type')}"}
-            if not self._is_functional_fire(obj):
-                return {"status": "rejected",
-                        "reason": f"The {obj.get('object_type')} at {obj_id} has no fuel materials and is unlit"}
-            weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
-            if weather in ("rain", "storm", "blizzard") and not self._in_shelter(obj.get("tile_id", "")):
-                return {"status": "rejected",
-                        "reason": f"The fire at {obj_id} is snuffed by the {weather} (build a shelter or roof to protect it)"}
+            # Phase 10QC: rung 4's promised effect finally exists. A proper
+            # home has a hearth built in, so a SHELTERING house or longhouse
+            # cooks without a separate fire object -- the first thing in the
+            # world a rung-4 structure does that a cabin cannot. A rung-3
+            # cabin, and any half-built project, still needs its own fire.
+            if not self._is_hearth_dwelling(obj):
+                valid_cooking_types = ("fire", "campfire", "hearth", "cooker", "oven")
+                if not any(term in obj_type for term in valid_cooking_types):
+                    return {"status": "rejected",
+                            "reason": f"Cooking requires a fire, campfire, or hearth, not a {obj.get('object_type')}"}
+                if not self._is_functional_fire(obj):
+                    return {"status": "rejected",
+                            "reason": f"The {obj.get('object_type')} at {obj_id} has no fuel materials and is unlit"}
+                weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
+                if weather in ("rain", "storm", "blizzard") and not self._in_shelter(obj.get("tile_id", "")):
+                    return {"status": "rejected",
+                            "reason": f"The fire at {obj_id} is snuffed by the {weather} (build a shelter or roof to protect it)"}
 
         # Initialize contents if the object predates the field
         if "contents" not in obj or not isinstance(obj.get("contents"), dict):

@@ -1284,6 +1284,47 @@ def _home_network_description() -> str:
     )
 
 
+def _structure_ladder_description() -> str:
+    """Disclose the five-rung structure ladder as buildable facts.
+
+    Phase 10QC. The rung table was enforced by the runtime and advertised to
+    the agents in exactly one string -- the rejection message for an unknown
+    type -- so `house` and `longhouse` were things an agent could only learn
+    by being told "no". Across 12,700 heartbeats in two lanes neither agent
+    ever named either one, and both lanes' dwellings stop at lean-t, shelter
+    and cabin.
+
+    This renders the table itself, exactly as `_craft_recipe_advertisement`
+    renders the craft recipes, so the prompt can never drift from the code
+    that enforces it: what each rung is called, what it costs, what it does,
+    and how many roofed units it counts for. It states what the world IS and
+    never what an agent should build.
+    """
+    from backend.world.first_pair_runtime import (
+        _FOOTPRINT_SATURATION,
+        _STRUCTURE_RUNGS,
+    )
+
+    entries = []
+    for name in ("lean-to", "hut", "cabin", "house", "longhouse"):
+        record = _STRUCTURE_RUNGS[name]
+        floor = ", ".join(f"{kind} x{amount}"
+                          for kind, amount in sorted(record["floor"].items()))
+        entries.append(
+            f"`{name}` (rung {record['rung']}, {floor}; "
+            f"{record['effects']}; counts {record['weight']} roofed units)"
+        )
+    return (
+        "- Structure ladder, each rung a buildable roofed type: "
+        + " | ".join(entries)
+        + ". A roofed structure only shelters from the roofed stage, and a "
+        "connected home's comfort comes from its tier weight, which is the "
+        f"roofed footprint (saturating at {_FOOTPRINT_SATURATION}) plus the "
+        "bonus for the best rung in it, so one proper home outranks the "
+        "smaller shelters it replaces."
+    )
+
+
 def _craft_recipe_advertisement() -> str:
     """Disclose the crafting recipes as facts, not instructions.
 
@@ -1472,6 +1513,7 @@ def build_system_prompt(context: AgentContext) -> str:
     _CRAFT_RECIPE_DESC = _craft_recipe_advertisement()
     _STRUCTURAL_TIMBER_DESC = _structural_timber_requirement_desc()
     _HOME_NETWORK_DESC = _home_network_description()
+    _STRUCTURE_LADDER_DESC = _structure_ladder_description()
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
         json.dumps(context.unanswered_questions, indent=2)
@@ -1935,16 +1977,31 @@ def build_system_prompt(context: AgentContext) -> str:
 
     footprint = int(getattr(context, "home_network_footprint", 0) or 0)
     if footprint > 0:
-        from backend.world.first_pair_runtime import _home_network_tier
-        floor, decay, regen, downed, approach = _home_network_tier(footprint)
-        settlement_lines.append(
-            f"Fact: connected roofed home footprint is {footprint}; "
-            f"comfort floor is {floor:g}; cold decay factor is {decay:g}; "
-            f"rest recovery is {regen:g} per heartbeat; downed recovery is "
-            f"{downed:g} per heartbeat; warmth approach is {approach:g}; "
-            f"storage-cellar food budget is {footprint * 20} units."
+        # Phase 10QC: the tier weight is the number the physics reads, so it
+        # is the number disclosed. A 46-tile settlement of cabins and a
+        # single longhouse were both reading "past the end of the table"
+        # before this; now the ladder continues and both numbers are facts.
+        from backend.world.first_pair_runtime import (
+            _FOOTPRINT_SATURATION,
+            _home_tier_weight,
+            _home_network_tier,
         )
-
+        best_rung = 0
+        home = getattr(context, "home_rung", {}) or {}
+        if isinstance(home, dict):
+            best_rung = int(home.get("best_rung", 0) or 0)
+        tier_weight = _home_tier_weight(footprint, best_rung)
+        floor, decay, regen, downed, approach = _home_network_tier(tier_weight)
+        settlement_lines.append(
+            f"Fact: connected roofed home footprint is {footprint} "
+            f"(saturates at {_FOOTPRINT_SATURATION}); best structure rung in "
+            f"the network is {best_rung if best_rung else 'none'}; tier weight "
+            f"is {tier_weight}; comfort floor is {floor:g}; cold decay factor "
+            f"is {decay:g}; rest recovery is {regen:g} per heartbeat; downed "
+            f"recovery is {downed:g} per heartbeat; warmth approach is "
+            f"{approach:g}; storage-cellar food budget is "
+            f"{20 * max(1, tier_weight)} units."
+        )
     tool_condition = getattr(context, "tool_condition", {}) or {}
     if isinstance(tool_condition, dict) and tool_condition:
         parts = []
@@ -2160,6 +2217,7 @@ Answers you have received:
 {answered_str}
 {_AVAILABLE_ACTIONS_DESC}
 {_CRAFT_RECIPE_DESC}
+{_STRUCTURE_LADDER_DESC}
 {_HOME_NETWORK_DESC}
 {_STRUCTURAL_TIMBER_DESC}
 {_MESSAGE_FIELD_DESC}
