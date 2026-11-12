@@ -29,11 +29,20 @@ def test_inline_script_parses():
     """Node's parser must accept the viewer script: a syntax error here is a
     dead page, which is the worst possible failure for an operator watching."""
     js = _script()
-    out = Path(r"S:\KILO-CLEAN-SOURCE\profile\local\Temp\opencode\proto_check.js")
-    out.write_text(js, encoding="utf-8")
-    res = subprocess.run(["node", "--check", str(out)],
-                         capture_output=True, text=True)
-    assert res.returncode == 0, "inline script syntax error:\n" + res.stderr[:1500]
+    # tmp_path is platform-native; a hardcoded 'S:\...' path would be handed
+    # to node as a literal string with backslashes, which it URL-encodes and
+    # then rejects as an unresolvable module specifier on POSIX runners.
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                     encoding="utf-8") as fh:
+        fh.write(js)
+        out = Path(fh.name)
+    try:
+        res = subprocess.run(["node", "--check", str(out)],
+                             capture_output=True, text=True)
+        assert res.returncode == 0, "inline script syntax error:\n" + res.stderr[:1500]
+    finally:
+        out.unlink(missing_ok=True)
 
 
 def test_crash_safety_caps_are_present():
