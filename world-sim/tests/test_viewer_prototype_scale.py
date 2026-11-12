@@ -47,6 +47,15 @@ DATA_MAP = WORLD_SIM / "data" / "world" / "true_map.json"
 VIEWER_DIR = WORLD_SIM / "viewer"
 RUNTIME_ROOT = WORLD_SIM / ".runtime"
 
+# Environment gates defined in tests/conftest.py: `data/world/true_map.json`
+# is gitignored live world data, so the suites that need it skip with a
+# reason instead of failing on a fresh checkout.
+needs_true_map = pytest.mark.skipif(
+    not DATA_MAP.exists(),
+    reason="data/world/true_map.json is gitignored; generate it with "
+           "scripts/generate_world_scale.py to run the world-map suites",
+)
+
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
@@ -90,6 +99,7 @@ def browser_prototype_page():
     httpd.server_close()
 
 
+@needs_true_map
 def test_dual_continent_atlas_scale_80k_tiles():
     """Prove the true simulation map consists of two 40,000-tile continents."""
     with open(DATA_MAP, "r", encoding="utf-8") as f:
@@ -105,6 +115,7 @@ def test_dual_continent_atlas_scale_80k_tiles():
     assert len(tiles_b) == 40000, f"Beta continent must have 40,000 tiles, got {len(tiles_b)}"
 
 
+@needs_true_map
 def test_cross_continent_coordinate_collision_prevention():
     """Prove that cont_a and cont_b tiles sharing (x, y) do not collide when
     scoped by continent_id."""
@@ -211,6 +222,7 @@ def test_position_truth_schema_and_backward_lookup():
     assert latest_west_adam != "west-start-adam"
 
 
+@needs_true_map
 def test_zero_fictional_caves_and_canonical_cave_integrity():
     """Prove that caves are strictly placed on canonical landmark tiles,
     with 0 procedurally invented caves on arbitrary mountains."""
