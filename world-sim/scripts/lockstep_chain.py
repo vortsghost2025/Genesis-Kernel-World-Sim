@@ -448,7 +448,7 @@ def probe_route_health() -> dict:
     import os
     import urllib.request
     from backend.world.canonical_heartbeat_runner import (
-        PRIMARY_MODEL, FALLBACK_MODEL,
+        FALLBACK_MODEL, resolve_primary_lane,
     )
 
     env = {}
@@ -460,18 +460,30 @@ def probe_route_health() -> dict:
                 continue
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip()
-    key = env.get("OPENROUTER_API_KEY", "")
-    if not key:
-        return route_health_verdict(False, False, "no OPENROUTER_API_KEY in vault")
+    # Phase 10QE: probe the lane the agents ACTUALLY run on, which the vault
+    # chooses. Probing a module constant here reported the health of a lane
+    # that was no longer serving.
+    primary_base, primary_model, primary_kind = resolve_primary_lane(env)
+    fallback_model = env.get("GENESIS_FIRST_PAIR_FALLBACK_MODEL", "") or FALLBACK_MODEL
+    fallback_base = "https://openrouter.ai/api/v1"
+    fallback_kind = "openrouter"
 
-    def _probe(model):
+    def _key_for(kind):
+        if kind == "nvidia":
+            return env.get("NVIDIA_NIM_API_KEY", "") or env.get("NVIDIA_API_KEY", "")
+        return env.get("OPENROUTER_API_KEY", "")
+
+    def _probe(base, model, kind):
+        key = _key_for(kind)
+        if not key:
+            return False, f"no {kind} credential in vault"
         payload = _json.dumps({
             "model": model,
             "messages": [{"role": "user", "content": "ok"}],
             "max_tokens": 4, "temperature": 0,
         }).encode("utf-8")
         req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions",
+            f"{base}/chat/completions",
             data=payload,
             headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"})
@@ -481,11 +493,13 @@ def probe_route_health() -> dict:
         except Exception as e:
             return False, f"{type(e).__name__}: {str(e)[:100]}"
 
-    p_ok, p_err = _probe(PRIMARY_MODEL)
-    f_ok, f_err = _probe(FALLBACK_MODEL)
+    p_ok, p_err = _probe(primary_base, primary_model, primary_kind)
+    f_ok, f_err = _probe(fallback_base, fallback_model, fallback_kind)
     v = route_health_verdict(p_ok, f_ok, f_err or p_err)
-    v["primary"] = {"model": PRIMARY_MODEL, "ok": p_ok, "error": p_err[:120]}
-    v["fallback"] = {"model": FALLBACK_MODEL, "ok": f_ok, "error": f_err[:120]}
+    v["primary"] = {"model": primary_model, "base_url": primary_base,
+                    "lane": primary_kind, "ok": p_ok, "error": p_err[:120]}
+    v["fallback"] = {"model": fallback_model, "base_url": fallback_base,
+                     "lane": fallback_kind, "ok": f_ok, "error": f_err[:120]}
     return v
 
 

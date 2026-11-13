@@ -246,6 +246,11 @@ def build_clean_env(vault_path: Path) -> dict:
     env["GENESIS_FIRST_PAIR_BASE_URL"] = primary_base
     env["GENESIS_FIRST_PAIR_API_KEY"] = primary_key
     env["GENESIS_FIRST_PAIR_MODEL"] = primary_model
+    # A POINTER to the source of truth, so resolution_proof can recompute the
+    # expected lane from the vault rather than from the environment it is
+    # checking. Set unconditionally so an ambient value cannot point the
+    # proof at a different expectation.
+    env["GENESIS_FIRST_PAIR_VAULT_PATH"] = str(Path(vault_path).resolve())
     env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] = FALLBACK_MODEL
     env["GENESIS_FIRST_PAIR_MODEL_EAST_ADAM"] = primary_model
     env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = primary_model
@@ -264,7 +269,16 @@ def build_clean_env(vault_path: Path) -> dict:
 def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     """Run the repo provider resolver in a clean child process and require
     a valid primary lane plus a valid fallback. The proof performs no
-    network calls and never prints credential values."""
+    network calls and never prints credential values.
+
+    Phase 10QE: the expected primary lane is RECOMPUTED from the vault the
+    lane was configured from, never read out of `env`. A proof must not take
+    the thing it is checking as its own reference: if the expectation came
+    from `env`, a hijacked environment would be indistinguishable from a
+    correct one. The vault path travels in the env as a POINTER to the
+    source of truth, and the expectation is derived from that file. With no
+    pointer the module constants are the reference, equally unhijackable.
+    """
     code = (
         "import sys; sys.path.insert(0, '.'); "
         "from backend.world.provider_resolver import ("
@@ -310,25 +324,29 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     # have honored the configured primary model and endpoint, not merely
     # returned *some* primary.
     #
-    # Phase 10QE: the expected values are read from the ENVIRONMENT this
-    # proof was handed, not from module constants, because the lane is now
-    # chosen by the vault (10QE). Comparing against a constant would have
-    # rejected a legitimate NVIDIA lane as a "hijack"; comparing against the
-    # env proves the resolver honoured the policy it was actually given,
-    # which is the property that matters.
+    # Phase 10QE: the expected values come from the VAULT the lane was
+    # configured from (or, with no vault, from the module constants) --
+    # never from `env` itself. Reading the expectation out of the same
+    # dictionary the proof is checking would make a hijacked environment
+    # indistinguishable from a correct one, and the two hijack-guard tests
+    # exist precisely to catch that.
+    vault_ref = (env.get("GENESIS_FIRST_PAIR_VAULT_PATH") or "").strip()
+    if vault_ref and Path(vault_ref).is_file():
+        expected_base, expected_model, _kind = resolve_primary_lane(
+            load_vault(Path(vault_ref)))
+    else:
+        expected_base, expected_model = PRIMARY_BASE_URL, PRIMARY_MODEL
     resolved_model = fields.get("RESOLUTION_MODEL", "")
-    expected_model = (env.get("GENESIS_FIRST_PAIR_MODEL") or "").strip()
     if resolved_model != expected_model:
         return False, (
             text + f" (rejected: primary model {resolved_model!r} is not the "
             f"configured {expected_model!r})"
         )
     resolved_url = fields.get("RESOLUTION_BASE_URL", "")
-    expected_url = (env.get("GENESIS_FIRST_PAIR_BASE_URL") or "").strip()
-    if resolved_url != expected_url:
+    if resolved_url != expected_base:
         return False, (
             text + f" (rejected: base url {resolved_url!r} is not the "
-            f"configured {expected_url!r})"
+            f"configured {expected_base!r})"
         )
     return True, text
 

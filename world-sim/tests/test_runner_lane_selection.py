@@ -132,3 +132,23 @@ def test_ambient_environment_cannot_hijack_the_lane(tmp_path, monkeypatch):
         tmp_path, "NVIDIA_PRIMARY_MODEL=nvidia/nemotron-3-ultra-550b-a55b\n"))
     assert env["GENESIS_FIRST_PAIR_MODEL"] == "nvidia/nemotron-3-ultra-550b-a55b"
     assert env["GENESIS_FIRST_PAIR_BASE_URL"] == NVIDIA_BASE_URL
+
+
+def test_the_env_carries_a_pointer_to_the_vault_it_came_from(tmp_path):
+    """resolution_proof must be able to recompute the expected lane from the
+    vault rather than from the environment it is checking - otherwise a
+    hijacked environment would be accepted as 'the configured lane'."""
+    vault = _vault(tmp_path, "NVIDIA_PRIMARY_MODEL=nvidia/nemotron-3-ultra-550b-a55b\n")
+    env = build_clean_env(vault)
+    assert env["GENESIS_FIRST_PAIR_VAULT_PATH"] == str(vault.resolve())
+    assert Path(env["GENESIS_FIRST_PAIR_VAULT_PATH"]).is_file()
+
+
+def test_the_vault_pointer_cannot_be_hijacked_by_the_environment(tmp_path,
+                                                                monkeypatch):
+    """An ambient pointer is overwritten, so the proof always recomputes from
+    the vault the runner was actually given."""
+    monkeypatch.setenv("GENESIS_FIRST_PAIR_VAULT_PATH", r"C:\attacker\.env")
+    vault = _vault(tmp_path, "NVIDIA_PRIMARY_MODEL=nvidia/nemotron-3-ultra-550b-a55b\n")
+    env = build_clean_env(vault)
+    assert env["GENESIS_FIRST_PAIR_VAULT_PATH"] == str(vault.resolve())
