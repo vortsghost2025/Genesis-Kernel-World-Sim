@@ -1752,13 +1752,30 @@ def build_system_prompt(context: AgentContext) -> str:
                 "you while you are down. Vitality recovers slowly on its "
                 "own, and faster when fed.")
         else:
+            # Phase 10PM/10QH: the body's one-word state, as prose. The runtime
+            # computes it with survival.vitals_state_label and caches it on
+            # self_body.state; the prompt used to leave it in the observation
+            # JSON and never render it, so the only genuinely alarming words
+            # the world had ("collapsed", "failing", "dehydrated",
+            # "starving", "freezing") reached an agent as a key rather than a
+            # sentence. Derived here if the field is absent, so an older
+            # observation still reads correctly.
+            _state = _sb.get("state")
+            if not isinstance(_state, str) or not _state.strip():
+                _state = survival.vitals_state_label(_sb)
+            if _state and _state != "well":
+                _lines.append(f"Fact: your body is {_state}.")
             thirst_val = _sb.get("thirst", 18) or 0
             if thirst_val >= 40:
                 _lines.append(
                     f"Your thirst is {round(thirst_val)}/100."
+                    # The lead time hunger has always had: the world states
+                    # the danger BEFORE it starts, not on the heartbeat it
+                    # begins. This sentence was gated on thirst >= 88, i.e.
+                    # the exact tick DEHYDRATION_DRAIN applies, so an agent
+                    # learned it was in danger at the same instant it was.
                     + (" Your vitality drains while thirst stays at 88 or "
-                       "higher, and at 0 vitality you collapse."
-                       if thirst_val >= 88 else "")
+                       "higher, and at 0 vitality you collapse.")
                 )
                 inventory = context.inventory if isinstance(context.inventory, dict) else {}
                 carried_water = int(inventory.get("fresh_water", 0) or 0)
