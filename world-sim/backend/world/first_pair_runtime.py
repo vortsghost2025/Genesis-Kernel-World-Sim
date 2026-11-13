@@ -1068,6 +1068,18 @@ class FirstPairRuntime:
         observed_resources stayed [] forever. Mirrors
         merge_observation_into_known_map's entry shape. Fail-closed:
         returns the input map unchanged on any error.
+
+        Phase 10QH root-cause fix: DRINKABLE WATER TOO. The observation has
+        carried each visible tile's `water` since a previous phase fixed the
+        adapter ("the fact was present in the true map and dropped here"),
+        but this merge only ever read `resources` - so the water was dropped
+        a SECOND time, one step later, and no agent could ever REMEMBER a
+        river. Measured 2026-11-13: the world holds 2,163 tiles whose
+        `water.drinkable` is true, exactly ONE of them lists `fresh_water` as
+        a resource, and `cont_a_origin_000` was therefore the only water in
+        any agent's known map. east_eve knew 1,592 tiles and zero rivers,
+        asked where water was, drank where she stood, and collapsed; all four
+        agents sat at thirst 100 on dry ground.
         """
         try:
             known = known_map or {}
@@ -1096,6 +1108,16 @@ class FirstPairRuntime:
                     }
                     tiles[tid] = entry
                     changed = True
+                # A tile the agent can see and drink from is a tile it can
+                # remember and return to. Recorded as the same
+                # `fresh_water` kind the gather vocabulary and the rollup
+                # already use, so nothing downstream needs to learn a new
+                # word.
+                seen_resources = list(detail.get("resources") or [])
+                water = detail.get("water")
+                if isinstance(water, dict) and water.get("drinkable") is True:
+                    seen_resources.append("fresh_water")
+                detail = dict(detail, resources=seen_resources)
                 for key, obs_key in (("resources", "observed_resources"), ("hazards", "observed_hazards")):
                     incoming = [str(v) for v in (detail.get(key) or []) if isinstance(v, str) and v.strip()]
                     current = entry.get(obs_key) or []
