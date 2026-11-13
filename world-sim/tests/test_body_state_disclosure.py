@@ -130,9 +130,12 @@ def test_state_label_agrees_with_the_survival_function():
 
 def test_collapsed_body_still_leads_with_the_collapse_facts():
     """The downed branch is the rescue briefing and must come first; the
-    state word must not shadow it or contradict it."""
+    state word must not shadow it or contradict it. Since 10QI it also names
+    the crawl, because a body that cannot move at all is a body that cannot
+    reach the water five tiles away."""
     prompt = _prompt(downed=True, vitality=0.0, thirst=100.0)
-    assert "Your body has collapsed (vitality 0)." in prompt
+    assert "Your body has collapsed." in prompt
+    assert "crawl" in prompt.lower()
     assert "Eat" in prompt or "eat" in prompt
     assert "the drink action also works while you are collapsed" in prompt.lower()
 

@@ -1745,8 +1745,9 @@ def build_system_prompt(context: AgentContext) -> str:
     if _sb:
         if _sb.get("downed"):
             _lines.append(
-                "Your body has collapsed (vitality 0). You cannot move, "
-                "gather, or build until vitality recovers above 12.")
+                "Your body has collapsed. You can still crawl to an adjacent "
+                "tile, one tile per heartbeat, but you cannot gather or build "
+                "until vitality recovers above 12.")
             _lines.append(
                 "Facts: the eat action consumes one unit of a named food "
                 "from your belongings and works while you are collapsed. "

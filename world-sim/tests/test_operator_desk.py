@@ -76,11 +76,18 @@ class TestAnswerBank:
         assert "adam is at cont_b_gen_33_51" in a.lower()
         assert "wild_berries ×42" in a
 
-    def test_provide_question_refuses_and_states_where_food_is(self):
+    def test_provide_question_escalates_instead_of_refusing(self):
+        """Phase 10QJ. This used to assert the desk refused a provisioning
+        request with "the operator does not hand out anything". That was a
+        policy impersonating a fact, recited to agents collapsed and begging:
+        measured 2026-11-13, 100+ requests for water, food and emergency
+        provision across both lanes, three of four agents at thirst 100. The
+        operator CAN hand out now (scripts/operator_provide.py leaves a
+        provision in a cache on the agent's tile), so a request for help comes
+        back as None - escalate to the operator, who acts."""
         a = desk.draft_answer("Can you provide wild_berries for food?",
                               _facts())
-        assert "does not hand out anything" in a.lower()
-        assert "wild_berries ×42" in a  # where the food actually is
+        assert a is None
 
     def test_bug_question_names_current_terms(self):
         a = desk.draft_answer("Is the deposit cycle bug known?", _facts())

@@ -237,14 +237,19 @@ def draft_answer(question: str, f: dict) -> str | None:
         if located:
             return located
 
-    if re.search(r"provide|give me|give us|feed me|send me|bring me", text):
-        return assert_no_advice(
-            "The operator does not hand out anything. Facts: you carry "
-            f"{f['food_on_hand']}; objects on your tile hold "
-            f"{', '.join(f['tile_food']) if f['tile_food'] else 'nothing edible'}; "
-            f"{f['other_name']} is at {f['other_position']} holding "
-            f"{f['other_food']}. Food deposited into an object on your "
-            f"tile feeds you even while downed.")
+    if re.search(r"provide|give me|give us|feed me|send me|bring me|"
+                 r"deliver|emergency provision|hand out", text):
+        # Phase 10QJ. This branch used to answer every request for material
+        # help with a flat "The operator does not hand out anything." That was
+        # a policy impersonating a fact, and it was recited to agents who were
+        # collapsed and begging: measured 2026-11-13, 100+ requests for water,
+        # food, clay and emergency provision across both lanes, three of four
+        # agents at thirst 100. The operator CAN hand out now
+        # (scripts/operator_provide.py leaves a provision in a cache on the
+        # agent's tile, where the world's own downed-drink and downed-feed
+        # paths read it). So a provisioning request is ESCALATED - it stays
+        # unheard and surfaces to the operator - instead of being refused.
+        return None
 
     if re.search(r"purpose|impasse|task|goal|should i do|what next|"
                  r"what to do|intended outcome", text):

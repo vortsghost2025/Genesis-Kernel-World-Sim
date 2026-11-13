@@ -819,6 +819,13 @@ class FirstPairRuntime:
 
         fauna_interactions.recover_fauna_interactions(self._store, self._world_state)
 
+        # Phase 10QJ: apply anything the operator left for them. Inside the
+        # heartbeat's own read-modify-write cycle, so it cannot be clobbered.
+        try:
+            self._apply_operator_provision_queue()
+        except Exception:
+            pass
+
         is_fresh = (
             world_state.tick == 0
             and not self._adam_memory
@@ -826,6 +833,90 @@ class FirstPairRuntime:
             and not self._goals
         )
         return is_fresh
+
+    def _apply_operator_provision_queue(self) -> int:
+        """Turn queued operator provisions into objects on the right tiles.
+
+        Phase 10QJ. Writing the live world_state straight from the operator
+        side is a RACE: a heartbeat that began before the write saves its own
+        copy when it persists, and the provision disappears. Measured
+        2026-11-13: eight provisions written directly into world_state.json
+        were gone by the next completed heartbeat.
+
+        So the operator ENQUEUES (scripts/operator_provide.py) and the runtime
+        applies the queue here, inside the read-modify-write it already owns.
+        Idempotent by object_id, so a re-run cannot duplicate a gift, and
+        fail-closed: an unreadable queue is not a reason to refuse to run.
+        """
+        import json as _json
+        from backend.world.first_pair_persistence import save_world_state
+
+        queue_path = Path(self._store.root) / "operator_provisions_pending.json"
+        if not queue_path.is_file():
+            return 0
+        try:
+            payload = _json.loads(queue_path.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+        acts = payload.get("acts") if isinstance(payload, dict) else payload
+        if not isinstance(acts, list) or not acts:
+            return 0
+
+        state = self._world_state
+        objects = state.public_objects or {}
+        applied = 0
+        remaining = []
+        for act in acts:
+            if not isinstance(act, dict):
+                continue
+            obj_id = str(act.get("object_id") or "")
+            if not obj_id or obj_id in objects:
+                continue  # already applied, or malformed
+            is_water = act.get("kind") == "fresh_water"
+            amount = int(act.get("amount") or 0)
+            if amount <= 0:
+                continue
+            # Resolve the tile AT APPLY TIME. The agent may have crawled away
+            # between the queue being written and the heartbeat that applies
+            # it, and a cache behind a crawling body helps nobody.
+            agent_ref = str(act.get("agent_ref") or "")
+            tile = (self._world_state.tile_occupancy or {}).get(agent_ref) \
+                or act.get("tile_id")
+            if not tile:
+                continue
+            objects[obj_id] = {
+                "object_id": obj_id,
+                "object_type": "supply_cache",
+                "tile_id": tile,
+                "creator_agent_id": "the operator",
+                "public_description": (
+                    f"an operator supply cache: {amount} {act.get('kind')} "
+                    f"left for {agent_ref}"
+                ),
+                "created_heartbeat": int(state.tick or 0),
+                "provenance": "operator-provision",
+                "materials": {} if is_water else {str(act.get("kind")): amount},
+                "contents": {"fresh_water": amount} if is_water else {},
+            }
+            applied += 1
+        state.public_objects = objects
+        if applied:
+            try:
+                save_world_state(self._store, state)
+            except Exception:
+                return 0
+        # clear what we applied; keep anything we could not (never silently)
+        for act in acts:
+            if isinstance(act, dict) and str(act.get("object_id") or "") in objects:
+                continue
+            remaining.append(act)
+        try:
+            queue_path.write_text(
+                _json.dumps({"acts": remaining}, indent=1),
+                encoding="utf-8", newline="\n")
+        except Exception:
+            pass
+        return applied
 
     # ------------------------------------------------------------------
     # Cognition backends
@@ -3761,14 +3852,26 @@ class FirstPairRuntime:
         # auto-fed by the physics (see apply_survival_to_all). Blocking
         # eat while holding food would recreate the retired model's
         # impossible board: starving with full pockets.
+        # Phase 10QI: a collapsed body keeps its legs. Operator: "we should
+        # help them while they are learning instead of leaving them on the
+        # ground? would you want us to sit here for hours if you were dying of
+        # thirst on the ground?" It could not move at all: both partners of a
+        # pair are usually down together, the operator has no mechanic to
+        # deliver anything, and self-recovery is 0.15/hb - four hours of lying
+        # still. So `move` is permitted while collapsed (a CRAWL: one edge per
+        # heartbeat, same as walking, with nothing else available), which makes
+        # the river five tiles away, the partner on the next tile and the
+        # cistern at home reachable. Collapse takes your hands, not your legs.
         if self._vitals_for(agent_ref).get("downed"):
             if action_type not in ("leave_public_message", "ask_human",
-                                   "no_action", "eat", "drink"):
+                                   "no_action", "eat", "drink", "move"):
                 return {
                     "status": "rejected",
-                    "reason": ("You have collapsed (vitality 0). Your body "
-                               "cannot act. If food or water is brought to your tile "
-                               "you will drink and eat and recover; otherwise rest."),
+                    "reason": ("You have collapsed. You cannot gather, build, "
+                               "craft or work while your body is down, but you "
+                               "can crawl to an adjacent tile, drink, eat, "
+                               "speak and ask. Food or water brought to your "
+                               "tile is drunk and eaten; otherwise rest."),
                 }
 
         if action_type == "eat":
