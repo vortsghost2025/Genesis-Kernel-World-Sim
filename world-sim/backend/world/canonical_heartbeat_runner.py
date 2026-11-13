@@ -102,6 +102,39 @@ EVE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 # policy and the enforced policy cannot drift apart.
 PRIMARY_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Phase 10QE: the primary LANE is chosen by the vault, not by this file.
+#
+# Measured 2026-11-13 against a live agent prompt (261,071 chars, 112,803
+# tokens) with the operator's NVIDIA key:
+#   NVIDIA nemotron-3-ultra-550b-a55b   17.5s   contract-VALID
+#   NVIDIA nemotron-3-nano-omni-30b     28.0s   contract-VALID
+#   OpenRouter 30b (the lane running today) 68.1s contract-VALID
+# The 550B is not only bigger but 4x faster than the OpenRouter lane, and it
+# acted on a partner's public plea that the 30B ignored.
+#
+# Setting NVIDIA_PRIMARY_MODEL in the vault moves the primary lane to NVIDIA
+# NIM with the vault's NVIDIA credential; removing that one line restores
+# OpenRouter. The fallback lane is untouched: always OpenRouter, always a
+# :free model, so the free-only guard still holds and a 429 on the big model
+# degrades to the 30B instead of killing the heartbeat.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+
+def resolve_primary_lane(vault: dict) -> tuple[str, str, str]:
+    """The primary lane as (base_url, model, key_kind), read from the vault.
+
+    ``key_kind`` is "nvidia" or "openrouter" and names which vault credential
+    the lane spends. Defaults to today's behaviour (OpenRouter, free
+    nemotron) when the vault says nothing, so an unchanged vault cannot
+    change the sim's behaviour by accident.
+    """
+    nvidia_model = (vault.get("NVIDIA_PRIMARY_MODEL", "") or "").strip()
+    if nvidia_model:
+        base = (vault.get("NVIDIA_PRIMARY_BASE_URL", "") or "").strip() or NVIDIA_BASE_URL
+        return base, nvidia_model, "nvidia"
+    return OPENROUTER_BASE_URL, PRIMARY_MODEL, "openrouter"
+
 _STRIPPED_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_BASE_URL",
     "GENESIS_FIRST_PAIR_API_KEY",
@@ -205,14 +238,19 @@ def build_clean_env(vault_path: Path) -> dict:
         env.pop(key, None)
     env["NVIDIA_API_KEY"] = nv
     env["OPENROUTER_API_KEY"] = ork
-    env["GENESIS_FIRST_PAIR_BASE_URL"] = PRIMARY_BASE_URL
-    env["GENESIS_FIRST_PAIR_API_KEY"] = ork
-    env["GENESIS_FIRST_PAIR_MODEL"] = PRIMARY_MODEL
+    # Phase 10QE: the primary lane comes from the vault, so the operator can
+    # move the agents onto a bigger NVIDIA model (or back) by editing ONE
+    # vault line, with no code change and no commit.
+    primary_base, primary_model, primary_key_kind = resolve_primary_lane(vault)
+    primary_key = nv if primary_key_kind == "nvidia" else ork
+    env["GENESIS_FIRST_PAIR_BASE_URL"] = primary_base
+    env["GENESIS_FIRST_PAIR_API_KEY"] = primary_key
+    env["GENESIS_FIRST_PAIR_MODEL"] = primary_model
     env["GENESIS_FIRST_PAIR_FALLBACK_MODEL"] = FALLBACK_MODEL
-    env["GENESIS_FIRST_PAIR_MODEL_EAST_ADAM"] = ADAM_MODEL
-    env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = EVE_MODEL
-    env["GENESIS_FIRST_PAIR_MODEL_WEST_ADAM"] = ADAM_MODEL
-    env["GENESIS_FIRST_PAIR_MODEL_WEST_EVE"] = EVE_MODEL
+    env["GENESIS_FIRST_PAIR_MODEL_EAST_ADAM"] = primary_model
+    env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = primary_model
+    env["GENESIS_FIRST_PAIR_MODEL_WEST_ADAM"] = primary_model
+    env["GENESIS_FIRST_PAIR_MODEL_WEST_EVE"] = primary_model
     # Credential pools ride from the VAULT only, never ambient: rotation
     # across operator keys without letting ambient values hijack the lane.
     # Absent plurals simply leave single-key behavior unchanged.
@@ -271,17 +309,26 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
     # The remaining assertions stop a silent lane hijack: the resolver must
     # have honored the configured primary model and endpoint, not merely
     # returned *some* primary.
+    #
+    # Phase 10QE: the expected values are read from the ENVIRONMENT this
+    # proof was handed, not from module constants, because the lane is now
+    # chosen by the vault (10QE). Comparing against a constant would have
+    # rejected a legitimate NVIDIA lane as a "hijack"; comparing against the
+    # env proves the resolver honoured the policy it was actually given,
+    # which is the property that matters.
     resolved_model = fields.get("RESOLUTION_MODEL", "")
-    if resolved_model != PRIMARY_MODEL:
+    expected_model = (env.get("GENESIS_FIRST_PAIR_MODEL") or "").strip()
+    if resolved_model != expected_model:
         return False, (
             text + f" (rejected: primary model {resolved_model!r} is not the "
-            f"configured {PRIMARY_MODEL!r})"
+            f"configured {expected_model!r})"
         )
     resolved_url = fields.get("RESOLUTION_BASE_URL", "")
-    if resolved_url != PRIMARY_BASE_URL:
+    expected_url = (env.get("GENESIS_FIRST_PAIR_BASE_URL") or "").strip()
+    if resolved_url != expected_url:
         return False, (
             text + f" (rejected: base url {resolved_url!r} is not the "
-            f"configured {PRIMARY_BASE_URL!r})"
+            f"configured {expected_url!r})"
         )
     return True, text
 
