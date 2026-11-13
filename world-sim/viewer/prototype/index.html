@@ -3413,6 +3413,62 @@ function createCampfireSprite(x, z, h, scale = 1.0, withLight = true, withShadow
 // so adjacent cabins interpenetrate into an unreadable mega-blob. The
 // interior diorama is independent and keeps its explicit 5.4x4.4 spec.
 const EXTERIOR_SHELTER_SCALE = 0.62;
+// ---------------------------------------------------------------------------
+// Phase 10QF: the cistern.
+//
+// A lined pit, not a building: a low stone rim with water in it. Drawn from
+// primitives so the picture cannot claim a roof the physics never granted -
+// a cistern is not shelter, it is a supply. This is the first structure whose
+// value is water rather than warmth, and it should read as a hole in the
+// ground at a glance.
+// ---------------------------------------------------------------------------
+function createCisternSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
+  const s = EXTERIOR_SHELTER_SCALE * scale;
+  const group = new THREE.Group();
+  group.position.set(x, h, z);
+
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: tintHex, roughness: 0.95, metalness: 0.0,
+  });
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 0x2f5d6b, roughness: 0.24, metalness: 0.06,
+    transparent: true, opacity: 0.88,
+  });
+
+  // The rim: a short, wide stone curb sunk into the ground.
+  const rimR = 1.15 * s;
+  const rim = new THREE.Mesh(
+    new THREE.CylinderGeometry(rimR, rimR * 0.94, 0.42 * s, 12, 1, true), stoneMat);
+  rim.position.y = 0.21 * s;
+  group.add(rim);
+
+  // The lip, so the rim reads as masonry rather than a pipe.
+  const lip = new THREE.Mesh(
+    new THREE.TorusGeometry(rimR, 0.10 * s, 6, 14), stoneMat);
+  lip.rotation.x = Math.PI / 2;
+  lip.position.y = 0.42 * s;
+  group.add(lip);
+
+  // The water: a dark disc just below the lip. A dry cistern still reads as
+  // a lined pit, which is honest - the world knows whether it holds water.
+  const water = new THREE.Mesh(
+    new THREE.CircleGeometry(rimR * 0.88, 16), waterMat);
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = 0.30 * s;
+  group.add(water);
+
+  if (withShadow) {
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(rimR * 1.05, 16),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18 }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.012;
+    group.add(shadow);
+  }
+  group.userData = { kind: "cistern", tintHex };
+  return group;
+}
+
 function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
   const s = EXTERIOR_SHELTER_SCALE * scale;
   const w = 5.4 * s;
@@ -3683,6 +3739,12 @@ function getObjectVisualProfile(rec) {
   }
   if (rawType === "house") {
     return { id: "vis_house", category: "shelter", label: "House", color: 0xc29b68, scale: 1.12 };
+  }
+  // Phase 10QF: a cistern is a lined pit, not a building - a low stone rim
+  // with dark water in it. It draws as a shelter category so it sits with
+  // the home it belongs to, and it reads as a hole, not a roof.
+  if (rawType.includes("cistern")) {
+    return { id: "vis_cistern", category: "shelter", label: "Cistern", color: 0x6f8a94, scale: 0.95 };
   }
 
   if (rawType.includes("fire") || rawType.includes("hearth") || rawType === "campfire") {
@@ -4049,6 +4111,10 @@ function updatePublicObjectsAndClearings(pn, hb) {
               ox, oz, oh, prof.construction_stage, prof.structure_rung,
               effScale, profTint
             );
+          } else if (prof && prof.id === "vis_cistern") {
+            // Phase 10QF: a cistern is a supply, not a shelter - it must not
+            // draw as the generic shelter hut.
+            propMesh = createCisternSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else if (cat === "shelter") {
             propMesh = createShelterSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else if (cat === "campfire") {
@@ -7098,6 +7164,7 @@ window.__GENESIS_PROTO__ = {
       { name: "cabin", rung: 3, weight: 2 },
       { name: "house", rung: 4, weight: 3 },
       { name: "longhouse", rung: 5, weight: 4 },
+      { name: "cistern", rung: 6, weight: 2 },
     ];
     const rungCounts = {};
     let bestRung = 0;

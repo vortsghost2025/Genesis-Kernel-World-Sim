@@ -1306,8 +1306,11 @@ def _structure_ladder_description() -> str:
     )
 
     entries = []
-    for name in ("lean-to", "hut", "cabin", "house", "longhouse"):
-        record = _STRUCTURE_RUNGS[name]
+    # Render the TABLE, not a hardcoded list of names: the disclosure can
+    # then never drift from the rungs the world actually accepts. A rung
+    # that is enforced but undisclosed is a type an agent cannot build,
+    # which is how the 550B came to exist without anyone ever naming it.
+    for name, record in _STRUCTURE_RUNGS.items():
         floor = ", ".join(f"{kind} x{amount}"
                           for kind, amount in sorted(record["floor"].items()))
         entries.append(
@@ -1781,12 +1784,27 @@ def build_system_prompt(context: AgentContext) -> str:
                 )
                 inventory = context.inventory if isinstance(context.inventory, dict) else {}
                 carried_water = int(inventory.get("fresh_water", 0) or 0)
+                # Phase 10QF: name the SOURCE. A river is unlimited and
+                # satisfies 75; a cistern holds what was carried to it,
+                # satisfies 55, and one drink empties one unit.
+                source = str(_env.get("drinkable_source") or "")
+                if source == "cistern":
+                    water_note = (
+                        f"This tile is drinkable: True, from a cistern holding "
+                        f"{int(_env.get('drinkable_units', 0) or 0)} units; a "
+                        f"drink from it satisfies 55 and uses one unit. "
+                    )
+                else:
+                    water_note = (
+                        f"This tile is drinkable: "
+                        f"{_env.get('drinkable_water', False)}; "
+                    )
                 _lines.append(
                     "Fact: the drink action reduces thirst: a drinkable "
                     "current tile satisfies 75; one carried fresh_water or "
                     "one fresh_water from a clay_pot vessel satisfies 55. "
-                    f"This tile is drinkable: {_env.get('drinkable_water', False)}; "
-                    f"carried fresh_water units: {carried_water}. "
+                    + water_note
+                    + f"carried fresh_water units: {carried_water}. "
                     "Thirst rises 0.8 each heartbeat."
                 )
             hunger_val = _sb.get("hunger", 0) or 0

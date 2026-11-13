@@ -395,6 +395,16 @@ _STRUCTURE_RUNGS = {
         "rung": 5, "weight": 4, "floor": {"timber": 8, "stone": 10, "wood": 6},
         "effects": "campaign build: cellar budget doubled",
     },
+    # Phase 10QF: the ladder turns from bigger to more capable. A cistern is
+    # a lined pit, not a building - almost no timber, a lot of stone and clay
+    # - and its worth is that WATER CAN LIVE AT HOME. Measured 2026-11-12:
+    # three of four agents had collapsed at thirst 100, and not one object in
+    # either lane had ever held a unit of water, so a collapsed body could
+    # only be helped by a partner who walked it there.
+    "cistern": {
+        "rung": 6, "weight": 2, "floor": {"timber": 2, "stone": 8, "clay": 6},
+        "effects": "holds fresh water for the home; a filled cistern makes its tile drinkable",
+    },
 }
 
 # Dwellings already in the live lanes. Mapped to their rung so existing objects
@@ -553,6 +563,10 @@ _HOME_NETWORK_TIERS = (
 )
 _CELLAR_FOOD_BUDGET_PER_FOOTPRINT = 20
 
+# Phase 10QF: how much water one cistern holds. The first object in the
+# world whose capacity is measured in units someone carried home.
+_CISTERN_WATER_CAPACITY = 20
+
 # Phase 10QC: roofed tiles past this many stop adding warmth. The operator
 # has been rejecting the "15 single houses beside each other" settlement
 # shape since 10PH; until now an extra shack always paid +1 footprint
@@ -568,7 +582,7 @@ _FOOTPRINT_SATURATION = 12
 #   house   3 + 7 = 10   longhouse 4 + 11 = 15
 # One house (tier weight 10, comfort floor 75) clears seven lean-tos
 # (7 units, floor 68), which is the whole point of the change.
-_RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11}
+_RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
 
 
 def _home_tier_weight(footprint: int, best_rung: int) -> int:
@@ -578,7 +592,7 @@ def _home_tier_weight(footprint: int, best_rung: int) -> int:
     count saturates. Both halves are deliberate; see _RUNG_TIER_BONUS.
     """
     footprint = max(0, int(footprint or 0))
-    best_rung = max(1, min(5, int(best_rung or 1)))
+    best_rung = max(1, min(max(_RUNG_TIER_BONUS), int(best_rung or 1)))
     return min(footprint, _FOOTPRINT_SATURATION) + _RUNG_TIER_BONUS[best_rung]
 
 
@@ -1463,7 +1477,8 @@ class FirstPairRuntime:
                         del stores[kind]
                         ages.pop(kind, None)
 
-    def _current_tile_water_drinkable(self, position: str) -> bool:
+    def _canonical_water_drinkable(self, position: str) -> bool:
+        """True when the WORLD's map says this tile has drinkable water."""
         position = str(position or "")
         if not position:
             return False
@@ -1488,6 +1503,57 @@ class FirstPairRuntime:
             r.get("kind") == "fresh_water"
             for r in self._current_tile_resources.get(position, [])
         )
+
+    def _cistern_on_tile(self, position: str) -> dict | None:
+        """The cistern standing on a tile, if it holds water.
+
+        Phase 10QF. A cistern is a FINITE source: it holds what was carried
+        to it, and drinking from it consumes a unit. It is never a river.
+        """
+        position = str(position or "")
+        if not position:
+            return None
+        for record in (self._world_state.public_objects or {}).values():
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("tile_id", "")) != position:
+                continue
+            if str(record.get("object_type", "")).strip().lower() != "cistern":
+                continue
+            contents = record.get("contents")
+            if not isinstance(contents, dict):
+                continue
+            if int(contents.get("fresh_water", 0) or 0) >= 1:
+                return record
+        return None
+
+    def _cistern_water_units(self, position: str) -> int:
+        """How much water a cistern on this tile is holding."""
+        total = 0
+        position = str(position or "")
+        for record in (self._world_state.public_objects or {}).values():
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("tile_id", "")) != position:
+                continue
+            if str(record.get("object_type", "")).strip().lower() != "cistern":
+                continue
+            contents = record.get("contents")
+            if isinstance(contents, dict):
+                total += int(contents.get("fresh_water", 0) or 0)
+        return total
+
+    def _current_tile_water_drinkable(self, position: str) -> bool:
+        """True when this tile can be drunk from.
+
+        The world's rivers, and - since 10QF - a cistern that has been filled.
+        The two are distinguished by `_canonical_water_drinkable`, because a
+        cistern is FINITE: drinking from it consumes a unit, while a river
+        is not.
+        """
+        if self._canonical_water_drinkable(position):
+            return True
+        return self._cistern_on_tile(position) is not None
 
 
     # Phase 10PT: the resource kinds disclosed about the partner. Same bounded
@@ -1942,6 +2008,17 @@ class FirstPairRuntime:
             "by_fire": self._nearby_fire(position, heartbeat_number) if position else False,
             "sheltered": self._in_shelter(position) if position else False,
             "drinkable_water": self._current_tile_water_drinkable(position) if position else False,
+            # Phase 10QF: a cistern's water is FINITE, so the agent is told
+            # what it is drinking from and how much is left. A river says
+            # "river"; a filled cistern says "cistern" and the unit count.
+            "drinkable_source": (
+                "" if not position else
+                ("river" if self._canonical_water_drinkable(position)
+                 else ("cistern" if self._cistern_on_tile(position) else ""))
+            ),
+            "drinkable_units": (
+                self._cistern_water_units(position) if position else 0
+            ),
         }
 
         # Check if honeycomb on current tile to report bee colony state
@@ -3275,8 +3352,27 @@ class FirstPairRuntime:
         #    otherwise carried water instead of a dead end.
         elif source in self._DRINK_HERE_TOKENS:
             if self._current_tile_water_drinkable(str(position or "")):
-                satisfaction = survival.DRINK_SATISFACTION["tile"]
-                outcome_source = "tile"
+                # Phase 10QF: a cistern tile is drinkable but FINITE. One
+                # drink, one unit, and the supply is what the partner
+                # carried home. A river is unlimited and satisfies more.
+                cistern = None
+                if not self._canonical_water_drinkable(str(position or "")):
+                    cistern = self._cistern_on_tile(str(position or ""))
+                if cistern is not None:
+                    contents = cistern.get("contents") or {}
+                    held = int(contents.get("fresh_water", 0) or 0)
+                    if held >= 1:
+                        contents["fresh_water"] = held - 1
+                        if contents["fresh_water"] <= 0:
+                            del contents["fresh_water"]
+                        satisfaction = survival.DRINK_SATISFACTION["vessel"]
+                        outcome_source = "cistern"
+                    else:
+                        return {"status": "rejected",
+                                "reason": "The cistern here is empty"}
+                else:
+                    satisfaction = survival.DRINK_SATISFACTION["tile"]
+                    outcome_source = "tile"
             else:
                 inventory = self._get_agent_inventory(agent_ref)
                 if int(inventory.get("fresh_water", 0) or 0) >= 1:
@@ -4703,6 +4799,21 @@ class FirstPairRuntime:
                         "reason": (
                             f"Cellar food budget exceeded: stores {current_food} "
                             f"of {cellar_capacity} home food units"
+                        ),
+                    }
+            # Phase 10QF: a cistern's capacity is about WATER, not food. It
+            # is the first object in the world whose store is measured in
+            # units someone carried home.
+            if obj_type.strip().lower() == "cistern":
+                capacity = _CISTERN_WATER_CAPACITY
+                current_water = int((obj.get("contents") or {}).get("fresh_water", 0) or 0)
+                incoming_water = int(materials.get("fresh_water", 0) or 0)
+                if incoming_water and current_water + incoming_water > capacity:
+                    return {
+                        "status": "rejected",
+                        "reason": (
+                            f"Cistern water capacity exceeded: holds {current_water} "
+                            f"of {capacity} units"
                         ),
                     }
             # All checks pass; move the materials via the persistence layer
