@@ -120,6 +120,10 @@ class AgentContext:
     # when the agent is not inside or beside a structure. Facts only.
     home_rung: dict = field(default_factory=dict)
     construction_here: dict = field(default_factory=dict)
+    # Partner state (Phase 10QE): where the other agent is and how its body
+    # is. Empty when there is no partner or the partner is well. Facts only -
+    # the agent learns what is true about their companion, never what to do.
+    partner_state: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

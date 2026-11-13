@@ -1749,8 +1749,10 @@ def build_system_prompt(context: AgentContext) -> str:
                 "from your belongings and works while you are collapsed. "
                 "The drink action also works while you are collapsed. "
                 "Food deposited into any object on your tile also feeds "
-                "you while you are down. Vitality recovers slowly on its "
-                "own, and faster when fed.")
+                "you while you are down. Food or fresh_water carried by "
+                "your partner, while they stand on your tile, reaches you "
+                "the same way. Vitality recovers slowly on its own, and "
+                "faster when fed.")
         else:
             # Phase 10PM/10QH: the body's one-word state, as prose. The runtime
             # computes it with survival.vitals_state_label and caches it on
@@ -2069,6 +2071,30 @@ def build_system_prompt(context: AgentContext) -> str:
             f"rest recovery is {home.get('rest_regen', 1.0):g} per heartbeat; "
             f"cellar food budget is {home.get('cellar_budget', 20)} units."
         )
+
+    # Phase 10QE: the partner's condition, as a fact. The operator asked what
+    # the NPCs would want: "I'd want to know where my partner is and what
+    # state they're in." east_eve asked exactly that ("Are you alive?") and
+    # the world could not answer it. Facts only - never a directive about
+    # what to do about it.
+    partner_state = getattr(context, "partner_state", {}) or {}
+    if isinstance(partner_state, dict) and partner_state:
+        if partner_state.get("downed"):
+            settlement_lines.append(
+                f"Fact: your partner is collapsed at "
+                f"{partner_state.get('tile_id', 'an unknown tile')} "
+                f"(vitality {partner_state.get('vitality', 0):g}, thirst "
+                f"{partner_state.get('thirst', 0):g}, hunger "
+                f"{partner_state.get('hunger', 0):g}). While you stand on "
+                f"that tile they draw on the food and fresh_water you "
+                f"carry, and on anything left in objects there.")
+        else:
+            settlement_lines.append(
+                f"Fact: your partner is at "
+                f"{partner_state.get('tile_id', 'an unknown tile')}, "
+                f"vitality {partner_state.get('vitality', 100):g}, thirst "
+                f"{partner_state.get('thirst', 0):g}, hunger "
+                f"{partner_state.get('hunger', 0):g}.")
 
     build_here = getattr(context, "construction_here", {}) or {}
     if isinstance(build_here, dict) and build_here:

@@ -1544,6 +1544,34 @@ class FirstPairRuntime:
             return str(record.get("construction_stage", "")) in _SHELTERING_STAGES
         return True
 
+    def _partner_state_for(self, agent_ref: str) -> dict:
+        """Where the partner is and how its body is doing.
+
+        Phase 10QE. The world told a collapsed agent that "food or water
+        brought to your tile" would reach it, and a partner has no way to
+        learn that their companion is collapsed, where they are, or that
+        their pack is the supply. This is the fact: the partner's tile, and
+        the numbers that describe their condition. Facts only.
+        """
+        partner_ref = (self._eve_ref if agent_ref == self._adam_ref
+                       else self._adam_ref)
+        if not partner_ref:
+            return {}
+        partner_pos = self._world_state.tile_occupancy.get(partner_ref)
+        if not partner_pos:
+            return {}
+        vitals = self._vitals_for(partner_ref)
+        state = {
+            "agent_ref": partner_ref,
+            "tile_id": partner_pos,
+            "downed": bool(vitals.get("downed")),
+            "vitality": round(float(vitals.get("vitality", 100.0)), 2),
+            "thirst": round(float(vitals.get("thirst", 18.0)), 2),
+            "hunger": round(float(vitals.get("hunger", 0.0)), 2),
+        }
+        state["state"] = survival.vitals_state_label(vitals)
+        return state
+
     def _home_rung_for(self, position: str | None) -> dict:
         """The structure this agent stands in, with rung and live effects.
 
@@ -2340,6 +2368,7 @@ class FirstPairRuntime:
             partner_holdings=self._partner_holdings_for(agent_ref),
             home_rung=self._home_rung_for(position),
             construction_here=self._construction_here_for(agent_ref, position),
+            partner_state=self._partner_state_for(agent_ref),
         )
 
     # ------------------------------------------------------------------
@@ -2988,6 +3017,17 @@ class FirstPairRuntime:
             if vitals.get("downed"):
                 ate = self._downed_tile_feed(agent_ref, position)
                 drank = self._downed_tile_drink(agent_ref, position)
+                # Phase 10QE: the partner handover. A collapsed body draws on
+                # what its partner CARRIES while the partner stands on the
+                # same tile. Without this the rescue was mechanically
+                # impossible: east_eve lay collapsed on a tile with zero
+                # objects while east_adam walked 35 tiles to her carrying
+                # 12 edible_roots and 5 fresh_water, and there was nothing
+                # to put them in. A partner beside you is a supply.
+                handover_ate, handover_drank = self._partner_handover(
+                    agent_ref, position)
+                ate += handover_ate
+                drank += handover_drank
 
             comfort_floor = survival.SHELTER_COMFORT_FLOOR
             shelter_decay = survival.SHELTER_DECAY_FACTOR
@@ -3035,6 +3075,12 @@ class FirstPairRuntime:
             for kind, amount in materials.items():
                 if not isinstance(amount, int) or amount <= 0:
                     continue
+                # Only real food counts. eat_satisfaction() returns a
+                # DEFAULT of 10.0 for unknown kinds, so without this filter
+                # a collapsed body "ate" the timber of a clay pot and the
+                # pot silently lost its build materials.
+                if str(kind) not in survival.EAT_SATISFACTION:
+                    continue
                 sat = survival.eat_satisfaction(str(kind))
                 if sat > best_sat:
                     best_kind, best_sat, best_obj_id = str(kind), sat, oid
@@ -3047,6 +3093,67 @@ class FirstPairRuntime:
         else:
             del obj["materials"][best_kind]
         return best_sat
+
+    def _partner_handover(self, agent_ref: str,
+                          position: str | None) -> tuple[float, float]:
+        """What a collapsed body draws from the partner standing beside it.
+
+        Returns (hunger points, thirst points). The partner's OWN carried
+        supplies are consumed: one unit of the most nourishing food and one
+        unit of fresh water per heartbeat, while the partner is on the same
+        tile. A partner on another tile reaches nothing, and a standing body
+        is never fed this way - it has its own hands.
+
+        This is the same rescue path as `_downed_tile_feed` / `_downed_tile_drink`
+        (which read objects on the tile), extended to the one supply those
+        cannot see: the partner's pack.
+        """
+        if not position:
+            return 0.0, 0.0
+        partner_ref = (self._eve_ref if agent_ref == self._adam_ref
+                       else self._adam_ref)
+        partner_pos = self._world_state.tile_occupancy.get(partner_ref)
+        if not partner_pos or partner_pos != position:
+            return 0.0, 0.0
+        partner_vitals = self._vitals_for(partner_ref)
+        if partner_vitals.get("downed"):
+            # a collapsed partner cannot hand anything over
+            return 0.0, 0.0
+        # Fail closed on a runtime carrying no store, exactly as
+        # _get_agent_inventory does: `hasattr(self._store, ...)` evaluates
+        # self._store FIRST, so a missing attribute raises before hasattr
+        # can catch anything.
+        store = getattr(self, "_store", None)
+        if store is None or not hasattr(store, "_read_json"):
+            return 0.0, 0.0
+        pack = self._get_agent_inventory(partner_ref)
+        if not isinstance(pack, dict) or not pack:
+            return 0.0, 0.0
+
+        ate = 0.0
+        best_kind, best_sat = None, 0.0
+        for kind, amount in pack.items():
+            if not isinstance(amount, int) or amount <= 0:
+                continue
+            # Only real food: eat_satisfaction() defaults to 10.0 for unknown
+            # kinds, which would let a collapsed body drink its partner's
+            # WATER as if it were a meal.
+            if str(kind) not in survival.EAT_SATISFACTION:
+                continue
+            sat = survival.eat_satisfaction(str(kind))
+            if sat > best_sat:
+                best_kind, best_sat = str(kind), sat
+        if best_kind is not None:
+            add_to_inventory(self._store, partner_ref, best_kind, -1)
+            self._remove_food_lots(partner_ref, best_kind, 1)
+            ate = best_sat
+
+        drank = 0.0
+        carried_water = int(pack.get("fresh_water", 0) or 0)
+        if carried_water >= 1:
+            add_to_inventory(self._store, partner_ref, "fresh_water", -1)
+            drank = float(survival.DRINK_SATISFACTION["carried"])
+        return ate, drank
 
     def _downed_tile_drink(self, agent_ref: str, position: str | None) -> float:
         """A collapsed body drinks from a vessel on its own tile.
