@@ -138,15 +138,35 @@ class TestCraft:
         assert inv.get("east_adam", {}).get("fiber_rope") == 1
 
     def test_craft_only_works_on_crafting_surface(self, tmp_path):
+        """A workshop recipe needs a workshop; a KNITTED blade does not.
+
+        Phase 10QL changed the second half only, and only because the world
+        already claimed it: `hew_timber` prints "with 2 stone and 1 wood a
+        blade can be knapped on the spot", and until now that route did not
+        exist. Both Eves hold no tool, so ~700 "Insufficient timber" refusals
+        followed from the promise being false.
+        """
         rt = _rt(tmp_path)
         _seed_object(rt, obj_id="storage-1", obj_type="storage")
-        _seed_inventory(rt, "east_adam", {"stone": 5, "wood": 3})
-        out = rt._execute_use_object("east_adam", {
+        _seed_inventory(rt, "east_adam", {"stone": 5, "wood": 3,
+                                          "fiber_plants": 6})
+
+        # a woven basket is not knapping: still refused away from a surface
+        basket = rt._execute_use_object("east_adam", {
+            "target_object_id": "storage-1",
+            "operation": "craft",
+            "materials": {"fiber_plants": 4, "wood": 2},
+        }, 100)
+        assert basket["status"] == "rejected", basket
+
+        # a blade is struck where the agent sits, whatever it named
+        blade = rt._execute_use_object("east_adam", {
             "target_object_id": "storage-1",
             "operation": "craft",
             "materials": {"stone": 2, "wood": 1},
         }, 100)
-        assert out["status"] == "rejected"
+        assert blade["status"] == "success", blade
+        assert blade.get("crafted") == "stone_axe"
 
     def test_craft_requires_exact_materials(self, tmp_path):
         rt = _rt(tmp_path)

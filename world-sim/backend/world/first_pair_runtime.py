@@ -4818,7 +4818,27 @@ class FirstPairRuntime:
         extension. The object must be on the agent's current tile.
         """
         obj_id = action.get("target_object_id")
+        # Phase 10QL: knapping needs no object to target. `hew_timber` already
+        # promises "with 2 stone and 1 wood a blade can be knapped on the
+        # spot", and a craft with no target at all is that act. Any other
+        # operation still requires a target.
+        bare_knap = (
+            (not obj_id or not isinstance(obj_id, str))
+            and str(action.get("operation") or "").strip().lower() == "craft"
+            and self._is_knapping_recipe(action.get("materials"))
+        )
+        if bare_knap:
+            return self._craft_on_surface("", {}, action.get("materials") or {},
+                                          agent_ref, heartbeat_number)
         if not obj_id or not isinstance(obj_id, str):
+            # Phase 10QL: a craft that names no object at all still needs a
+            # surface for anything that is not knapping, and saying so is more
+            # use than "missing target".
+            if str(action.get("operation") or "").strip().lower() == "craft":
+                return {"status": "rejected",
+                        "reason": ("Crafting requires a crafting surface: name "
+                                   "one with target_object_id, or knap a blade "
+                                   "where you stand with a blade recipe.")}
             return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
         obj = self._world_state.public_objects.get(obj_id)
         if obj is None or not isinstance(obj, dict):
@@ -4867,9 +4887,30 @@ class FirstPairRuntime:
         if operation == "smelt" and "furnace" not in obj_type and "foundry" not in obj_type:
             return {"status": "rejected",
                     "reason": f"Smelting requires a furnace or foundry, not a {obj.get('object_type')}"}
-        if operation == "craft" and not any(term in obj_type for term in ("crafting_surface", "forge", "workbench", "workshop")):
-            return {"status": "rejected",
-                    "reason": f"Crafting requires a crafting surface, not a {obj.get('object_type')}"}
+        if operation == "craft":
+            # Phase 10QL: knapping needs no workshop, and the world already
+            # says so. `hew_timber` prints "with 2 stone and 1 wood a blade can
+            # be knapped on the spot" - but this gate demanded a crafting
+            # surface, so the promised route did not exist. Measured: both Eves
+            # hold NO tool (east_eve stone 104 + wood 91 is one craft from an
+            # axe; west_eve stone 1), so neither could ever hew timber and
+            # ~700 "Insufficient timber" refusals followed.
+            #
+            # The fix makes the claim TRUE rather than rewriting it to match
+            # the limitation, and it is scoped to the two recipes the world
+            # calls knapping. Everything else still needs a surface, and a
+            # target that is not a surface is still refused even for knapping.
+            wants_surface = True
+            if obj_id is None or obj_id == "":
+                wants_surface = False  # a bare craft: handled below
+            elif any(term in obj_type for term in ("crafting_surface", "forge", "workbench", "workshop")):
+                wants_surface = False
+            if wants_surface:
+                # `materials` is not assigned yet at this point in the
+                # function, so read it from the action.
+                if not self._is_knapping_recipe(action.get("materials")):
+                    return {"status": "rejected",
+                            "reason": f"Crafting requires a crafting surface, not a {obj.get('object_type')}"}
         if operation == "cook":
             # Phase 10QC: rung 4's promised effect finally exists. A proper
             # home has a hearth built in, so a SHELTERING house or longhouse
@@ -5095,6 +5136,30 @@ class FirstPairRuntime:
         return {"status": "success",
                 "detail": f"Smelted {amount} {kind} into {output_amount} {output_kind}",
                 "contents": dict(obj["contents"])}
+
+    # Phase 10QL: the recipes the world already calls knapping. A blade is
+    # struck from stone or flint wherever the agent sits; a woven basket is
+    # not, and still needs a surface.
+    _KNAPPING_RECIPES = frozenset({"stone_axe", "flint_knife"})
+
+    @classmethod
+    def _is_knapping_recipe(cls, materials) -> bool:
+        """True when this declaration is a knapped blade.
+
+        Accepts the same shapes `_craft_on_surface` does (a dict, or a
+        sequence of pairs), and fails closed: anything unrecognised needs a
+        surface.
+        """
+        try:
+            if isinstance(materials, dict):
+                material_set = tuple(sorted(
+                    (str(k), int(v)) for k, v in materials.items()))
+            else:
+                material_set = tuple(sorted(
+                    (str(k), int(v)) for k, v in materials))
+        except Exception:
+            return False
+        return cls._CRAFT_RECIPES.get(material_set) in cls._KNAPPING_RECIPES
 
     def _craft_on_surface(self, obj_id: str, obj: dict, materials: dict,
                           agent_ref: str, heartbeat_number: int | None = None) -> dict:
