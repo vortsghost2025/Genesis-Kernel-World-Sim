@@ -2,8 +2,8 @@
 """Assemble a static, deployable copy of the 3D Civilization Observatory.
 
 The live viewer under world-sim/viewer/prototype/ is left untouched. This
-builds world-sim/viewer-dist/ -- a self-contained static site that can be
-pushed to Netlify, Vercel, or any static host with no server process.
+builds world-sim/viewer/viewer-deploy/ -- a self-contained static site that can
+be pushed to Netlify, Vercel, or any static host with no server process.
 
 What it does:
   1. copies the html entry points, js libs, and world backdrop
@@ -17,11 +17,13 @@ Refresh the deployed site by re-running this script and re-pushing.
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
@@ -30,7 +32,15 @@ PROTO = VIEWER / "prototype"
 # was viewer-dist, but a lingering handle from a finished `vercel deploy`
 # made that path undeletable and an rmtree against it wiped a good build.
 # Building to a fresh directory sidesteps the lock entirely.
-DIST = VIEWER / "viewer-deploy"
+PUBLISHED = VIEWER / "viewer-deploy"
+# DIST is the directory being WRITTEN. It starts as PUBLISHED and is retargeted
+# at the staging directory while a build runs, so the live tree is only ever
+# replaced by a complete one.
+DIST = PUBLISHED
+
+# Quarantine names must be unique within a process as well as across processes:
+# a single build quarantines twice (clearing the output, then promoting).
+_QUARANTINE_SEQ = itertools.count(1)
 
 EXPORTER = WORLD_SIM / "scripts" / "export_viewer_snapshot.py"
 
@@ -113,6 +123,56 @@ def rewrite_asset_paths(html: str) -> str:
     return html
 
 
+def _stale_dirs() -> list[Path]:
+    """Directories this script's own swap can leave behind.
+
+    A finished `vercel deploy` (or an archiver, or an editor) can still hold a
+    handle on the tree it just uploaded, and a locked path makes rmtree fail.
+    """
+    return ([p for p in sorted(VIEWER.glob(PUBLISHED.name + ".old*")) if p.is_dir()]
+            + [VIEWER / (PUBLISHED.name + ".staging")])
+
+
+def _sweep_stale_dirs() -> list[str]:
+    """Delete leftover build directories. Returns the ones that would not go.
+
+    Never fatal, and never allowed to accumulate: quarantined directories are
+    named uniquely, so the next run sweeps them again instead of colliding.
+    """
+    stubborn: list[str] = []
+    for old in _stale_dirs():
+        if not old.exists():
+            continue
+        try:
+            shutil.rmtree(old)
+            print("  swept stale build dir: %s" % old.name)
+        except OSError as exc:
+            stubborn.append("%s (%s)" % (old.name, type(exc).__name__))
+    return stubborn
+
+
+def _quarantine(path: Path) -> Path | None:
+    """Move a directory aside under a UNIQUE name, or None if it will not move.
+
+    The bug this exists to prevent: the swap used to rename the previous build
+    to the fixed name `viewer-deploy.old`. If that name was still occupied --
+    because a locked file had stopped the previous cleanup -- the rename failed
+    on Windows, the stale directory stayed, and the swap could not proceed.
+
+    Uniqueness is pid + nanosecond clock + a per-process counter, so two
+    quarantines in the same second (which a build does do: `_clear_output_dir`
+    and then `_publish_staging`) cannot land on the same name.
+    """
+    target = path.with_name("%s.old-%d-%d-%d" % (
+        path.name, os.getpid(), time.time_ns(), next(_QUARANTINE_SEQ)))
+    try:
+        path.rename(target)
+        return target
+    except OSError as exc:
+        print("  WARN could not move %s aside (%s)" % (path.name, exc))
+        return None
+
+
 def _clear_output_dir() -> None:
     """Empty the build output without ever risking a half-wiped tree.
 
@@ -123,7 +183,7 @@ def _clear_output_dir() -> None:
     by a complete one.
     """
     global DIST
-    staging = VIEWER / (DIST.name + ".staging")
+    staging = VIEWER / (PUBLISHED.name + ".staging")
     if staging.exists():
         try:
             shutil.rmtree(staging)
@@ -132,39 +192,55 @@ def _clear_output_dir() -> None:
     staging.mkdir(parents=True, exist_ok=True)
     (staging / "assets").mkdir(parents=True, exist_ok=True)
     (staging / "js").mkdir(parents=True, exist_ok=True)
-    if DIST.exists():
-        try:
-            DIST.rename(staging.parent / (DIST.name + ".old"))
-            shutil.rmtree(staging.parent / (DIST.name + ".old"))
-        except OSError:
-            # fall back to in-place overwrite
-            pass
+    if PUBLISHED.exists():
+        quarantine = _quarantine(PUBLISHED)
+        if quarantine is not None:
+            try:
+                shutil.rmtree(quarantine)
+            except OSError as exc:
+                print("  WARN previous output %s is still locked (%s); a later "
+                      "sweep will remove it" % (quarantine.name, exc))
     DIST = staging
 
 
-def _publish_staging() -> Path:
-    """Move the completed staging tree into place as the real output dir."""
+def _publish_staging() -> Path | None:
+    """Move the completed staging tree into place as the real output dir.
+
+    Returns the published path, or None when the swap could not be completed.
+    The caller MUST then fail the build: a build that reported success without
+    publishing would let the deploy path ship the PREVIOUS bundle while every
+    check still passed, because the old bundle is a valid viewer too.
+    """
     real = DIST                      # this IS the staging directory
-    target = VIEWER / "viewer-deploy"
-    # 1) move any previous real build out of the way
+    target = PUBLISHED
+    # 1) move any previous real build out of the way, under a unique name
     if target.exists():
+        quarantine = _quarantine(target)
+        if quarantine is None:
+            return None
         try:
-            target.rename(VIEWER / "viewer-deploy.old")
+            shutil.rmtree(quarantine)
         except OSError as exc:
-            print("  WARN could not move previous build aside (%s)" % exc)
+            print("  WARN previous build %s is still locked (%s); the next run "
+                  "will sweep it" % (quarantine.name, exc))
     # 2) promote staging
-    real.rename(target)
-    # 3) remove the old build
-    old = VIEWER / "viewer-deploy.old"
-    if old.exists():
-        try:
-            shutil.rmtree(old)
-        except OSError as exc:
-            print("  WARN could not delete previous build (%s)" % exc)
+    try:
+        real.rename(target)
+    except OSError as exc:
+        print("  ERROR could not promote the new build to %s (%s)"
+              % (target, exc))
+        return None
+    # 3) sweep whatever this run left behind
+    for stubborn in _sweep_stale_dirs():
+        print("  WARN still locked: %s" % stubborn)
     return target
 
 
 def main() -> int:
+    # Sweep FIRST, before _clear_output_dir recreates the staging directory.
+    for stubborn in _sweep_stale_dirs():
+        print("  WARN leftover build dir is locked; will retry next run: %s"
+              % stubborn)
     _clear_output_dir()
 
     total_before = total_after = 0
@@ -316,6 +392,11 @@ def main() -> int:
              100.0 * (1 - total_after / max(total_before, 1))))
     print("  built: %s" % DIST)
     final = _publish_staging()
+    if final is None:
+        print()
+        print("  BUILD FAILED: the new bundle is staged at %s but could not be "
+              "published; the previous build is untouched" % DIST)
+        return 1
     print("  published: %s" % final)
     print()
     print("  next:")
