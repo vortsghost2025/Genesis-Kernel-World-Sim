@@ -3411,6 +3411,25 @@ class FirstPairRuntime:
             if rk in ("fresh_water", "fresh water", "freshwater",
                       "river", "water", "river water"):
                 source = rk
+        # Phase 10QL: normalise the phrasings they actually write, before the
+        # branch chain so every branch keeps its meaning. Measured across the
+        # history: ~340 refusals of "Unknown drink source None",
+        # "Unknown drink source '<tile>'", "Unknown drink source 'river on
+        # <tile>'" and "Invalid drink source". An agent naming a river on a
+        # tile is doing the right thing in the wrong words, and the world's
+        # job is to know what it meant.
+        if not source:
+            # A bare drink is the plainest act in the world: this tile, then
+            # what you carry. Branch 3 already does exactly that.
+            source = "tile"
+        else:
+            tile_hint = re.search(r"cont_[ab]_[a-z0-9_]+", source)
+            if tile_hint:
+                source = tile_hint.group(0)
+            elif any(word in source for word in (
+                    "river", "lake", "stream", "pond", "water", "here",
+                    "ground", "current")):
+                source = "tile"
         # A tile id passed as target_object_id names a place, not an object.
         if isinstance(target_object_id, str):
             tid = target_object_id.strip()
@@ -4438,7 +4457,9 @@ class FirstPairRuntime:
                         f"timber to bear its own weight; you declared "
                         f"{declared_timber}. Fell trees with hew_timber once you "
                         f"hold an axe (stone_axe, iron_axe) or knapped blade "
-                        f"(flint_knife)."
+                        f"(flint_knife); a stone_axe is crafted from stone x2 "
+                        f"plus wood x1 on a crafting_surface, and a flint_knife "
+                        f"from flint x2 plus wood x1."
                     ),
                 }
 
@@ -4456,8 +4477,21 @@ class FirstPairRuntime:
             return {
                 "status": "rejected",
                 "reason": (
-                    f"A {object_type} is not a structure this world knows how to "
-                    f"raise. Legal roofed structures: {_STRUCTURE_RUNG_NAMES}."
+                    # Phase 10QL: `foundation`, `frame`, `walls`, `roofed` and
+                    # `finished` are STAGES of every build, not types. Named as
+                    # a type 19 times in the history; the refusal must say what
+                    # it actually is.
+                    (f"{object_type} is a construction STAGE, not a structure "
+                     f"type; a build passes through "
+                     f"{', '.join(_CONSTRUCTION_STAGES)} and you name the type "
+                     f"once at the start. Legal roofed structures: "
+                     f"{_STRUCTURE_RUNG_NAMES}.")
+                    if str(object_type).strip().lower() in _CONSTRUCTION_STAGES
+                    else (
+                        f"A {object_type} is not a structure this world knows "
+                        f"how to raise. Legal roofed structures: "
+                        f"{_STRUCTURE_RUNG_NAMES}."
+                    )
                 ),
             }
 
@@ -4534,11 +4568,13 @@ class FirstPairRuntime:
                 return {
                     "status": "rejected",
                     "reason": (
-                        f"A {object_type} needs at least {floor_timber} structural "
+                        f"A {object_type} needs at least {timber_min} structural "
                         f"timber to bear its own weight; you declared "
                         f"{declared_timber}. Fell trees with hew_timber once you "
                         f"hold an axe (stone_axe, iron_axe) or knapped blade "
-                        f"(flint_knife)."
+                        f"(flint_knife); a stone_axe is crafted from stone x2 "
+                        f"plus wood x1 on a crafting_surface, and a flint_knife "
+                        f"from flint x2 plus wood x1."
                     ),
                 }
             spend = stage_materials
