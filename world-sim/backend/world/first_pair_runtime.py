@@ -876,6 +876,17 @@ class FirstPairRuntime:
             amount = int(act.get("amount") or 0)
             if amount <= 0:
                 continue
+            # Phase 10QN: a TOOL goes into the hand, not into a cache.
+            if str(act.get("into") or "") == "pack":
+                pack_agent = str(act.get("agent_ref") or "")
+                if pack_agent:
+                    try:
+                        from backend.world.first_pair_persistence import add_to_inventory
+                        add_to_inventory(self._store, pack_agent, str(act.get("kind")), amount)
+                        applied += 1
+                    except Exception:
+                        pass
+                continue
             # Resolve the tile AT APPLY TIME. The agent may have crawled away
             # between the queue being written and the heartbeat that applies
             # it, and a cache behind a crawling body helps nobody.

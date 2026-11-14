@@ -65,7 +65,7 @@ def _occ(pair_dir: Path) -> tuple[dict, int]:
 
 
 def enqueue(pair: str, to: str, kind: str, amount: int, reason: str,
-            apply: bool) -> dict:
+            apply: bool, to_pack: bool = False) -> dict:
     pair_dir = PAIRS[pair]
     occ, tick = _occ(pair_dir)
     targets = dict(occ) if to == "all" else ({to: occ[to]} if to in occ else {})
@@ -85,7 +85,13 @@ def enqueue(pair: str, to: str, kind: str, amount: int, reason: str,
             obj_id = f"operator-provision-hb{tick}-{kind}-{i + 1}-{suffix}"
         acts.append({"object_id": obj_id, "agent_ref": agent_ref,
                      "tile_id": tile, "kind": kind, "amount": int(amount),
-                     "reason": reason})
+                     "reason": reason,
+                     # Phase 10QN: a TOOL goes into the hand, not into a cache.
+                     # A gift in a container needs an `extract` step, and
+                     # measured 2026-11-14 a model that cannot hold a four-step
+                     # plan will not take it. The operator handing someone an
+                     # axe hands it to them.
+                     "into": "pack" if to_pack else "object"})
 
     result = {"pair": pair, "tick": tick, "kind": kind, "amount": amount,
               "acts": acts, "queued": bool(apply)}
@@ -129,6 +135,9 @@ def main() -> int:
     ap.add_argument("--reason", default="")
     ap.add_argument("--apply", action="store_true",
                     help="without this it is a dry run and nothing is queued")
+    ap.add_argument("--to-pack", action="store_true",
+                    help="put the provision in the agent's PACK (for tools) "
+                         "instead of leaving it in a cache on their tile")
     args = ap.parse_args()
 
     if args.amount < 1 or args.amount > MAX_PER_ACT:
@@ -139,7 +148,7 @@ def main() -> int:
     pairs = ["east", "west"] if args.pair == "both" else [args.pair]
     for name in pairs:
         res = enqueue(name, args.to, args.kind, args.amount, args.reason,
-                      args.apply)
+                      args.apply, to_pack=args.to_pack)
         if "error" in res:
             print(f"{name}: {res['error']}")
             continue

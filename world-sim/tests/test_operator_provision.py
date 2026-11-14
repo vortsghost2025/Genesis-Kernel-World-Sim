@@ -111,6 +111,23 @@ def test_the_provision_is_drunk_and_eaten_by_a_downed_body(tmp_path):
     assert rt._world_state.public_objects["f1"]["materials"]["edible_roots"] == 1
 
 
+def test_a_tool_can_be_gifted_into_the_pack(tmp_path):
+    """Phase 10QN. A gift in a cache needs an `extract` step, and a model that
+    cannot hold a four-step plan will not take it. The operator handing
+    someone an axe hands it to them."""
+    from backend.world.first_pair_persistence import load_inventory
+    rt = _runtime(tmp_path)
+    _queue(rt._store.root, [{
+        "object_id": "gift-1", "agent_ref": "east_adam", "tile_id": TILE,
+        "kind": "stone_axe", "amount": 1, "reason": "experiment",
+        "into": "pack",
+    }])
+    assert rt._apply_operator_provision_queue() == 1
+    assert load_inventory(rt._store)["east_adam"].get("stone_axe", 0) == 1
+    # and nothing was left lying about as an object
+    assert "gift-1" not in rt._world_state.public_objects
+
+
 def test_applying_twice_does_not_duplicate_the_gift(tmp_path):
     """Idempotent by object_id, so a re-run cannot double a provision."""
     rt = _runtime(tmp_path)
