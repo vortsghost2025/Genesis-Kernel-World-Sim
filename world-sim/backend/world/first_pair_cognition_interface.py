@@ -124,6 +124,10 @@ class AgentContext:
     # is. Empty when there is no partner or the partner is well. Facts only -
     # the agent learns what is true about their companion, never what to do.
     partner_state: dict = field(default_factory=dict)
+    # Nearest drinkable tile this agent has PERSONALLY observed, with its
+    # distance in tiles (Phase 10QM). Empty when they have seen no water.
+    # Their own memory plus arithmetic; a fact, never a destination.
+    nearest_known_water: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

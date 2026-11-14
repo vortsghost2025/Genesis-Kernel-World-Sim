@@ -1140,6 +1140,51 @@ class FirstPairRuntime:
             parts.append(f"{res}: {', '.join(shown)}")
         return "; ".join(parts)
 
+    def _nearest_known_water_for(self, agent_ref: str) -> dict:
+        """The nearest drinkable tile this agent has PERSONALLY observed.
+
+        Phase 10QM. The resource roll-up names the water tiles an agent knows
+        and never says how far, and nothing connected "my thirst is 100" to
+        "I know where water is". Measured overnight 2026-11-14: 397 heartbeats
+        with rivers in both lanes' own roll-ups four to five tiles away, and
+        not one drink from a river - the East lane spent them trying to
+        extract water from an empty cache and the West lane asking the
+        operator in 192 of 184 heartbeats.
+
+        Distance is arithmetic on the agent's own memory: no true-map
+        knowledge, and it is a fact, not a destination instruction.
+        """
+        try:
+            known = load_known_map(self._store.root, agent_ref) or {}
+        except Exception:
+            return {}
+        tiles = known.get("known_tiles") or {}
+        if not tiles:
+            return {}
+        position = (self._world_state.tile_occupancy or {}).get(agent_ref)
+        pos_xy = self._tile_xy(str(position or ""))
+        if pos_xy is None:
+            return {}
+        continent = self._tile_continent(str(position or ""))
+
+        best = None
+        for tid, entry in tiles.items():
+            if not isinstance(entry, dict):
+                continue
+            if "fresh_water" not in (entry.get("observed_resources") or []):
+                continue
+            # The continents share a coordinate space, so a tile on the other
+            # one is not "five tiles away" from this agent.
+            if self._tile_continent(str(tid)) != continent:
+                continue
+            xy = self._tile_xy(str(tid))
+            if xy is None:
+                continue
+            distance = max(abs(xy[0] - pos_xy[0]), abs(xy[1] - pos_xy[1]))
+            if best is None or distance < best["distance"]:
+                best = {"tile_id": str(tid), "distance": int(distance)}
+        return best or {}
+
     def _rollup_for(self, agent_ref: str) -> str:
         """Best-effort roll-up for the prompt; "" when unavailable."""
         try:
@@ -2555,6 +2600,7 @@ class FirstPairRuntime:
                 self._home_network_footprint(position) if position else 0
             ),
             observed_resource_rollup=self._rollup_for(agent_ref),
+            nearest_known_water=self._nearest_known_water_for(agent_ref),
             tool_condition=self._tool_states_for(agent_ref),
             food_freshness=self._food_freshness_for(agent_ref),
             partner_holdings=self._partner_holdings_for(agent_ref),

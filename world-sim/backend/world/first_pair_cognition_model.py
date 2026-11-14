@@ -1757,6 +1757,20 @@ def build_system_prompt(context: AgentContext) -> str:
                 "your partner, while they stand on your tile, reaches you "
                 "the same way. Vitality recovers slowly on its own, and "
                 "faster when fed.")
+            # Phase 10QM: the water fact belongs HERE too. The collapsed
+            # branch replaced the whole body section, so the one agent who
+            # can crawl to water was the only one never told where it is -
+            # measured 2026-11-14, both East agents collapsed at thirst 100
+            # for a night while the West agents (standing) got the line.
+            known_water = getattr(context, "nearest_known_water", {}) or {}
+            if isinstance(known_water, dict) and known_water.get("tile_id"):
+                _lines.append(
+                    f"Fact: the nearest drinkable tile you have observed is "
+                    f"{known_water['tile_id']}, "
+                    f"{int(known_water.get('distance', 0))} tiles away. A "
+                    f"collapsed body can crawl one tile per heartbeat, and "
+                    f"drinking from that tile satisfies thirst like a river."
+                )
         else:
             # Phase 10PM/10QH: the body's one-word state, as prose. The runtime
             # computes it with survival.vitals_state_label and caches it on
@@ -1774,8 +1788,7 @@ def build_system_prompt(context: AgentContext) -> str:
             thirst_val = _sb.get("thirst", 18) or 0
             if thirst_val >= 40:
                 _lines.append(
-                    f"Your thirst is {round(thirst_val)}/100."
-                    # The lead time hunger has always had: the world states
+                    f"Your thirst is {round(thirst_val)}/100."                    # The lead time hunger has always had: the world states
                     # the danger BEFORE it starts, not on the heartbeat it
                     # begins. This sentence was gated on thirst >= 88, i.e.
                     # the exact tick DEHYDRATION_DRAIN applies, so an agent
@@ -1808,6 +1821,21 @@ def build_system_prompt(context: AgentContext) -> str:
                     + f"carried fresh_water units: {carried_water}. "
                     "Thirst rises 0.8 each heartbeat."
                 )
+                # Phase 10QM: the water they KNOW about, with a distance.
+                # Measured overnight: 397 heartbeats with rivers in both
+                # lanes' own roll-ups four to five tiles away and not one
+                # drink from a river. The roll-up names the tiles and never
+                # says how far, and nothing connected being thirsty to
+                # knowing where water is.
+                known_water = getattr(context, "nearest_known_water", {}) or {}
+                if isinstance(known_water, dict) and known_water.get("tile_id"):
+                    _lines.append(
+                        f"Fact: the nearest drinkable tile you have observed "
+                        f"is {known_water['tile_id']}, "
+                        f"{int(known_water.get('distance', 0))} tiles away "
+                        f"(distance is tiles, and you cross one tile per "
+                        f"heartbeat)."
+                    )
             hunger_val = _sb.get("hunger", 0) or 0
             if hunger_val >= 60:
                 hunger_int = round(hunger_val)
