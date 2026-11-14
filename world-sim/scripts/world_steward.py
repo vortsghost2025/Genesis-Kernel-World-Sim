@@ -248,7 +248,18 @@ def ensure_running(pair: str) -> list[str]:
     actions = []
     alive = chain_alive()
     if alive.get(pair):
-        return actions  # running, nothing to do
+        # Phase 10QK: alive is not the same as advancing. A chain wedged on a
+        # provider wall stays alive forever, retrying a 1200s heartbeat, and
+        # was left alone because its process existed. Past the restart
+        # threshold it is treated as down and restarted.
+        minutes = lane_stall_minutes(pair)
+        if minutes is None or minutes < STALL_RESTART_MINUTES:
+            return actions  # running and advancing; nothing to do
+        actions.append(f"{pair}: WEDGED - no heartbeat in {int(minutes)} "
+                       f"minutes (alive but not advancing); restarting")
+        kill_chain(pair)
+        clear_lock(pair)
+        # fall through to the ordinary start path below
 
     # .scratch can vanish (cleanup tools love gitignored dirs); without
     # it start_chain cannot open logs and every restart silently fails
@@ -404,11 +415,78 @@ def build_narrative_summary(pair: str, since_hb: int) -> dict:
     }
 
 
+def kill_chain(pair: str) -> int:
+    """Terminate the lockstep_chain.py processes for one lane.
+
+    Phase 10QK recovery path. Reuses the same psutil detection chain_alive()
+    uses, so there is one way to find these processes, not two.
+    """
+    killed = 0
+    try:
+        import psutil
+    except ImportError:
+        return 0
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or [])
+        except Exception:
+            continue
+        if "lockstep_chain.py" not in cmd:
+            continue
+        if f" {pair}" not in cmd and f'"{pair}"' not in cmd:
+            continue
+        try:
+            proc.terminate()
+            killed += 1
+        except Exception:
+            pass
+    return killed
+
+
+# --- Phase 10QK: a silent freeze is the failure mode that hurts most ------
+# Measured 2026-11-13: the NVIDIA lane hit its quota wall and no heartbeat
+# completed for five hours, while the digest reported "West: quiet". A lane
+# that has stopped is not quiet.
+STALL_REPORT_MINUTES = 30
+STALL_RESTART_MINUTES = 45  # beyond the chain's own 1200s budget + its retry
+
+
+def lane_stall_minutes(pair: str, now: float | None = None) -> float | None:
+    """Minutes since this lane last advanced, or None when unmeasurable.
+
+    The state file's mtime is the cheapest honest signal: persistence
+    rewrites it on every completed heartbeat, and a digest must not parse a
+    100 MB heartbeat log.
+    """
+    import time as _time
+
+    store = STORES.get(pair)
+    if store is None:
+        return None
+    try:
+        mtime = (Path(store) / "world_state.json").stat().st_mtime
+    except OSError:
+        return None
+    return max(0.0, ((_time.time() if now is None else now) - mtime) / 60.0)
+
+
+def lane_is_stalled(pair: str, threshold: float = STALL_REPORT_MINUTES,
+                    now: float | None = None) -> bool:
+    minutes = lane_stall_minutes(pair, now=now)
+    return minutes is not None and minutes >= threshold
+
+
 def build_digest(east: dict, west: dict) -> str:
     """One paragraph, TTS-friendly: what they did, what they said,
     what they need. No coordinates, no numbers, no telemetry."""
     parts = []
     for pair_name, data in (("East", east), ("West", west)):
+        # Phase 10QK: FIRST, so a frozen sim can never be summarised as
+        # behaviourally boring.
+        if lane_is_stalled(pair_name.lower()):
+            minutes = lane_stall_minutes(pair_name.lower()) or 0.0
+            parts.append(f"STALLED: {pair_name} has completed no heartbeat "
+                         f"in {int(minutes)} minutes")
         s = data.get("summary", "quiet")
         if s and s != "quiet":
             sentence = f"{pair_name}: {s}"

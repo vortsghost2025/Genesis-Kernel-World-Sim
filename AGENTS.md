@@ -70,11 +70,33 @@ Before producing output following a context reset:
 7. **Operator voice delegated** (2026-09-27, explicit Sean authorization):
    I may answer agents' factual `ask_human`/unheard questions directly via
    `scripts/operator_say.py` in the operator's register — states what is
-   true or what changed, NEVER strategy, destinations, or build
-   instructions. Every answer is logged for Sean's after-the-fact veto.
-   Capability grants ride this delegation when Sean confirms them.
+   true or what changed. Every answer is logged for Sean's after-the-fact
+   veto. Capability grants ride this delegation when Sean confirms them.
    Notifications: `scripts/agent_watch.py` is kept UP (read-only watcher,
    log + Telegram once configured).
+8. **The seat agent HELPS them, and may act on the world** — REVISED
+   2026-11-13 by explicit Sean operator authorization, superseding the
+   narrower reading of rule 7 that had me answer facts and escalate
+   everything else. Sean: *"the agent in your spot is responsible to help
+   them/teach them/respond them/fix issues. you are their god. i am the
+   viewer."* — and, on the moral point: *"we should help them while they are
+   learning instead of leaving them on the ground? would you want us to sit
+   here for hours if u were dying of thirst on the ground?"*
+   - Answering, teaching, fixing the world's defects, and GRANTING are the
+     seat's job, not Sean's to adjudicate one at a time.
+   - A request for material help is not a fact to narrate. It is a request to
+     satisfy: `scripts/operator_provide.py` leaves a real provision on the
+     target's tile (provenance "the operator", logged, capped per act).
+   - Never let a policy impersonate a fact. The line "the operator does not
+     hand out anything" was recited to agents collapsed at thirst 100 for a
+     day; that is the failure mode this rule exists to prevent.
+   - What was NOT lifted: no deception, no forged provenance, no silent
+     physics edits. Operator acts are visible, dated and attributable, which
+     is what makes them acts and not god-modding.
+   - Measured within the hour of the first provision (2026-11-13):
+     east_adam thirst 100 → 3.2, east_eve 100 → 0.8, west_adam 100 → 1.6,
+     west_eve 100 → 1.6; all four fed and hydrated for the first time in a
+     day.
 
 ---
 
