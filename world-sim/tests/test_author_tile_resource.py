@@ -161,18 +161,26 @@ def test_resource_id_convention_matches_the_existing_records():
     not (WORLD_SIM / "data" / "world" / "true_map.json").is_file(),
     reason="true map is gitignored; generate it first",
 )
-def test_the_live_map_still_satisfies_the_audit_for_the_authored_tile():
-    """The finding this tool was authorized to fix is actually fixed."""
+def test_the_live_map_still_satisfies_the_audit_for_the_authored_tiles():
+    """The findings this tool was authorized to fix are actually fixed.
+
+    Two operator authorizations on 2026-11-14: east_adam's occupied hill
+    cont_a_gen_-43_5, and west_adam's origin west-start-adam (whose sibling
+    origin west-start-eve carries stone). If the map is regenerated without
+    them, this fails loudly instead of the audit quietly going red.
+    """
     true_map = json.loads(
         (WORLD_SIM / "data" / "world" / "true_map.json").read_text(encoding="utf-8"))
     resources = {}
     for rec in true_map.get("resources", []):
         resources.setdefault(rec.get("tile_id"), []).append(rec)
-    tile = "cont_a_gen_-43_5"
-    if tile not in {t.get("tile_id") for t in true_map.get("tiles", [])}:
-        pytest.skip("tile absent from this generated map")
-    yield_total = sum(r.get("amount", 0) for r in resources.get(tile, [])
-                      if isinstance(r.get("amount"), int))
-    assert yield_total > 0, (
-        f"{tile} is still un-gatherable; run "
-        f"scripts/author_tile_resource.py --tile {tile} --kind stone --amount 4 --apply")
+    tile_ids = {t.get("tile_id") for t in true_map.get("tiles", [])}
+    for tile in ("cont_a_gen_-43_5", "west-start-adam"):
+        if tile not in tile_ids:
+            continue
+        yield_total = sum(r.get("amount", 0) for r in resources.get(tile, [])
+                          if isinstance(r.get("amount"), int))
+        assert yield_total > 0, (
+            f"{tile} is still un-gatherable; run "
+            f"scripts/author_tile_resource.py --tile {tile} --kind stone "
+            f"--amount 2 --apply (see the audit accepted-findings note)")

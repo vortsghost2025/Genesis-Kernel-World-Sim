@@ -43,15 +43,12 @@ ACCEPTED_FINDINGS = {
         "authoring resources onto a public tile (world-sim/data, which "
         "requires explicit operator authorization)."
     ),
-    "west-start-adam:barren": (
-        "found by the audit's first live run 2026-09-26, not designed: "
-        "west_adam's origin tile was authored with no resources. He has "
-        "occupied cont_b_gen_42_46 for 700+ heartbeats and only returns "
-        "to his origin rarely, so the cost is a truthful failed gather on "
-        "a tile that was never a resource site. Authoring stone or clay "
-        "onto it would change world-sim/data and needs explicit operator "
-        "authorization."
-    ),
+    # "west-start-adam:barren" lived here from 2026-09-26 until 2026-11-14.
+    # It is now FIXED rather than accepted: the operator authorized authoring a
+    # resource, and scripts/author_tile_resource.py put stone x2 on the tile,
+    # matching its sibling origin west-start-eve. Deleting the entry is the
+    # deliberate act described above -- if that tile ever goes barren again,
+    # the guard fails until a human looks at it.
 }
 
 
