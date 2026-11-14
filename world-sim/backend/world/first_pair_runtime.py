@@ -5174,7 +5174,20 @@ class FirstPairRuntime:
         applied: dict[str, Any] = {}
         for key, value in modifications.items():
             if key not in _ALLOWED_MUTABLE_FIELDS:
-                return {"status": "rejected", "reason": f"Cannot modify field: {key}"}
+                # Phase 10QL: name the action that DOES change this. Measured
+                # 23 refusals of "Cannot modify field: materials" - agents
+                # trying to put materials into their own object, which is the
+                # `deposit` operation, not a field edit.
+                hint = ""
+                if key in ("materials", "contents"):
+                    hint = (f" {key} is changed with use_object: operation "
+                            f"'deposit' puts materials in and 'extract' takes "
+                            f"them out.")
+                return {"status": "rejected",
+                        "reason": (f"Cannot modify field: {key}. Modifiable "
+                                   f"fields are: "
+                                   f"{', '.join(sorted(_ALLOWED_MUTABLE_FIELDS))}."
+                                   + hint)}
             if isinstance(value, str):
                 sanitized = sanitize_public_text(value)
                 if not sanitized.strip():

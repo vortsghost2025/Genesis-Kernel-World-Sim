@@ -154,6 +154,27 @@ def test_the_hew_timber_refusal_names_the_route(tmp_path):
 # C. a stage named as a type is told what it is
 # ---------------------------------------------------------------------------
 
+def test_a_refused_field_edit_names_the_action_that_works(tmp_path):
+    """23 x "Cannot modify field: materials" - an agent putting materials into
+    its own object, which is `deposit`, not a field edit."""
+    rt = _runtime(tmp_path)
+    rt._world_state.public_objects["mine"] = {
+        "object_id": "mine", "object_type": "storage",
+        "tile_id": TILE,
+        "creator_agent_id": rt._agent_view("east_adam")["agent_id"],
+        "public_description": "a store", "materials": {}, "contents": {},
+        "created_heartbeat": 99,
+    }
+    res = rt._execute_action("east_adam", {
+        "action_type": "modify_owned_public_object", "target_object_id": "mine",
+        "modifications": {"materials": {"wood": 1}}, "reason": "add wood",
+    }, 101)
+    assert res["status"] == "rejected", res
+    reason = res["reason"].lower()
+    assert "modifiable fields are" in reason or "modifiable fields" in reason
+    assert "deposit" in reason and "extract" in reason
+
+
 def test_naming_a_construction_stage_as_a_type_says_it_is_a_stage(tmp_path):
     """19 x "A foundation is not a structure this world knows how to raise."
     `foundation` is a STAGE of every build, so the refusal must say that.
