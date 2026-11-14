@@ -2965,6 +2965,29 @@ class FirstPairRuntime:
             capacity *= 2
         return capacity
 
+    # Phase 10RF: where a kind actually comes from, so an empty-container
+    # refusal names a route instead of only a number.
+    _KIND_SOURCES = {
+        "fresh_water": ("Water is drunk at a river or lake tile, or from a "
+                        "filled cistern or a home that has banked it."),
+        "wood": "Wood is gathered from a tile whose resources list it.",
+        "stone": "Stone is gathered from a tile whose resources list it.",
+        "clay": "Clay is gathered from a tile whose resources list it.",
+        "timber": "Timber is hewn from wood, at a wood tile, with a stone_axe.",
+        "iron_ore": "Iron ore is gathered from a tile whose resources list it.",
+        "fiber_plants": ("Fiber plants are gathered from a tile whose resources "
+                         "list them."),
+        "edible_roots": ("Edible roots are gathered from a tile whose resources "
+                         "list them."),
+    }
+
+    def _kind_source_hint(self, kind: str) -> str:
+        known = self._KIND_SOURCES.get(str(kind))
+        if known:
+            return known
+        return (f"{kind} is gathered from a tile whose resources list it, or "
+                f"taken from a container that already holds it.")
+
     def _home_water_capacity(self, obj_id: str) -> int:
         """How much fresh water a dwelling can bank, from its home's best rung.
 
@@ -5191,9 +5214,23 @@ class FirstPairRuntime:
                             "reason": f"Invalid amount for {kind}: {amount}"}
                 contained = obj["contents"].get(kind, 0)
                 if contained < amount:
-                    return {"status": "rejected",
-                            "reason": f"Not enough {kind} in object: holds "
-                                      f"{contained}, tried to extract {amount}"}
+                    # Phase 10RF: "holds 0, tried to extract 3" reported a number
+                    # and not a situation. Measured 2026-11-14: two east agents
+                    # asked for fresh_water from an empty cache for SIX
+                    # consecutive heartbeats (13681-13686) and were refused with
+                    # that line every time, while they froze at warmth 12 with
+                    # vitality 1.6 and 0.8. A refusal must name the next step
+                    # (10QL), and for an EMPTY container the next step is where
+                    # that kind actually comes from.
+                    if contained <= 0:
+                        return {"status": "rejected", "reason": (
+                            f"{obj_id} is EMPTY: it holds no {kind} to extract, "
+                            f"and a {obj_type} gives back only what was put into "
+                            f"it. {self._kind_source_hint(kind)}")}
+                    return {"status": "rejected", "reason": (
+                        f"{obj_id} holds {contained} of {kind}, less than the "
+                        f"{amount} you asked for. Extracting {contained} would "
+                        f"work.")}
             # All checks pass; move the materials via the persistence layer
             for kind, amount in materials.items():
                 obj_contents = obj["contents"]
