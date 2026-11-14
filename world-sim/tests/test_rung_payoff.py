@@ -236,9 +236,13 @@ def test_west_live_settlement_clears_the_old_cap(tmp_path):
     assert footprint >= 8, footprint
     weight = rt._home_tier_weight("cont_a_gen_0_0")
     assert weight > 8, (weight, footprint)
+    # 10QU repriced warmth onto the rung, so 46 cabins now read as a CABIN
+    # (62.0) rather than as the top row of the table. The settlement's size
+    # still shows where size belongs -- the tier weight above -- and its
+    # ceiling is the rung it has not built yet.
     params = rt._shelter_params_for("cont_a_gen_0_0")
-    assert params["comfort_floor"] > _TIERS_10PJ[-1][1]
-    assert weight < _HOME_NETWORK_TIERS[-1][0], (
+    assert params["comfort_floor"] == 62.0
+    assert rt._home_tier_weight("cont_a_gen_0_0") < _HOME_NETWORK_TIERS[-1][0], (
         "a settlement of cabins must still have somewhere to climb")
 
 

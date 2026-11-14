@@ -567,6 +567,14 @@ _CELLAR_FOOD_BUDGET_PER_FOOTPRINT = 20
 # world whose capacity is measured in units someone carried home.
 _CISTERN_WATER_CAPACITY = 20
 
+# Phase 10QU: what a HOME can bank, keyed to its best rung. Mirrors the cellar's
+# food budget. The cistern keeps its own 20 constant above, so the rung-6
+# cistern remains the best store in the world. A lean-to holds a little rather
+# than nothing: a dwelling that holds water was ALREADY drinkable at its tile
+# (10QJ generalised _cistern_on_tile to any object holding fresh_water), so
+# this must remove no capability -- it gives the capacity a name and a ladder.
+_WATER_STORE_BY_RUNG = {1: 3, 2: 6, 3: 10, 4: 14, 5: 18, 6: 20}
+
 # Phase 10QC: roofed tiles past this many stop adding warmth. The operator
 # has been rejecting the "15 single houses beside each other" settlement
 # shape since 10PH; until now an extra shack always paid +1 footprint
@@ -583,6 +591,18 @@ _FOOTPRINT_SATURATION = 12
 # One house (tier weight 10, comfort floor 75) clears seven lean-tos
 # (7 units, floor 68), which is the whole point of the change.
 _RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
+
+# Phase 10QU: the WARMTH ladder is keyed to what a home IS -- its best rung --
+# not to how many tiles it covers. Maps a rung onto a row of the unchanged
+# _HOME_NETWORK_TIERS table above, so there is ONE source of truth for the
+# numbers. Measured 2026-11-14, operator: "maybe there just isint enough
+# benefits for them to build a single main shelter and then just have smaller
+# temp shelter when exploring." He was right: footprint drove the warmth lookup,
+# so twelve shacks out-warmed one well-built house, and a lone lean-to (floor
+# 45.0) was already 25 points above FREEZE_THRESHOLD (20) -- survival stopped
+# being a reason to build anything better. Size still buys SPACE (cellar food
+# capacity, tier weight, rooms); quality now buys WARMTH and RECOVERY.
+_THERMAL_TIER_BY_RUNG = {1: 1, 2: 2, 3: 3, 4: 5, 5: 8, 6: 12}
 
 
 def _home_tier_weight(footprint: int, best_rung: int) -> int:
@@ -605,6 +625,22 @@ def _home_network_tier(footprint: int) -> tuple[float, float, float, float, floa
         if footprint >= threshold:
             params = (floor, decay, regen, downed, approach)
     return params
+
+
+def _home_thermal_index(best_rung: int, explicit: int = 0) -> int:
+    """The _HOME_NETWORK_TIERS row a home earns, from its BEST RUNG.
+
+    Phase 10QU. The single place that decides how warm a home is, so the
+    disclosed numbers (see `_home_rung_for`) and the physics (see
+    `_shelter_params_for`) cannot drift apart.
+
+    `explicit` is the 10PJ addon compound's declared thermal_mass, still
+    honoured as a FLOOR so an authored compound cannot read worse than it
+    declares.
+    """
+    top = max(_THERMAL_TIER_BY_RUNG)
+    rung = max(1, min(top, int(best_rung or 1)))
+    return max(_THERMAL_TIER_BY_RUNG[rung], int(explicit or 0))
 
 
 def _roofed_structure_weight(object_type: str, record: dict | None = None) -> int:
@@ -1818,7 +1854,9 @@ class FirstPairRuntime:
         if not position:
             return {}
         footprint, best_rung, _ids = self._home_network_detail(position)
-        tier = _home_network_tier(_home_tier_weight(footprint, best_rung))
+        # Phase 10QU: derive the disclosed tier through the SAME helper the
+        # physics uses, or the agent is told a floor it does not get.
+        tier = _home_network_tier(_home_thermal_index(best_rung))
         here = None
         pos_xy = self._tile_xy(position)
         for record in (self._world_state.public_objects or {}).values():
@@ -1853,6 +1891,7 @@ class FirstPairRuntime:
             "rest_regen": tier[2],
             "downed_regen": tier[3],
             "cellar_budget": self._cellar_food_capacity(str(here.get("object_id", ""))),
+            "water_store": self._home_water_capacity(str(here.get("object_id", ""))),
         }
 
     def _construction_here_for(self, agent_ref: str, position: str | None) -> dict:
@@ -2896,7 +2935,11 @@ class FirstPairRuntime:
         # derived walk found nothing.
         footprint = max(footprint, explicit)
         tier_weight = max(self._home_tier_weight(tile_id), explicit)
-        floor, decay, regen, downed_regen, approach = _home_network_tier(tier_weight)
+        # Phase 10QU: warmth is keyed to the home's BEST RUNG, not to how many
+        # tiles it spans. `tier_weight` still drives capacity and scoring.
+        _fp_detail, best_rung, _ids = self._home_network_detail(str(tile_id or ""))
+        thermal_index = _home_thermal_index(best_rung, explicit)
+        floor, decay, regen, downed_regen, approach = _home_network_tier(thermal_index)
         return {
             "footprint": footprint,
             "tier_weight": tier_weight,
@@ -2921,6 +2964,26 @@ class FirstPairRuntime:
         if longhouse_here:
             capacity *= 2
         return capacity
+
+    def _home_water_capacity(self, obj_id: str) -> int:
+        """How much fresh water a dwelling can bank, from its home's best rung.
+
+        Phase 10QU. Water is what has actually killed them -- three of four
+        agents collapsed at thirst 100, and not one object in either lane had
+        ever held a unit of fresh_water. The ability to drink from a dwelling's
+        store already existed (10QJ generalised `_cistern_on_tile` to any object
+        whose contents hold fresh_water, including by a collapsed body); what
+        was missing was a capacity a home could be TOLD about, so the plan could
+        form. Mirrors `_cellar_food_capacity`, but keyed to quality rather than
+        size, like the warmth ladder.
+        """
+        record = (self._world_state.public_objects or {}).get(obj_id) or {}
+        tile_id = str(record.get("tile_id", ""))
+        best = 1
+        for rec in self._network_dwellings(tile_id):
+            best = max(best, self._record_rung(rec))
+        top = max(_WATER_STORE_BY_RUNG)
+        return _WATER_STORE_BY_RUNG[max(1, min(top, int(best or 1)))]
 
     def _network_dwellings(self, tile_id: str) -> list[dict]:
         """Roofed records in the connected home network reached from a tile."""
@@ -5075,6 +5138,23 @@ class FirstPairRuntime:
                         "reason": (
                             f"Cistern water capacity exceeded: holds {current_water} "
                             f"of {capacity} units"
+                        ),
+                    }
+            # Phase 10QU: a HOME banks water too, up to what its rung earns.
+            # The cistern branch above keeps its own capacity; this covers every
+            # other dwelling, so "carry water home and keep it" is a plan the
+            # ladder now pays for.
+            if self._record_shelters(obj) and obj_type.strip().lower() != "cistern":
+                water_store = self._home_water_capacity(obj_id)
+                current_water = int((obj.get("contents") or {}).get("fresh_water", 0) or 0)
+                incoming_water = int(materials.get("fresh_water", 0) or 0)
+                if incoming_water and current_water + incoming_water > water_store:
+                    return {
+                        "status": "rejected",
+                        "reason": (
+                            f"This home stores up to {water_store} units of fresh "
+                            f"water and already holds {current_water}. A better "
+                            f"home stores more."
                         ),
                     }
             # All checks pass; move the materials via the persistence layer

@@ -55,16 +55,28 @@ def test_network_rejects_disconnected_and_non_roofed(tmp_path):
     assert rt._home_network_footprint("cont_a_gen_0_0") == 1
 
 
-def test_shelter_params_scale_with_network_and_explicit_compound_fallback(tmp_path):
+def test_shelter_params_follow_the_best_rung_and_the_compound_fallback(tmp_path):
+    """10QU repriced this: warmth follows the network's BEST RUNG, not its size.
+
+    The network still REPORT its footprint (size buys space), but five rung-less
+    shelters no longer read as a warm home: they are a lean-to's 45.0 floor. One
+    cabin among them is what raises it.
+    """
     rt = _runtime(tmp_path)
     for x in range(5):
         rt._world_state.public_objects[f"s{x}"] = _obj("shelter", x + 1, 0)
-    tier = rt._shelter_params_for("cont_a_gen_0_0")
-    assert tier["footprint"] == 5
-    assert tier["comfort_floor"] == 68.0
-    assert tier["shelter_decay_factor"] == 0.14
-    assert tier["regen_rate"] == 1.75
-    assert tier["downed_regen_rate"] == 0.9
+    shanty = rt._shelter_params_for("cont_a_gen_0_0")
+    assert shanty["footprint"] == 5
+    assert shanty["comfort_floor"] == 45.0, "a shanty town is not a warm home"
+    assert shanty["shelter_decay_factor"] == 0.45
+    assert shanty["regen_rate"] == 1.0
+
+    rt._world_state.public_objects["cabin"] = _obj("cabin", 5, 0)
+    upgraded = rt._shelter_params_for("cont_a_gen_0_0")
+    assert upgraded["comfort_floor"] == 62.0, "one cabin must raise the home"
+    assert upgraded["shelter_decay_factor"] == 0.18
+    assert upgraded["regen_rate"] == 1.5
+    assert upgraded["downed_regen_rate"] == 0.7
 
     rt2 = _runtime(tmp_path / "more")
     rt2._world_state.compounds = {

@@ -305,12 +305,14 @@ def test_home_rung_disclosure_is_a_fact_without_directives():
         "object_id": "house-1", "object_type": "house", "rung": 4,
         "weight": 3, "footprint": 9, "comfort_floor": 75.0,
         "cold_decay": 0.10, "rest_regen": 2.0, "downed_regen": 1.1,
-        "cellar_budget": 180,
+        "cellar_budget": 180, "water_store": 14,
     })
     prompt = m.build_system_prompt(ctx)
     line = ("Fact: you are inside a house (rung 4) with footprint 9; "
             "comfort floor is 75; cold decay factor is 0.1; "
-            "rest recovery is 2 per heartbeat; cellar food budget is 180 units.")
+            "rest recovery is 2 per heartbeat; cellar food budget is 180 units; "
+            "it can bank 14 units of fresh water, and while it holds water this "
+            "tile can be drunk from.")
     assert line in prompt, line
     for banned in _BANNED_DIRECTIVE_PHRASES:
         assert banned not in line.lower(), banned

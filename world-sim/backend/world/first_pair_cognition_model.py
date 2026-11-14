@@ -2116,7 +2116,9 @@ def build_system_prompt(context: AgentContext) -> str:
             f"comfort floor is {home.get('comfort_floor', 45):g}; "
             f"cold decay factor is {home.get('cold_decay', 0.45):g}; "
             f"rest recovery is {home.get('rest_regen', 1.0):g} per heartbeat; "
-            f"cellar food budget is {home.get('cellar_budget', 20)} units."
+            f"cellar food budget is {home.get('cellar_budget', 20)} units; "
+            f"it can bank {home.get('water_store', 3)} units of fresh water, "
+            f"and while it holds water this tile can be drunk from."
         )
 
     # Phase 10QE: the partner's condition, as a fact. The operator asked what
