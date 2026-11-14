@@ -5183,6 +5183,110 @@ function rebuildInteriorVolume() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 10QO: what is actually INSIDE a home.
+//
+// Operator, 2026-11-14: "i still find the interior of the house to be very
+// bland they have 8 houses but zero things inside."
+//
+// Measured on the live West settlement: the interior view picked the nearest
+// roofed structure to the walking agent - a bare lean-to one tile away whose
+// ONLY object was itself - and drew a beige box, while 147 objects stood
+// within two tiles of the settlement core and the richest single tile held
+// 72. Two defects, both here:
+//
+//   1. it looked at ONE tile's objects, but a home is a connected compound
+//      (the world's own `_connected_home_network` counts adjacent roofed
+//      structures as one home), so a house's furniture standing on the
+//      neighbouring tile was invisible;
+//   2. its prop vocabulary covered six object types, while the lanes contain
+//      wells, furnaces, forges, containers, barrels, ladders, tools and
+//      storage - every one of them drawn as nothing.
+//
+// `neighbourhoodObjects` gathers the home's real contents and
+// `interiorPropPlan` turns them into a placed, bounded prop list. Both are
+// pure so they can be asserted in node without a browser.
+// ---------------------------------------------------------------------------
+const INTERIOR_PROP_CAP = 14;
+
+function _tileCoordOf(tid) {
+  const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid || ""));
+  return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+}
+
+// The home's real contents: this tile and its immediate neighbours, which is
+// what a compound is. `reconstructPublicObjectsAtHb` already answers "what
+// existed then", so the room stays honest about the heartbeat being viewed.
+function neighbourhoodObjects(pairName, hb, tileId) {
+  const centre = _tileCoordOf(tileId);
+  if (!centre) return [];
+  const all = reconstructPublicObjectsAtHb(pairName, hb) || [];
+  const out = [];
+  for (const obj of all) {
+    const c = _tileCoordOf(obj.tile_id);
+    if (!c) continue;
+    if (Math.max(Math.abs(c.x - centre.x), Math.abs(c.y - centre.y)) <= 1) {
+      out.push(obj);
+    }
+  }
+  // deterministic: nearest to the centre tile first, then by id
+  out.sort((a, b) => {
+    const ca = _tileCoordOf(a.tile_id), cb = _tileCoordOf(b.tile_id);
+    const da = Math.max(Math.abs(ca.x - centre.x), Math.abs(ca.y - centre.y));
+    const db = Math.max(Math.abs(cb.x - centre.x), Math.abs(cb.y - centre.y));
+    if (da !== db) return da - db;
+    return String(a.object_id || "").localeCompare(String(b.object_id || ""));
+  });
+  return out;
+}
+
+// Classify one object into the thing the room should draw, or null when it is
+// a structure (the room IS that) or scenery.
+function interiorPropKind(objectType) {
+  const t = String(objectType || "").toLowerCase();
+  if (!t) return null;
+  if (t.includes("fire") || t.includes("hearth") || t === "campfire") return "hearth";
+  if (t.includes("forge") || t.includes("furnace") || t.includes("smelter")) return "forge";
+  if (t.includes("well") || t.includes("cistern")) return "well";
+  if (t.includes("bed")) return "bed";
+  if (t.includes("ladder")) return "ladder";
+  if (t.includes("crafting") || t.includes("workbench") || t.includes("anvil")) return "workbench";
+  if (t.includes("table")) return "table";
+  if (t.includes("chair") || t.includes("stool") || t.includes("bench")) return "chair";
+  if (t.includes("container") || t.includes("barrel") || t.includes("crate")
+      || t.includes("chest") || t.includes("basket") || t.includes("storage")
+      || t.includes("cache") || t.includes("cellar") || t.includes("pot")
+      || t.includes("urn")) return "storage";
+  if (t.includes("tool") || t.includes("rack")) return "tools";
+  if (t.includes("wall") || t.includes("roof") || t.includes("shelter")
+      || t.includes("cabin") || t.includes("hut") || t.includes("lean")
+      || t.includes("house") || t.includes("longhouse")) return null; // structure
+  if (t.includes("garden") || t.includes("field") || t.includes("pen")
+      || t.includes("corral")) return "garden";
+  return null;
+}
+
+// How many of each kind the room can hold before it stops reading as a room.
+const INTERIOR_PROP_LIMITS = {
+  hearth: 1, forge: 1, well: 1, bed: 2, ladder: 1, workbench: 2,
+  table: 1, chair: 3, storage: 4, tools: 1, garden: 1,
+};
+
+function interiorPropPlan(objects) {
+  const counts = {};
+  const plan = [];
+  for (const obj of (objects || [])) {
+    const kind = interiorPropKind(obj && obj.object_type);
+    if (!kind) continue;
+    const limit = INTERIOR_PROP_LIMITS[kind] || 1;
+    const n = counts[kind] || 0;
+    if (n >= limit) continue;
+    counts[kind] = n + 1;
+    plan.push({ kind, index: n, object_id: obj.object_id || null });
+  }
+  return plan.slice(0, INTERIOR_PROP_CAP);
+}
+
 function rebuildInteriorProps(tileId, pairName, hb) {
   // Clear and dispose any dynamic interior props
   while (interiorPropsGroup.children.length > 0) {
@@ -5197,91 +5301,185 @@ function rebuildInteriorProps(tileId, pairName, hb) {
 
   if (!tileId) return;
 
-  const activeObjects = reconstructPublicObjectsAtHb(pairName, hb);
-  const tileObjs = activeObjects.filter(o => o.tile_id === tileId);
+  // Phase 10QO: the whole home, not one tile. A compound's furniture stands
+  // on the neighbouring tiles, and the world counts adjacent roofed
+  // structures as one home - so the room shows that home's contents.
+  const contents = neighbourhoodObjects(pairName, hb, tileId);
+  const plan = interiorPropPlan(contents);
 
-  let hasHearth = false;
-  let hasBed = false;
-  let hasTable = false;
-  let hasChair = false;
-  let hasStorage = false;
-  let hasWorkbench = false;
+  // Slots around the room, so several of a kind sit like furniture instead of
+  // overlapping in the middle.
+  const SLOTS = [
+    { x: 0.0, z: -1.5 }, { x: -1.7, z: -1.4 }, { x: 1.7, z: -1.4 },
+    { x: -1.9, z: 0.2 }, { x: 1.9, z: 0.2 },
+    { x: -1.7, z: 1.5 }, { x: 1.7, z: 1.5 }, { x: 0.0, z: 1.7 },
+    { x: -0.9, z: -0.4 }, { x: 0.9, z: -0.4 },
+    { x: -0.9, z: 0.9 }, { x: 0.9, z: 0.9 },
+    { x: 0.0, z: 0.6 }, { x: -2.0, z: -0.6 },
+  ];
+  const slotAt = (i) => SLOTS[i % SLOTS.length];
 
-  for (const obj of tileObjs) {
-    const otype = String(obj.object_type || "").toLowerCase();
-    if (otype.includes("fire") || otype.includes("hearth") || otype === "campfire") hasHearth = true;
-    else if (otype.includes("bed")) hasBed = true;
-    else if (otype.includes("table")) hasTable = true;
-    else if (otype.includes("chair") || otype.includes("bench") || otype.includes("stool")) hasChair = true;
-    else if (otype.includes("storage") || otype.includes("chest") || otype.includes("box") || otype.includes("crate") || otype.includes("barrel")) hasStorage = true;
-    else if (otype.includes("crafting") || otype.includes("workbench") || otype.includes("forge")) hasWorkbench = true;
-  }
+  let slotCursor = 8; // kinds get their own preferred slots first
+  const PREFERRED = {
+    hearth: 0, forge: 1, well: 2, ladder: 5, bed: 3, workbench: 6,
+    table: 11, chair: 12, storage: 7, tools: 9, garden: 10,
+  };
 
-  // 1. Hearth / Fireplace (only if campfire/hearth object exists on tile)
-  if (hasHearth) {
-    const hsGeom = new THREE.CylinderGeometry(0.55, 0.65, 0.25, 12);
-    const hsMat = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 });
-    const hsMesh = new THREE.Mesh(hsGeom, hsMat);
-    hsMesh.position.set(0, 0.15, 0);
-    interiorPropsGroup.add(hsMesh);
+  for (const item of plan) {
+    const slot = (item.index === 0 && PREFERRED[item.kind] != null)
+      ? SLOTS[PREFERRED[item.kind]]
+      : slotAt(slotCursor++);
+    const at = { x: slot.x + (item.index % 2 ? 0.18 : -0.18), z: slot.z };
 
-    const hLight = new THREE.PointLight(0xff8822, 1.4, 9);
-    hLight.position.set(0, 0.65, 0);
-    interiorPropsGroup.add(hLight);
-
-    const hFlame = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: propTextures.campfire,
-      transparent: true,
-      alphaTest: 0.3
-    }));
-    hFlame.scale.set(0.9, 0.85, 1);
-    hFlame.position.set(0, 0.55, 0);
-    interiorPropsGroup.add(hFlame);
-  }
-
-  // 2. Bed (only if bed object exists on tile)
-  if (hasBed) {
-    const bGeom = new THREE.BoxGeometry(1.6, 0.15, 0.9);
-    const bMat = new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 });
-    const bMesh = new THREE.Mesh(bGeom, bMat);
-    bMesh.position.set(-1.3, 0.1, 0.7);
-    interiorPropsGroup.add(bMesh);
-  }
-
-  // 3. Table
-  if (hasTable) {
-    const tGeom = new THREE.BoxGeometry(1.2, 0.5, 0.8);
-    const tMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.85 });
-    const tMesh = new THREE.Mesh(tGeom, tMat);
-    tMesh.position.set(0.9, 0.25, -0.6);
-    interiorPropsGroup.add(tMesh);
-  }
-
-  // 4. Chair
-  if (hasChair) {
-    const chGeom = new THREE.BoxGeometry(0.45, 0.4, 0.45);
-    const chMat = new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 });
-    const chMesh = new THREE.Mesh(chGeom, chMat);
-    chMesh.position.set(0.9, 0.2, 0.2);
-    interiorPropsGroup.add(chMesh);
-  }
-
-  // 5. Storage / Crate / Chest / Barrel
-  if (hasStorage) {
-    const cGeom = new THREE.BoxGeometry(0.7, 0.6, 0.7);
-    const cMat = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 });
-    const cMesh = new THREE.Mesh(cGeom, cMat);
-    cMesh.position.set(1.4, 0.32, 0.8);
-    interiorPropsGroup.add(cMesh);
-  }
-
-  // 6. Workbench / Crafting Surface
-  if (hasWorkbench) {
-    const wbGeom = new THREE.BoxGeometry(1.4, 0.55, 0.6);
-    const wbMat = new THREE.MeshStandardMaterial({ color: 0x825a32, roughness: 0.85 });
-    const wbMesh = new THREE.Mesh(wbGeom, wbMat);
-    wbMesh.position.set(-1.2, 0.28, -0.8);
-    interiorPropsGroup.add(wbMesh);
+    if (item.kind === "hearth") {
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.6, 0.22, 12),
+        new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 }));
+      base.position.set(at.x, 0.12, at.z);
+      interiorPropsGroup.add(base);
+      const light = new THREE.PointLight(0xff8822, 1.4, 9);
+      light.position.set(at.x, 0.6, at.z);
+      interiorPropsGroup.add(light);
+      const flame = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: propTextures.campfire, transparent: true, alphaTest: 0.3 }));
+      flame.scale.set(0.85, 0.8, 1);
+      flame.position.set(at.x, 0.5, at.z);
+      interiorPropsGroup.add(flame);
+    } else if (item.kind === "forge") {
+      // A forge is a squat stone block with an ember glow: the thing the
+      // lanes actually built five of and never saw.
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(0.95, 0.8, 0.7),
+        new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 }));
+      block.position.set(at.x, 0.4, at.z);
+      interiorPropsGroup.add(block);
+      const ember = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.12, 0.35),
+        new THREE.MeshStandardMaterial({ color: 0xd2451a, emissive: 0x7a2408,
+                                         emissiveIntensity: 1.3, roughness: 0.7 }));
+      ember.position.set(at.x, 0.83, at.z);
+      interiorPropsGroup.add(ember);
+      const glow = new THREE.PointLight(0xff6622, 1.0, 6);
+      glow.position.set(at.x, 0.9, at.z);
+      interiorPropsGroup.add(glow);
+    } else if (item.kind === "well") {
+      // A stone ring: open, so the hole is the point.
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.46, 0.5, 12, 1, true),
+        new THREE.MeshStandardMaterial({ color: 0x6f6a60, roughness: 0.95,
+                                         side: THREE.DoubleSide }));
+      ring.position.set(at.x, 0.25, at.z);
+      interiorPropsGroup.add(ring);
+      const water = new THREE.Mesh(
+        new THREE.CircleGeometry(0.36, 14),
+        new THREE.MeshStandardMaterial({ color: 0x2f5d6b, roughness: 0.25,
+                                         transparent: true, opacity: 0.9 }));
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(at.x, 0.18, at.z);
+      interiorPropsGroup.add(water);
+    } else if (item.kind === "ladder") {
+      const rail = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.9 });
+      for (const off of [-0.16, 0.16]) {
+        const r = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.7, 0.06), rail);
+        r.position.set(at.x + off, 0.85, at.z);
+        interiorPropsGroup.add(r);
+      }
+      for (let s = 0; s < 6; s++) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.05), rail);
+        st.position.set(at.x, 0.18 + s * 0.28, at.z);
+        interiorPropsGroup.add(st);
+      }
+    } else if (item.kind === "bed") {
+      const frame = new THREE.Mesh(
+        new THREE.BoxGeometry(1.7, 0.16, 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 }));
+      frame.position.set(at.x, 0.12, at.z);
+      interiorPropsGroup.add(frame);
+      const blanket = new THREE.Mesh(
+        new THREE.BoxGeometry(1.5, 0.12, 0.82),
+        new THREE.MeshStandardMaterial({ color: 0x9a5b3a, roughness: 0.98 }));
+      blanket.position.set(at.x, 0.24, at.z);
+      interiorPropsGroup.add(blanket);
+    } else if (item.kind === "workbench") {
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(1.3, 0.12, 0.6),
+        new THREE.MeshStandardMaterial({ color: 0x825a32, roughness: 0.85 }));
+      top.position.set(at.x, 0.5, at.z);
+      interiorPropsGroup.add(top);
+      for (const lx of [-0.5, 0.5]) {
+        const leg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.5, 0.5),
+          new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
+        leg.position.set(at.x + lx, 0.25, at.z);
+        interiorPropsGroup.add(leg);
+      }
+      const vice = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.16, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0x3f3b38, roughness: 0.8 }));
+      vice.position.set(at.x + 0.4, 0.63, at.z);
+      interiorPropsGroup.add(vice);
+    } else if (item.kind === "tools") {
+      // A tool rack: the 33 tool objects the lanes hold, made visible.
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 1.2, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
+      post.position.set(at.x, 0.6, at.z);
+      interiorPropsGroup.add(post);
+      const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.42, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0xb9b3a6, roughness: 0.55,
+                                         metalness: 0.35 }));
+      blade.position.set(at.x + 0.12, 0.95, at.z);
+      interiorPropsGroup.add(blade);
+    } else if (item.kind === "storage") {
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(0.66, 0.56, 0.66),
+        new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 }));
+      box.position.set(at.x, 0.3, at.z);
+      interiorPropsGroup.add(box);
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.08, 0.7),
+        new THREE.MeshStandardMaterial({ color: 0x4a3016, roughness: 0.85 }));
+      band.position.set(at.x, 0.5, at.z);
+      interiorPropsGroup.add(band);
+    } else if (item.kind === "table") {
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.1, 0.75),
+        new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.85 }));
+      top.position.set(at.x, 0.48, at.z);
+      interiorPropsGroup.add(top);
+      for (const [lx, lz] of [[-0.45, -0.28], [0.45, -0.28], [-0.45, 0.28], [0.45, 0.28]]) {
+        const leg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.46, 0.08),
+          new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
+        leg.position.set(at.x + lx, 0.23, at.z + lz);
+        interiorPropsGroup.add(leg);
+      }
+    } else if (item.kind === "chair") {
+      const seat = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.09, 0.42),
+        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
+      seat.position.set(at.x, 0.42, at.z);
+      interiorPropsGroup.add(seat);
+      const back = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.44, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
+      back.position.set(at.x, 0.64, at.z - 0.17);
+      interiorPropsGroup.add(back);
+    } else if (item.kind === "garden") {
+      const soil = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.14, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x3d2a18, roughness: 1.0 }));
+      soil.position.set(at.x, 0.07, at.z);
+      interiorPropsGroup.add(soil);
+      for (let g = 0; g < 5; g++) {
+        const sprout = new THREE.Mesh(
+          new THREE.ConeGeometry(0.06, 0.24, 6),
+          new THREE.MeshStandardMaterial({ color: 0x4e7a34, roughness: 0.9 }));
+        sprout.position.set(at.x - 0.4 + g * 0.2, 0.24, at.z);
+        interiorPropsGroup.add(sprout);
+      }
+    }
   }
 }
 
@@ -5345,6 +5543,28 @@ function hideExteriorPropsForInterior() {
     cutawayShelterProps.push(child);
   }
   cutawayShelterProp = cutawayShelterProps[0] || null;
+
+  // Phase 10QO: the scenery and the animals go too. Operator screenshot,
+  // 2026-11-14: a berry bush and a deer stood INSIDE the room, because only
+  // object props were hidden. A house with a deer in the front room is not a
+  // house. Scenery and fauna are whole-continent groups, so they are hidden
+  // wholesale (cheapest and they are invisible inside anyway); the existing
+  // restore path already walks `cutawayShelterProps`, so they are tracked
+  // with the same list and come back on exit.
+  const extraGroups = [];
+  if (typeof sceneryGroups !== "undefined" && sceneryGroups[cid]) {
+    extraGroups.push(sceneryGroups[cid]);
+  }
+  if (typeof faunaFiguresGroup !== "undefined" && faunaFiguresGroup) {
+    extraGroups.push(faunaFiguresGroup);
+  }
+  for (const grp of extraGroups) {
+    for (const child of grp.children) {
+      if (!child.visible) continue;
+      child.visible = false;
+      cutawayShelterProps.push(child);
+    }
+  }
 }
 
 function refreshInteriorProps() {
@@ -5971,22 +6191,52 @@ function applyCameraMode(mode, immediate = true) {
     let targetTid = null;
     let closestDist = Infinity;
     const pobjs = (PAIRS[pairName] || {}).public_objects || {};
+    // Phase 10QO: prefer a house with something IN it. Measured 2026-11-14:
+    // following the walking agent picked the nearest roofed structure - a
+    // bare lean-to one tile away whose only object was itself - and drew a
+    // beige box, while 147 objects stood two tiles from the settlement core.
+    // An operator asking for "the interior" wants a house worth entering.
+    const _interiorCandidates = [];
+    const _allAtHb = reconstructPublicObjectsAtHb(pairName, currentHb) || [];
+    const _centreOf = (tid) => {
+      const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid || ""));
+      return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+    };
+    const _propsNear = (tid) => {
+      const c = _centreOf(tid);
+      if (!c) return 0;
+      const near = _allAtHb.filter((o) => {
+        const q = _centreOf(o.tile_id);
+        return q && Math.max(Math.abs(q.x - c.x), Math.abs(q.y - c.y)) <= 1
+          && interiorPropKind(o.object_type);
+      });
+      return interiorPropPlan(near).length;
+    };
     for (const obj of Object.values(pobjs)) {
       if (!obj) continue;
       const otype = String(obj.object_type || "").toLowerCase();
-      if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut")) {
+      if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut")
+          || otype.includes("house")) {
         const tid = obj.tile_id;
         const t = tilesById.get(tid);
         if (t && t.coordinates) {
-          const d = Math.hypot(t.coordinates.x - ax, t.coordinates.y - az);
-          if (d < closestDist) {
-            closestDist = d;
-            targetX = t.coordinates.x;
-            targetZ = t.coordinates.y;
-            targetTid = tid;
-          }
+          _interiorCandidates.push({
+            tid,
+            x: t.coordinates.x,
+            z: t.coordinates.y,
+            props: _propsNear(tid),
+            d: Math.hypot(t.coordinates.x - ax, t.coordinates.y - az),
+          });
         }
       }
+    }
+    if (_interiorCandidates.length) {
+      _interiorCandidates.sort((a, b) => (b.props - a.props) || (a.d - b.d));
+      const chosen = _interiorCandidates[0];
+      targetX = chosen.x;
+      targetZ = chosen.z;
+      targetTid = chosen.tid;
+      closestDist = chosen.d;
     }
     const sh = getTerrainHeight(cid, targetX, targetZ);
     // Phase 10PA: inside the room near the front-right, looking along

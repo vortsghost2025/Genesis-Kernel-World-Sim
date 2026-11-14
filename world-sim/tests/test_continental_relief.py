@@ -66,6 +66,20 @@ def _extract_js_function(script: str, fn_name: str) -> str:
     return m.group(0)
 
 
+def _interior_helpers(script: str) -> str:
+    """The Phase 10QO interior helpers that rebuildInteriorProps depends on.
+
+    Sliced from the marker block so the harness cannot drift from the file:
+    if the helpers move, this raises rather than silently testing a stale copy.
+    """
+    start = script.find("const INTERIOR_PROP_CAP")
+    end = script.find("function rebuildInteriorProps")
+    assert start > 0 and end > start, (
+        "the Phase 10QO interior helper block must sit just above "
+        "rebuildInteriorProps in prototype/index.html")
+    return script[start:end]
+
+
 def _setup_runtime(tmp_path: Path) -> FirstPairRuntime:
     store = FirstPairPersistenceStore(tmp_path / "store")
     runtime = FirstPairRuntime(heartbeat_limit=10, store=store, pair_id="east")
@@ -419,9 +433,16 @@ def test_sheltered_agent_rests_on_floor_plane():
 # ---------------------------------------------------------------------------
 def test_empty_shelter_stays_empty():
     """Verify an empty shelter renders only the floor and sill walls and zero
-    furniture props."""
+    furniture props.
+
+    Phase 10QO: `rebuildInteriorProps` now gathers the home's contents through
+    `neighbourhoodObjects` + `interiorPropPlan`, so the harness supplies those
+    pure helpers too. The intent is unchanged and deliberately still asserted:
+    a lone shelter with nothing in it draws NO furniture.
+    """
     script = _get_prototype_script()
     fn_props = _extract_js_function(script, "rebuildInteriorProps")
+    helpers = _interior_helpers(script)
 
     js_setup = f"""
     const interiorPropsGroup = {{
@@ -433,6 +454,7 @@ def test_empty_shelter_stays_empty():
       // Only the shelter itself exists on the tile; no hearth, bed, table, chair, storage, or workbench
       return [{{ object_id: "shelter-1", object_type: "shelter", tile_id: "cont_a_gen_0_0" }}];
     }}
+    {helpers}
     {fn_props}
     rebuildInteriorProps("cont_a_gen_0_0", "east", 100);
     """
