@@ -3170,7 +3170,19 @@ const propTextures = {
   storage: loadSpriteTexture("./assets/storage_cache.png"),
   landmark: loadSpriteTexture("./assets/landmark.png"),
   mountain: loadSpriteTexture("./assets/mountain_peak.png"),
-  waterfall: loadSpriteTexture("./assets/waterfall_rock.png")
+  waterfall: loadSpriteTexture("./assets/waterfall_rock.png"),
+  // Phase 10QP: the world's flora, fruit and small life.
+  mushroom: loadSpriteTexture("./assets/mushroom_cluster.png"),
+  flower: loadSpriteTexture("./assets/flower_meadow.png"),
+  wheat: loadSpriteTexture("./assets/wheat_tufts.png"),
+  roots: loadSpriteTexture("./assets/root_plants.png"),
+  appleTree: loadSpriteTexture("./assets/apple_tree.png"),
+  nutBush: loadSpriteTexture("./assets/nut_bush.png"),
+  beehive: loadSpriteTexture("./assets/beehive.png"),
+  fish: loadSpriteTexture("./assets/fish_shoal.png"),
+  shells: loadSpriteTexture("./assets/shell_patch.png"),
+  ore: loadSpriteTexture("./assets/ore_rock.png"),
+  salt: loadSpriteTexture("./assets/salt_crust.png")
 };
 
 function createGroundedProp(tex, width, height, x, z, h, shadowRx, shadowRz, sink = 0.05, tintHex = 0xffffff) {
@@ -3207,6 +3219,90 @@ function createBoulderSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
 function createBerrySprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
   const sz = 0.78 * scale;
   return createGroundedProp(propTextures.berry, sz, sz * 0.88, x, z, h, sz * 0.42, sz * 0.42, 0.06, tintHex);
+}
+
+// Phase 10QP: one creator per kind, each sized against the berry bush so the
+// layer reads as one world. Low ground plants are small and flat; the crab
+// apple is a short tree with a long shadow; the fish sits sunk into water.
+function createMushroomSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.58 * scale;
+  return createGroundedProp(propTextures.mushroom, sz, sz * 0.86, x, z, h, sz * 0.40, sz * 0.40, 0.05, tintHex);
+}
+function createFlowerSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.66 * scale;
+  return createGroundedProp(propTextures.flower, sz, sz * 0.94, x, z, h, sz * 0.36, sz * 0.36, 0.04, tintHex);
+}
+function createWheatSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.64 * scale;
+  return createGroundedProp(propTextures.wheat, sz, sz * 0.96, x, z, h, sz * 0.34, sz * 0.34, 0.04, tintHex);
+}
+function createRootsSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.60 * scale;
+  return createGroundedProp(propTextures.roots, sz, sz * 0.80, x, z, h, sz * 0.38, sz * 0.38, 0.04, tintHex);
+}
+function createAppleTreeSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 1.02 * scale;
+  return createGroundedProp(propTextures.appleTree, sz, sz * 1.02, x, z, h, sz * 0.42, sz * 0.42, 0.08, tintHex);
+}
+function createNutBushSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.84 * scale;
+  return createGroundedProp(propTextures.nutBush, sz, sz * 0.90, x, z, h, sz * 0.42, sz * 0.42, 0.06, tintHex);
+}
+function createBeehiveSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.88 * scale;
+  return createGroundedProp(propTextures.beehive, sz, sz * 0.96, x, z, h, sz * 0.40, sz * 0.40, 0.06, tintHex);
+}
+function createFishSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.68 * scale;
+  return createGroundedProp(propTextures.fish, sz, sz * 0.60, x, z, h, 0, 0, 0.16, tintHex);
+}
+function createShellSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.56 * scale;
+  return createGroundedProp(propTextures.shells, sz, sz * 0.74, x, z, h, sz * 0.36, sz * 0.36, 0.03, tintHex);
+}
+function createOreSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.70 * scale;
+  return createGroundedProp(propTextures.ore, sz, sz * 0.78, x, z, h, sz * 0.38, sz * 0.38, 0.05, tintHex);
+}
+function createSaltSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.58 * scale;
+  return createGroundedProp(propTextures.salt, sz, sz * 0.70, x, z, h, sz * 0.36, sz * 0.36, 0.03, tintHex);
+}
+
+// Phase 10QP: which flora kind a tile's real resources call for, and how many
+// instances read as a patch rather than a single lonely plant. Pure so it can
+// be asserted in node.
+function floraKindFor(resourceList, seed) {
+  const has = (k) => resourceList.indexOf(k) >= 0;
+  const s = seed | 0;
+  if (has("mushrooms") && s % 2 === 0) return { kind: "mushroom", n: 1 + (s % 3) };
+  if (has("fiber_plants") && s % 4 === 0) return { kind: "flower", n: 1 + (s % 2) };
+  if (has("edible_roots") && s % 3 === 0) return { kind: "roots", n: 1 + (s % 2) };
+  if (has("wild_grain") && s % 3 === 0) return { kind: "wheat", n: 1 + (s % 2) };
+  if (has("nuts") && s % 3 === 0) return { kind: "nut", n: 1 + (s % 2) };
+  if (has("wild_apples") && s % 3 === 0) return { kind: "apple", n: 1 };
+  if (has("honeycomb") && s % 4 === 0) return { kind: "hive", n: 1 };
+  if (has("salt") && s % 3 === 0) return { kind: "salt", n: 1 + (s % 2) };
+  if (has("iron_ore") && s % 3 === 0) return { kind: "ore", n: 1 };
+  if (has("flint") && s % 4 === 0) return { kind: "ore", n: 1 };
+  if (has("fish") && s % 2 === 0) return { kind: "fish", n: 1 + (s % 3) };
+  if (has("shellfish") && s % 2 === 0) return { kind: "shells", n: 1 + (s % 2) };
+  return null;
+}
+
+function buildFloraProp(kind, x, z, h, scale, tintHex) {
+  if (kind === "mushroom") return createMushroomSprite(x, z, h, scale, tintHex);
+  if (kind === "flower") return createFlowerSprite(x, z, h, scale, tintHex);
+  if (kind === "wheat") return createWheatSprite(x, z, h, scale, tintHex);
+  if (kind === "roots") return createRootsSprite(x, z, h, scale, tintHex);
+  if (kind === "nut") return createNutBushSprite(x, z, h, scale, tintHex);
+  if (kind === "apple") return createAppleTreeSprite(x, z, h, scale, tintHex);
+  if (kind === "hive") return createBeehiveSprite(x, z, h, scale, tintHex);
+  if (kind === "salt") return createSaltSprite(x, z, h, scale, tintHex);
+  if (kind === "ore") return createOreSprite(x, z, h, scale, tintHex);
+  if (kind === "fish") return createFishSprite(x, z, h, scale, tintHex);
+  if (kind === "shells") return createShellSprite(x, z, h, scale, tintHex);
+  return null;
 }
 
 function computeMountainPeakScale(h, elev) {
@@ -4428,6 +4524,9 @@ function populateContinentScenery(cid) {
   const tData = terrainDB ? terrainDB[cid] : null;
   const bounds = getDynamicExploredBounds(cid);
   const mtnTiles = [];
+  // Phase 10QP: a hard ceiling on the new flora layer, so an explored
+  // rectangle full of wild plants cannot cost more than the trees already do.
+  let floraPlacedTotal = 0;
 
   // Populate Natural Geography & Vegetation across the 200x200 Continent
   // Strictly skip canonical ocean tiles. Tag procedural flora as current-snapshot scenery.
@@ -4531,7 +4630,7 @@ function populateContinentScenery(cid) {
       }
 
       // 5. Wild Berry Bushes on canonical berry/forage tiles
-      if (inExploredVicinity && (res.includes("berries") || res.includes("apples") || res.includes("fiber")) && (seed % 10 < 5)) {
+      if (inExploredVicinity && res.includes("berries") && (seed % 10 < 5)) {
         const bx = x + (((seed >> 4) % 100) / 100 - 0.5) * 0.65;
         const bz = y + (((seed >> 11) % 100) / 100 - 0.5) * 0.65;
         if (!isCanonicalOcean(cid, bx, bz)) {
@@ -4540,6 +4639,36 @@ function populateContinentScenery(cid) {
             const br = createBerrySprite(bx, bz, bh, 0.9 + (seed % 20) / 100, propTint);
             br.userData = { wx: bx, wz: bz, tileX: x, tileY: y, kind: "berry", isCanonicalLandmark: false, isKnownTile: isKnown, provenance: "current-snapshot scenery" };
             sGroup.add(br);
+          }
+        }
+      }
+
+      // 6b. Phase 10QP: the rest of the world's flora, fruit and small life.
+      // The resource list prefers the true_map tile (which carries all 16
+      // kinds) and falls back to tData.res (7 kinds) where the tile is not
+      // known, so the rare things appear where the agents are and the common
+      // ones still reach the whole map.
+      if (floraPlacedTotal < FLORA_PER_CONTINENT_CAP) {
+        const tResList = (tKnown && Array.isArray(tKnown.resources))
+          ? tKnown.resources.map(String)
+          : res.split(",").map(s => s.trim()).filter(Boolean);
+        const plan = floraKindFor(tResList, seed);
+        if (plan) {
+          for (let fi = 0; fi < plan.n && floraPlacedTotal < FLORA_PER_CONTINENT_CAP; fi++) {
+            const fx = (fi === 0) ? ox : x + (((seed >> (3 + fi)) % 100) / 100 - 0.5) * 0.62;
+            const fz = (fi === 0) ? oz : y + (((seed >> (7 + fi)) % 100) / 100 - 0.5) * 0.62;
+            if (isCanonicalOcean(cid, fx, fz)) continue;
+            const fh = getTerrainHeight(cid, fx, fz);
+            if (fh <= 0.08 || fh > 9.5) continue;
+            const fscale = 0.85 + ((seed >> (fi + 1)) % 26) / 100;
+            const fm = buildFloraProp(plan.kind, fx, fz, fh, fscale, propTint);
+            if (fm) {
+              fm.userData = { wx: fx, wz: fz, tileX: x, tileY: y, kind: plan.kind,
+                              isCanonicalLandmark: false, isKnownTile: isKnown,
+                              provenance: "current-snapshot scenery" };
+              sGroup.add(fm);
+              floraPlacedTotal++;
+            }
           }
         }
       }
@@ -5208,6 +5337,14 @@ function rebuildInteriorVolume() {
 // pure so they can be asserted in node without a browser.
 // ---------------------------------------------------------------------------
 const INTERIOR_PROP_CAP = 14;
+// Phase 10QP: how many new flora props one continent may carry. The existing
+// scenery inside the explored bounds already runs to roughly 1,300 props on
+// the east continent and 800 on the west (measured by a Python replica of this
+// very loop, prop_budget2.py), and a replica of the flora layer below measured
+// its own honest yield at 374 east / 235 west. So this ceiling never binds in
+// practice; it is a safety net, and because it never binds it cannot truncate
+// props on one side of the map in scan order.
+const FLORA_PER_CONTINENT_CAP = 700;
 
 function _tileCoordOf(tid) {
   const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid || ""));
