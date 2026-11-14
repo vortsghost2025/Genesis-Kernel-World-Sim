@@ -1618,10 +1618,12 @@ class FirstPairRuntime:
         )
 
     def _cistern_on_tile(self, position: str) -> dict | None:
-        """The cistern standing on a tile, if it holds water.
+        """A water source standing on a tile, if it holds water.
 
-        Phase 10QF. A cistern is a FINITE source: it holds what was carried
-        to it, and drinking from it consumes a unit. It is never a river.
+        Phase 10QF introduced this for a cistern; 10QJ generalised it, because
+        a cache of fresh water the operator left on a tile is water that can be
+        drunk AT that tile. Any object whose contents hold fresh_water is a
+        source, and the supply is FINITE: drinking consumes a unit.
         """
         position = str(position or "")
         if not position:
@@ -1631,8 +1633,6 @@ class FirstPairRuntime:
                 continue
             if str(record.get("tile_id", "")) != position:
                 continue
-            if str(record.get("object_type", "")).strip().lower() != "cistern":
-                continue
             contents = record.get("contents")
             if not isinstance(contents, dict):
                 continue
@@ -1640,16 +1640,18 @@ class FirstPairRuntime:
                 return record
         return None
 
+    def _water_source_obj_id(self, position: str) -> str | None:
+        record = self._cistern_on_tile(position)
+        return str(record.get("object_id")) if record else None
+
     def _cistern_water_units(self, position: str) -> int:
-        """How much water a cistern on this tile is holding."""
+        """How much water the containers on this tile are holding."""
         total = 0
         position = str(position or "")
         for record in (self._world_state.public_objects or {}).values():
             if not isinstance(record, dict):
                 continue
             if str(record.get("tile_id", "")) != position:
-                continue
-            if str(record.get("object_type", "")).strip().lower() != "cistern":
                 continue
             contents = record.get("contents")
             if isinstance(contents, dict):
