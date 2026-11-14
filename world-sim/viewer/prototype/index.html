@@ -3182,7 +3182,11 @@ const propTextures = {
   fish: loadSpriteTexture("./assets/fish_shoal.png"),
   shells: loadSpriteTexture("./assets/shell_patch.png"),
   ore: loadSpriteTexture("./assets/ore_rock.png"),
-  salt: loadSpriteTexture("./assets/salt_crust.png")
+  salt: loadSpriteTexture("./assets/salt_crust.png"),
+  // Phase 10QR: ground cover textures.
+  grass: loadSpriteTexture("./assets/grass_tuft.png"),
+  stones: loadSpriteTexture("./assets/stone_scatter.png"),
+  reeds: loadSpriteTexture("./assets/reed_clump.png")
 };
 
 function createGroundedProp(tex, width, height, x, z, h, shadowRx, shadowRz, sink = 0.05, tintHex = 0xffffff) {
@@ -3302,6 +3306,49 @@ function buildFloraProp(kind, x, z, h, scale, tintHex) {
   if (kind === "ore") return createOreSprite(x, z, h, scale, tintHex);
   if (kind === "fish") return createFishSprite(x, z, h, scale, tintHex);
   if (kind === "shells") return createShellSprite(x, z, h, scale, tintHex);
+  return null;
+}
+
+// Phase 10QR: ground cover. No shadow decal: a grass tuft needs one sprite,
+// not a sprite plus a shadow mesh, and at 1,359 props the difference is a
+// thousand objects. The art carries its own contact shading at the base.
+function createGrassSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 1.05 * scale;
+  return createGroundedProp(propTextures.grass, sz, sz * 0.82, x, z, h, 0, 0, 0.04, tintHex);
+}
+function createStonesSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.80 * scale;
+  return createGroundedProp(propTextures.stones, sz, sz * 0.80, x, z, h, 0, 0, 0.03, tintHex);
+}
+function createReedsSprite(x, z, h, scale = 1.0, tintHex = 0xffffff) {
+  const sz = 0.92 * scale;
+  return createGroundedProp(propTextures.reeds, sz, sz * 1.05, x, z, h, 0, 0, 0.04, tintHex);
+}
+
+// Which ground cover a tile's own terrain calls for, and how much of it.
+// `bankWater` is true when a neighbouring tile is a river or lake. Pure, so
+// it can be asserted in node without a browser.
+function groundCoverKindFor(terrain, biome, bankWater, seed) {
+  const tag = String(terrain || "").toLowerCase() + " " + String(biome || "").toLowerCase();
+  const s = seed | 0;
+  // Defence in depth: the loop already skips water, but cover must never be
+  // placed on water even if a caller forgets that.
+  if (/ocean|open_sea|deep_lake/.test(tag)) return null;
+  if (bankWater && s % 3 === 0) return { kind: "reeds", n: 1 + (s % 2) };
+  if (/valley|hill|highland|forest|woodland|coast|grass|plain|meadow|thicket/.test(tag)
+      && s % 3 === 0) {
+    return { kind: "grass", n: 1 + (s % 2) };
+  }
+  if (/mountain|rock|ravine|hill|highland|crag/.test(tag) && s % 11 === 0) {
+    return { kind: "stones", n: 1 };
+  }
+  return null;
+}
+
+function buildGroundProp(kind, x, z, h, scale, tintHex) {
+  if (kind === "grass") return createGrassSprite(x, z, h, scale, tintHex);
+  if (kind === "stones") return createStonesSprite(x, z, h, scale, tintHex);
+  if (kind === "reeds") return createReedsSprite(x, z, h, scale, tintHex);
   return null;
 }
 
@@ -4527,6 +4574,8 @@ function populateContinentScenery(cid) {
   // Phase 10QP: a hard ceiling on the new flora layer, so an explored
   // rectangle full of wild plants cannot cost more than the trees already do.
   let floraPlacedTotal = 0;
+  // Phase 10QR: ground cover gets its own ceiling, for the same reason.
+  let groundPlacedTotal = 0;
 
   // Populate Natural Geography & Vegetation across the 200x200 Continent
   // Strictly skip canonical ocean tiles. Tag procedural flora as current-snapshot scenery.
@@ -4668,6 +4717,41 @@ function populateContinentScenery(cid) {
                               provenance: "current-snapshot scenery" };
               sGroup.add(fm);
               floraPlacedTotal++;
+            }
+          }
+        }
+      }
+
+      // 6c. Phase 10QR: ground cover, scoped to the explored vicinity so it
+      // lands where the camera is. Water tiles never reach here (the loop
+      // skips them), so reeds are placed on the BANK instead.
+      if (inExploredVicinity && groundPlacedTotal < GROUND_PER_CONTINENT_CAP) {
+        let bankWater = false;
+        if (tData && tData.water) {
+          const wArr = tData.water;
+          const base = (y + 100) * 200 + (x + 100);
+          const neighbours = [base + 1, base - 1, base + 200, base - 200];
+          for (let ni = 0; ni < neighbours.length; ni++) {
+            const nv = String(wArr[neighbours[ni]] || "");
+            if (nv === "river" || nv === "lake") { bankWater = true; break; }
+          }
+        }
+        const gPlan = groundCoverKindFor(terr, b, bankWater, seed);
+        if (gPlan) {
+          for (let gi = 0; gi < gPlan.n && groundPlacedTotal < GROUND_PER_CONTINENT_CAP; gi++) {
+            const gx = (gi === 0) ? ox : x + (((seed >> (5 + gi)) % 100) / 100 - 0.5) * 0.7;
+            const gz = (gi === 0) ? oz : y + (((seed >> (9 + gi)) % 100) / 100 - 0.5) * 0.7;
+            if (isCanonicalOcean(cid, gx, gz)) continue;
+            const gh = getTerrainHeight(cid, gx, gz);
+            if (gh <= 0.08 || gh > 9.5) continue;
+            const gscale = 0.85 + ((seed >> (gi + 2)) % 28) / 100;
+            const gm = buildGroundProp(gPlan.kind, gx, gz, gh, gscale, propTint);
+            if (gm) {
+              gm.userData = { wx: gx, wz: gz, tileX: x, tileY: y, kind: gPlan.kind,
+                              isCanonicalLandmark: false, isKnownTile: isKnown,
+                              provenance: "current-snapshot scenery" };
+              sGroup.add(gm);
+              groundPlacedTotal++;
             }
           }
         }
@@ -5345,6 +5429,9 @@ const INTERIOR_PROP_CAP = 14;
 // practice; it is a safety net, and because it never binds it cannot truncate
 // props on one side of the map in scan order.
 const FLORA_PER_CONTINENT_CAP = 700;
+// Phase 10QR: ground cover ceiling. Measured yield is 1,359 east / 339 west,
+// so this never binds and therefore cannot truncate one part of the map.
+const GROUND_PER_CONTINENT_CAP = 1500;
 
 function _tileCoordOf(tid) {
   const m = /_(-?\d+)_(-?\d+)$/.exec(String(tid || ""));
