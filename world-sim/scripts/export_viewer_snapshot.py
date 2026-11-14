@@ -308,6 +308,30 @@ def build_chronicle(heartbeats: list[dict], name_by_hash: dict,
     return events[-limit:]
 
 
+def weather_snapshot_for(pair_name: str, heartbeat_number: int) -> dict | None:
+    """The sky at a heartbeat, with the REAL season and temperature.
+
+    Phase 10RB. `survival.weather_forecast` returns only current, next and the
+    window end -- no season and no temperature. The viewer's HUD therefore fell
+    back to its own defaults and displayed "Spring (17C)" beside foliage that
+    the same frame had already tinted for WINTER. The label contradicted the
+    picture, and both halves were wrong about the world.
+
+    Everything here comes from the survival module, the same authority the
+    physics uses, so the exported facts cannot drift from the simulated ones.
+    Temperature is `effective_temperature` (ambient plus the sky's modifier),
+    which is the number an agent's warmth actually moves toward.
+    """
+    from backend.world import survival
+
+    hb = int(heartbeat_number)
+    snapshot = survival.weather_forecast(pair_name, hb)
+    snapshot["season"] = survival.season(hb).title()
+    snapshot["temperature"] = round(
+        survival.effective_temperature(hb, snapshot["current"]), 1)
+    return snapshot
+
+
 def is_agent_sheltered(agent_ref: str, world_state: dict) -> bool:
     """Check if an agent is currently sheltered on their occupied tile."""
     occupancy = world_state.get("tile_occupancy", {})
@@ -462,8 +486,7 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
             operator_messages = []
 
     try:
-        from backend.world import survival
-        weather_snapshot = survival.weather_forecast(
+        weather_snapshot = weather_snapshot_for(
             pair_name, world_state.get("tick") or 0)
     except Exception:
         weather_snapshot = None

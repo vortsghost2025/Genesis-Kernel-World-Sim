@@ -749,7 +749,7 @@ header {
 
     <!-- Telemetry -->
     <div class="telemetry-cluster">
-      <div class="weather-hud" id="weather-hud">Spring (17°C) // Clear</div>
+      <div class="weather-hud" id="weather-hud">&mdash;</div>
       <div class="status-badge-snapshot" id="live-status-badge">SNAPSHOT</div>
     </div>
   </header>
@@ -1190,6 +1190,29 @@ function computeSeasonAtHb(hb, fallbackSeason = "Spring") {
   if (s.includes("aut") || s.includes("fall")) return "Autumn";
   if (s.includes("win")) return "Winter";
   return "Spring";
+}
+
+// Phase 10RB: the temperature the HUD must show, derived the same way the
+// physics derives it (survival.ambient_temperature + WEATHER_TEMP_MODIFIER),
+// so the label cannot disagree with the world. Returns null when the heartbeat
+// is unknown -- the caller must then show that it does not know, rather than
+// inventing a number. (It used to print a hardcoded 17C.)
+function computeTemperatureAtHb(hb, weather) {
+  if (hb === null || hb === undefined || !Number.isFinite(Number(hb)) || Number(hb) < 0) {
+    return null;
+  }
+  const DAY_LENGTH = 72;
+  const DAY_PHASE_START = 0.25;
+  const BASE_TEMP = { Spring: 55.0, Summer: 72.0, Autumn: 46.0, Winter: 26.0 };
+  const DAY_NIGHT_AMPLITUDE = 13.0;
+  const WEATHER_TEMP_MODIFIER = {
+    clear: 0.0, overcast: -3.0, rain: -6.0, storm: -11.0
+  };
+  const phase = (Number(hb) % DAY_LENGTH) / DAY_LENGTH;
+  const swing = Math.sin(2 * Math.PI * (phase - DAY_PHASE_START)) * DAY_NIGHT_AMPLITUDE;
+  const base = BASE_TEMP[computeSeasonAtHb(hb)] ?? BASE_TEMP.Spring;
+  const sky = WEATHER_TEMP_MODIFIER[String(weather || "").toLowerCase()] ?? 0.0;
+  return base + swing + sky;
 }
 
 function getSeasonPalette(seasonName) {
@@ -5126,8 +5149,11 @@ function getWeatherAt(pairName, hb) {
   const p = PAIRS[pairName] || {};
   const w = p.weather || {};
   let wtype = String(w.current || "clear").toLowerCase();
-  const temp = (w.temperature != null) ? w.temperature : 17;
-  const season = w.season || "Spring";
+  // Phase 10RB: no invented fallbacks. `w.season`/`w.temperature` come from the
+  // exporter (survival), and when they are absent the caller is told so instead
+  // of being handed a hardcoded "Spring" / 17C that nothing in the world said.
+  const temp = (w.temperature != null) ? w.temperature : null;
+  const season = w.season || null;
 
   if (hb != null && w.changes_at_heartbeat != null) {
     if (hb >= w.changes_at_heartbeat) {
@@ -5149,7 +5175,7 @@ function getWeatherAt(pairName, hb) {
 }
 
 function updateWeatherAtmospherics(pairName, hb) {
-  const env = (pairName && pairName !== "orbit") ? getWeatherAt(pairName, hb) : { season: "Spring", temperature: 18, weather: "clear" };
+  const env = (pairName && pairName !== "orbit") ? getWeatherAt(pairName, hb) : { season: null, temperature: null, weather: "clear" };
   const curSeason = computeSeasonAtHb(hb, env.season);
   updateSeasonalFoliage(curSeason);
 
@@ -5162,7 +5188,14 @@ function updateWeatherAtmospherics(pairName, hb) {
 
   const weatherHud = document.getElementById("weather-hud");
   if (weatherHud) {
-    weatherHud.textContent = `${env.season} (${env.temperature}°C) // ${wtype.toUpperCase()}`;
+    // Phase 10RB: the HUD rendered `env.season` and `env.temperature` while the
+    // SAME frame tinted the foliage for a season computed from `hb` -- so the
+    // label said Spring over snow. Both now come from the heartbeat, and an
+    // unknown heartbeat reads as unknown rather than as a made-up 17C.
+    const hbTemp = computeTemperatureAtHb(hb, wtype);
+    const temp = (hbTemp != null) ? hbTemp : env.temperature;
+    const tempText = (temp != null) ? `${Math.round(temp)}°C` : "temperature unknown";
+    weatherHud.textContent = `${curSeason} (${tempText}) // ${wtype.toUpperCase()}`;
   }
 
   rainLines.visible = isRaining;
