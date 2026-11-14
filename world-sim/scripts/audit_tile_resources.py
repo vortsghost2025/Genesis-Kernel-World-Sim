@@ -129,18 +129,29 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None,
                    transient=None) -> dict:
     """Audit each requested tile against the authored map.
 
-    `transient` names tiles occupied only by a DOWNED agent (see
-    `occupied_tiles_by_state`). A non-healthy transient tile is REPORTED in
-    `tiles` with its status, but it is not counted as blocking and needs no
-    accepted-findings entry, because a crawling body is not deadlocked by the
-    tile its body is crossing.
+    `occupy` are the tiles whose non-healthy status BLOCKS. Since 10RD the live
+    caller passes the pair habitat tiles here -- the homes, which is where the
+    regression that motivated this whole audit lived ("east_adam's home is no
+    longer a deadlock").
+
+    `transient` names tiles that are REPORTED but not blocking, because an agent
+    being on them is not a deadlock. It is either a set of tile ids (all using
+    the collapsed-body reason) or a mapping of tile id to its own reason, so the
+    digest can say WHY a finding is not red.
     """
     accepted = accepted or {}
     occupy_set = set(occupy or ())
-    transient = set(transient or ())
-    # Defence in depth: if a caller ever lists a tile as BOTH settled and
-    # transient, the settled reading wins. A guard must err toward red.
-    transient -= occupy_set
+    if isinstance(transient, dict):
+        transient_reasons = dict(transient)
+    else:
+        transient_reasons = {
+            t: "occupied only by a collapsed body, which crawls on"
+            for t in (transient or ())}
+    # Defence in depth: if a caller ever lists a tile as BOTH blocking and
+    # reported, the blocking reading wins. A guard must err toward red.
+    for tile in occupy_set:
+        transient_reasons.pop(tile, None)
+    transient = set(transient_reasons)
     by_tile: dict[str, list] = {}
     for rec in (true_map or {}).get("resources", []) or []:
         if isinstance(rec, dict) and isinstance(rec.get("tile_id"), str):
@@ -166,8 +177,7 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None,
                 entry["accepted"] = accepted[key]
                 accepted_count += 1
             elif tile_id in transient:
-                entry["transient"] = ("occupied only by a collapsed body, "
-                                      "which crawls on; reported, not blocking")
+                entry["transient"] = transient_reasons[tile_id]
                 transient_count += 1
             else:
                 blocking += 1
@@ -184,31 +194,38 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None,
 
 def occupied_tiles() -> list[str]:
     """Every tile an agent can currently be standing on, both pairs."""
-    settled, transient = occupied_tiles_by_state()
-    return sorted(set(settled) | set(transient))
+    blocking, reported = occupied_tiles_by_state()
+    return sorted(set(blocking) | set(reported))
 
 
-def occupied_tiles_by_state() -> tuple[list[str], list[str]]:
-    """Occupied tiles, split into (settled, transient).
+def occupied_tiles_by_state() -> tuple[list[str], dict[str, str]]:
+    """Occupied tiles split into (blocking, reported-with-a-reason).
 
-    Phase 10QX. Before 10QI a collapsed body stayed where it fell, so an
-    "occupied tile" meant a place an agent lives and must be able to gather
-    from. 10QI gave a collapsed body its legs -- it CRAWLS one tile per
-    heartbeat -- so a downed agent's tile is where its body is lying in
-    transit. It is not deadlocked there: it can crawl off, and its survival
-    runs through the crawl and the tile's auto-feed.
+    Phase 10RD, extending 10QX. The audit's motivating regression was a HOME
+    that could not feed the agent living on it: "east_adam's home is no longer a
+    deadlock". That is about the pair's own habitat tiles -- the two origin
+    tiles per pair -- and those are what BLOCK now.
+
+    Every other occupied tile is REPORTED with a reason, never hidden, because
+    the register already recorded the correct reading of such a tile:
+    `public-shared-center` is "a meeting point, not a resource site. Her gather
+    attempts there fail truthfully and that is the correct world."
 
     Measured 2026-11-14: 116 of the 652 tiles in the west explored box carry no
-    resources at all, so treating every tile a crawling body crossed as a
-    blocking finding was a treadmill of one-tile fixes. A transient tile is
-    still REPORTED (see `render_audit`), never hidden -- the same shape the
-    accepted-findings register already uses.
+    resources at all, and the agents wander, so treating every tile an agent
+    stood on as a blocking finding was a treadmill of one-tile fixes -- three of
+    which I had already made by hand.
 
-    A tile is transient only when EVERY agent on it is downed, and it is not a
-    pair's authored habitat tile: a standing agent still makes it settled.
+    Reasons:
+      * a tile occupied ONLY by a collapsed body -> it crawls on (10QX's case);
+      * a tile occupied by a standing agent -> it is passing through and can
+        move to gatherable ground.
+    A habitat tile blocks even when the only agent on it is downed: the err-toward-red
+    rule from 10QX still holds.
     """
     occupied: dict[str, set[str]] = {}
     standing: dict[str, int] = {}
+    habitat_tiles: set[str] = set()
     for pair in PAIRS:
         path = RUNTIME_ROOT / pair / "world_state.json"
         if not path.is_file():
@@ -224,29 +241,22 @@ def occupied_tiles_by_state() -> tuple[list[str], list[str]]:
             occupied.setdefault(tile, set()).add(ref)
             if not (vitals.get(ref) or {}).get("downed"):
                 standing[tile] = standing.get(tile, 0) + 1
-
-    habitat_tiles = set()
-    for pair in PAIRS:
-        path = RUNTIME_ROOT / pair / "world_state.json"
-        if not path.is_file():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8")).get("data", {})
-        except (OSError, json.JSONDecodeError):
-            continue
         habitat = data.get("habitat") or {}
         habitat_tiles.update(
             t for t in (habitat.get("starting_tile_ids") or {}).values()
             if isinstance(t, str))
 
-    settled, transient = [], []
+    blocking = sorted(habitat_tiles)
+    reported: dict[str, str] = {}
     for tile in sorted(occupied):
-        if standing.get(tile) or tile in habitat_tiles:
-            settled.append(tile)
+        if tile in habitat_tiles:
+            continue
+        if standing.get(tile):
+            reported[tile] = ("occupied in passing; the agent is not stuck here "
+                              "and can move to gatherable ground")
         else:
-            transient.append(tile)
-    settled = sorted(set(settled) | habitat_tiles)
-    return settled, transient
+            reported[tile] = "occupied only by a collapsed body, which crawls on"
+    return blocking, reported
 
 
 def render_audit(result: dict) -> str:
@@ -271,12 +281,12 @@ def render_audit(result: dict) -> str:
         if tile.get("accepted"):
             lines.append(f"    (accepted: {tile['accepted']})")
         if tile.get("transient"):
-            lines.append(f"    (transient: {tile['transient']})")
+            lines.append(f"    (reported, not blocking: {tile['transient']})")
     lines.append("-" * 60)
     lines.append(
         f"blocking findings: {result['blocking']} | "
         f"operator-accepted: {result['accepted_count']} | "
-        f"transient (collapsed body crawling): {result.get('transient_count', 0)}"
+        f"reported (not blocking): {result.get('transient_count', 0)}"
     )
     return "\n".join(lines)
 

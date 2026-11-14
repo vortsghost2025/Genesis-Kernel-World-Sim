@@ -182,24 +182,25 @@ class TestLiveBoard:
         return sorted(set(tiles))
 
     def _occupied_and_transient(self):
-        """The same split the CLI uses, from one source of truth (10QX).
+        """The same split the CLI uses, from one source of truth (10QX/10RD).
 
-        A tile occupied ONLY by a DOWNED agent is transient: 10QI lets a
-        collapsed body crawl one tile per heartbeat, so its tile is where its
-        body is lying in transit, not a place it is deadlocked. Measured
-        2026-11-14: 116 of 652 tiles in the west explored box are barren, so
-        reacting to each crawled-onto tile was a treadmill of one-tile fixes.
+        Blocking is the pair HABITAT tiles -- the homes, where the regression
+        that motivated the audit lived. Every other occupied tile is reported
+        with a reason: a collapsed body's tile (it crawls on) or a tile a
+        standing agent is passing through. Measured 2026-11-14: 116 of 652 tiles
+        in the west explored box are barren, so blocking on every occupied tile
+        was a treadmill of one-tile fixes.
         """
         return _occupied_tiles_by_state()
 
-    def test_every_settled_tile_is_gatherable_after_retirement(self):
-        settled, transient = self._occupied_and_transient()
+    def test_every_habitat_tile_is_gatherable_after_retirement(self):
+        blocking, reported = self._occupied_and_transient()
         result = audit_true_map(
             self._live_map(),
-            occupy=settled,
+            occupy=blocking,
             consumption_per_tick=0,
             accepted=ACCEPTED_FINDINGS,
-            transient=transient,
+            transient=reported,
         )
         unexpected = [
             f"{t['tile_id']}:{t['status']}"
@@ -210,22 +211,23 @@ class TestLiveBoard:
             and f"{t['tile_id']}:{t['status']}" not in ACCEPTED_FINDINGS
         ]
         assert not unexpected, (
-            "settled tiles are un-gatherable and not operator-accepted: "
+            "habitat tiles are un-gatherable and not operator-accepted: "
             + ", ".join(unexpected)
         )
 
-    def test_a_crawling_body_does_not_hide_a_standing_agent_on_the_same_tile(self):
-        """The transient exemption is per-tile and must not swallow a live one."""
-        settled, transient = self._occupied_and_transient()
-        assert not (set(settled) & set(transient)), (
-            "a tile cannot be both settled and transient")
+    def test_a_passing_agent_never_makes_a_barren_tile_blocking(self):
+        """The 10RD contract: only habitat tiles block."""
+        blocking, reported = self._occupied_and_transient()
+        assert not (set(blocking) & set(reported)), (
+            "a tile cannot be both blocking and reported")
         result = audit_true_map(
-            self._live_map(), occupy=[], consumption_per_tick=0,
-            accepted=ACCEPTED_FINDINGS, transient=transient)
-        assert all(t.get("transient") or t["status"] == "healthy"
-                   for t in result["tiles"])
+            self._live_map(), occupy=blocking, consumption_per_tick=0,
+            accepted=ACCEPTED_FINDINGS, transient=reported)
         assert result["blocking"] == 0, (
-            "a transient tile may never be counted as blocking")
+            "only habitat tiles may block")
+        for tile in result["tiles"]:
+            if tile.get("transient"):
+                assert "collapsed" in tile["transient"] or "passing" in tile["transient"]
 
     def test_east_adam_home_is_no_longer_a_deadlock(self):
         """The regression that motivated the whole audit."""
@@ -249,9 +251,11 @@ class TestLiveBoard:
 
 
 class TestTransientOccupancy:
-    """10QX: a tile occupied only by a crawling collapsed body is reported,
-    not blocking. Before 10QI a collapsed body stayed put, so "occupied" meant
-    a place an agent lives; the crawl changed that premise."""
+    """10QX/10RD: a non-healthy tile that is not a HOME is reported with a
+    reason, never blocking. 10QX drew that line at "occupied only by a crawling
+    collapsed body"; 10RD drew it where the audit's motivating regression lived
+    -- the habitat tiles -- because 116 of 652 tiles in the west explored box
+    carry no resources and the agents wander."""
 
     def _map(self):
         return {"tiles": [], "resources": _resources([("t1", "stone", 3, False)])}
@@ -292,6 +296,23 @@ class TestTransientOccupancy:
                                 transient=["t_barren"])
         text = render_audit(result)
         assert "t_barren" in text
-        assert "transient" in text
-        assert "-- " in text, "a transient finding is not a red one"
+        assert "reported, not blocking" in text
+        assert "-- " in text, "a reported finding is not a red one"
         assert "blocking findings: 0" in text
+
+    def test_a_tile_can_carry_its_own_reason(self):
+        """So the digest can say WHY a finding is not red (10RD)."""
+        result = audit_true_map(
+            self._map(), occupy=[], consumption_per_tick=0,
+            transient={"t_barren": "occupied in passing; not stuck here"})
+        entry = next(t for t in result["tiles"] if t["tile_id"] == "t_barren")
+        assert entry["transient"] == "occupied in passing; not stuck here"
+        assert "passing" in render_audit(result)
+
+    def test_a_habitat_tile_blocks_even_under_a_collapsed_body(self):
+        """Err toward red: the home always blocks, whoever is lying on it."""
+        result = audit_true_map(self._map(), occupy=["t_barren"],
+                                consumption_per_tick=0,
+                                transient={"t_barren": "collapsed body"})
+        assert result["blocking"] == 1
+        assert result["transient_count"] == 0
