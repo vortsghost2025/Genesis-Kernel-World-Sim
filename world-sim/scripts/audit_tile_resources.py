@@ -125,9 +125,22 @@ def tile_offer_health(resources, consumption_per_tick=0) -> dict:
     }
 
 
-def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None) -> dict:
-    """Audit each requested tile against the authored map."""
+def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None,
+                   transient=None) -> dict:
+    """Audit each requested tile against the authored map.
+
+    `transient` names tiles occupied only by a DOWNED agent (see
+    `occupied_tiles_by_state`). A non-healthy transient tile is REPORTED in
+    `tiles` with its status, but it is not counted as blocking and needs no
+    accepted-findings entry, because a crawling body is not deadlocked by the
+    tile its body is crossing.
+    """
     accepted = accepted or {}
+    occupy_set = set(occupy or ())
+    transient = set(transient or ())
+    # Defence in depth: if a caller ever lists a tile as BOTH settled and
+    # transient, the settled reading wins. A guard must err toward red.
+    transient -= occupy_set
     by_tile: dict[str, list] = {}
     for rec in (true_map or {}).get("resources", []) or []:
         if isinstance(rec, dict) and isinstance(rec.get("tile_id"), str):
@@ -136,7 +149,8 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None) -> d
     tiles = []
     blocking = 0
     accepted_count = 0
-    for tile_id in sorted(set(occupy or [])):
+    transient_count = 0
+    for tile_id in sorted(occupy_set | transient):
         health = tile_offer_health(
             by_tile.get(tile_id, []), consumption_per_tick)
         key = f"{tile_id}:{health['status']}"
@@ -151,6 +165,10 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None) -> d
             if key in accepted:
                 entry["accepted"] = accepted[key]
                 accepted_count += 1
+            elif tile_id in transient:
+                entry["transient"] = ("occupied only by a collapsed body, "
+                                      "which crawls on; reported, not blocking")
+                transient_count += 1
             else:
                 blocking += 1
         tiles.append(entry)
@@ -160,12 +178,37 @@ def audit_true_map(true_map, occupy, consumption_per_tick=0, accepted=None) -> d
         "tiles": tiles,
         "blocking": blocking,
         "accepted_count": accepted_count,
+        "transient_count": transient_count,
     }
 
 
 def occupied_tiles() -> list[str]:
     """Every tile an agent can currently be standing on, both pairs."""
-    found: set[str] = set()
+    settled, transient = occupied_tiles_by_state()
+    return sorted(set(settled) | set(transient))
+
+
+def occupied_tiles_by_state() -> tuple[list[str], list[str]]:
+    """Occupied tiles, split into (settled, transient).
+
+    Phase 10QX. Before 10QI a collapsed body stayed where it fell, so an
+    "occupied tile" meant a place an agent lives and must be able to gather
+    from. 10QI gave a collapsed body its legs -- it CRAWLS one tile per
+    heartbeat -- so a downed agent's tile is where its body is lying in
+    transit. It is not deadlocked there: it can crawl off, and its survival
+    runs through the crawl and the tile's auto-feed.
+
+    Measured 2026-11-14: 116 of the 652 tiles in the west explored box carry no
+    resources at all, so treating every tile a crawling body crossed as a
+    blocking finding was a treadmill of one-tile fixes. A transient tile is
+    still REPORTED (see `render_audit`), never hidden -- the same shape the
+    accepted-findings register already uses.
+
+    A tile is transient only when EVERY agent on it is downed, and it is not a
+    pair's authored habitat tile: a standing agent still makes it settled.
+    """
+    occupied: dict[str, set[str]] = {}
+    standing: dict[str, int] = {}
     for pair in PAIRS:
         path = RUNTIME_ROOT / pair / "world_state.json"
         if not path.is_file():
@@ -174,10 +217,36 @@ def occupied_tiles() -> list[str]:
             data = json.loads(path.read_text(encoding="utf-8")).get("data", {})
         except (OSError, json.JSONDecodeError):
             continue
-        found.update((data.get("tile_occupancy") or {}).values())
+        vitals = data.get("vitals") or {}
+        for ref, tile in (data.get("tile_occupancy") or {}).items():
+            if not isinstance(tile, str):
+                continue
+            occupied.setdefault(tile, set()).add(ref)
+            if not (vitals.get(ref) or {}).get("downed"):
+                standing[tile] = standing.get(tile, 0) + 1
+
+    habitat_tiles = set()
+    for pair in PAIRS:
+        path = RUNTIME_ROOT / pair / "world_state.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")).get("data", {})
+        except (OSError, json.JSONDecodeError):
+            continue
         habitat = data.get("habitat") or {}
-        found.update((habitat.get("starting_tile_ids") or {}).values())
-    return sorted(found)
+        habitat_tiles.update(
+            t for t in (habitat.get("starting_tile_ids") or {}).values()
+            if isinstance(t, str))
+
+    settled, transient = [], []
+    for tile in sorted(occupied):
+        if standing.get(tile) or tile in habitat_tiles:
+            settled.append(tile)
+        else:
+            transient.append(tile)
+    settled = sorted(set(settled) | habitat_tiles)
+    return settled, transient
 
 
 def render_audit(result: dict) -> str:
@@ -187,7 +256,12 @@ def render_audit(result: dict) -> str:
         "-" * 60,
     ]
     for tile in result["tiles"]:
-        mark = "OK " if tile["status"] == "healthy" else "!! "
+        if tile["status"] == "healthy":
+            mark = "OK "
+        elif tile.get("accepted") or tile.get("transient"):
+            mark = "-- "
+        else:
+            mark = "!! "
         lines.append(
             f"{mark}{tile['tile_id']:<34} {tile['status']:<9} "
             f"net {tile['net_gain']:>4}  {','.join(tile['kinds']) or '-'}"
@@ -196,10 +270,13 @@ def render_audit(result: dict) -> str:
             lines.append(f"    - {finding}")
         if tile.get("accepted"):
             lines.append(f"    (accepted: {tile['accepted']})")
+        if tile.get("transient"):
+            lines.append(f"    (transient: {tile['transient']})")
     lines.append("-" * 60)
     lines.append(
         f"blocking findings: {result['blocking']} | "
-        f"operator-accepted: {result['accepted_count']}"
+        f"operator-accepted: {result['accepted_count']} | "
+        f"transient (collapsed body crawling): {result.get('transient_count', 0)}"
     )
     return "\n".join(lines)
 
@@ -218,9 +295,13 @@ def main() -> int:
         print(f"AUDIT_ERROR: true map not found: {args.map}")
         return 1
     true_map = json.loads(Path(args.map).read_text(encoding="utf-8"))
-    occupy = args.tile or occupied_tiles()
+    if args.tile:
+        occupy, transient = args.tile, []
+    else:
+        occupy, transient = occupied_tiles_by_state()
     result = audit_true_map(
-        true_map, occupy, args.consumption, accepted=ACCEPTED_FINDINGS)
+        true_map, occupy, args.consumption, accepted=ACCEPTED_FINDINGS,
+        transient=transient)
     print(render_audit(result))
     if args.json:
         out = Path(args.json)
