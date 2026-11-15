@@ -4605,6 +4605,118 @@ class FirstPairRuntime:
             "heartbeat": heartbeat_number,
         }
 
+    _HOMESTEAD_STRUCTURAL_KINDS = frozenset({"timber", "stone", "clay", "wood"})
+
+    def _partner_beside(self, agent_ref: str, tile_id: str | None) -> str | None:
+        """The partner's ref when they stand on, or beside, this tile.
+
+        Phase 10RU. A sibling lane pooled the partner's carried stock wherever
+        the two agents happened to be, which lets one agent spend the other's
+        belongings from across the valley with no way to know. The honest rule
+        is the literal one: materials your partner is CARRYING BESIDE YOU are
+        at the build site. (Wider shared authorship is the rung-8 `stead` the
+        10QF spec deliberately left unbuilt.)
+        """
+        partner_ref = (self._eve_ref if agent_ref == self._adam_ref
+                       else self._adam_ref)
+        if not partner_ref or partner_ref == agent_ref:
+            return None
+        pxy = self._tile_xy(str(tile_id or ""))
+        if pxy is None:
+            return None
+        partner_tile = (self._world_state.tile_occupancy or {}).get(partner_ref)
+        qxy = self._tile_xy(str(partner_tile or ""))
+        if qxy is None:
+            return None
+        if max(abs(pxy[0] - qxy[0]), abs(pxy[1] - qxy[1])) > 1:
+            return None
+        return partner_ref
+
+    def _homestead_structural_holdings(
+        self, agent_ref: str, tile_id: str | None
+    ) -> dict[str, int]:
+        """Combined structural holdings across the builder, reachable containers,
+        and the partner's carried stock AT THE BUILD SITE."""
+        own = dict(self._get_agent_inventory(agent_ref) or {})
+        pooled = {k: int(v or 0) for k, v in own.items() if isinstance(v, (int, float))}
+        txy = self._tile_xy(str(tile_id or ""))
+        for obj in (self._world_state.public_objects or {}).values():
+            if not isinstance(obj, dict):
+                continue
+            if not self._is_container_type(str(obj.get("object_type", ""))):
+                continue
+            otile = str(obj.get("tile_id", ""))
+            oxy = self._tile_xy(otile)
+            if otile != str(tile_id or "") and (
+                txy is None or oxy is None
+                or max(abs(txy[0] - oxy[0]), abs(txy[1] - oxy[1])) > 1
+            ):
+                continue
+            contents = obj.get("contents")
+            if isinstance(contents, dict):
+                for kind in self._HOMESTEAD_STRUCTURAL_KINDS:
+                    amt = int(contents.get(kind, 0) or 0)
+                    if amt > 0:
+                        pooled[kind] = pooled.get(kind, 0) + amt
+        partner_ref = self._partner_beside(agent_ref, tile_id)
+        if partner_ref:
+            partner_inv = self._get_agent_inventory(partner_ref) or {}
+            for kind in self._HOMESTEAD_STRUCTURAL_KINDS:
+                amt = int(partner_inv.get(kind, 0) or 0)
+                if amt > 0:
+                    pooled[kind] = pooled.get(kind, 0) + amt
+        return pooled
+
+    def _spend_homestead_structural(
+        self, agent_ref: str, tile_id: str | None, spend: dict[str, int]
+    ) -> None:
+        """Deduct structural stage materials from builder first, then adjacent
+        containers, then the partner's carried stock AT THE BUILD SITE."""
+        own = self._get_agent_inventory(agent_ref) or {}
+        txy = self._tile_xy(str(tile_id or ""))
+        partner_ref = self._partner_beside(agent_ref, tile_id)
+        for kind, raw_amount in spend.items():
+            needed = int(raw_amount or 0)
+            if needed <= 0:
+                continue
+            own_held = max(0, int(own.get(kind, 0) or 0))
+            from_own = min(needed, own_held) if kind in self._HOMESTEAD_STRUCTURAL_KINDS else needed
+            if from_own > 0:
+                add_to_inventory(self._store, agent_ref, kind, -from_own)
+                needed -= from_own
+            if needed > 0 and kind in self._HOMESTEAD_STRUCTURAL_KINDS:
+                for obj in (self._world_state.public_objects or {}).values():
+                    if needed <= 0 or not isinstance(obj, dict):
+                        continue
+                    if not self._is_container_type(str(obj.get("object_type", ""))):
+                        continue
+                    otile = str(obj.get("tile_id", ""))
+                    oxy = self._tile_xy(otile)
+                    if otile != str(tile_id or "") and (
+                        txy is None or oxy is None
+                        or max(abs(txy[0] - oxy[0]), abs(txy[1] - oxy[1])) > 1
+                    ):
+                        continue
+                    contents = obj.get("contents")
+                    if not isinstance(contents, dict):
+                        continue
+                    c_held = max(0, int(contents.get(kind, 0) or 0))
+                    take_c = min(needed, c_held)
+                    if take_c > 0:
+                        contents[kind] = c_held - take_c
+                        if contents[kind] <= 0:
+                            del contents[kind]
+                        needed -= take_c
+            if needed > 0 and partner_ref:
+                # Clamped to what the partner actually holds: the pool check
+                # should already guarantee this, but a debit must never be able
+                # to drive another agent's holdings negative.
+                partner_held = max(0, int(
+                    (self._get_agent_inventory(partner_ref) or {}).get(kind, 0) or 0))
+                take_p = min(needed, partner_held)
+                if take_p > 0:
+                    add_to_inventory(self._store, partner_ref, kind, -take_p)
+
     def _advance_construction(self, agent_ref: str, action: dict, object_id: str,
                              record: dict, rung_record: dict,
                              heartbeat_number: int) -> dict:
@@ -4648,11 +4760,13 @@ class FirstPairRuntime:
             stage_materials = {}
 
         holdings = self._get_agent_inventory(agent_ref)
+        homestead_holdings = self._homestead_structural_holdings(agent_ref, tile_id)
         for kind, amount in stage_materials.items():
             amount = int(amount or 0)
             if amount <= 0:
                 continue
-            if holdings.get(kind, 0) < amount:
+            available = homestead_holdings.get(kind, 0) if kind in self._HOMESTEAD_STRUCTURAL_KINDS else holdings.get(kind, 0)
+            if available < amount:
                 summary = _holdings_summary(holdings, exclude=kind)
                 reason = (f"Insufficient {kind} for the {next_stage} stage of "
                           f"{object_id}: need {amount}, hold {holdings.get(kind, 0)}")
@@ -4660,10 +4774,7 @@ class FirstPairRuntime:
                     reason += f"; {summary}"
                 return {"status": "rejected", "reason": reason}
 
-        for kind, amount in stage_materials.items():
-            amount = int(amount or 0)
-            if amount > 0:
-                add_to_inventory(self._store, agent_ref, kind, -amount)
+        self._spend_homestead_structural(agent_ref, tile_id, stage_materials)
 
         remaining = dict(record.get("remaining_floor") or {})
         for kind, amount in stage_materials.items():
@@ -4754,6 +4865,21 @@ class FirstPairRuntime:
                         f"(existing: {existing_type} on {existing_tile})"
                     ),
                 }
+            if structural_build:
+                for cand_id, cand_obj in (self._world_state.public_objects or {}).items():
+                    if not isinstance(cand_obj, dict):
+                        continue
+                    if (cand_obj.get("tile_id") == tile_id
+                            and cand_obj.get("creator_agent_id") == view["agent_id"]
+                            and cand_obj.get("construction_project") is True
+                            and cand_obj.get("construction_stage") != "finished"
+                            and (str(cand_id).startswith(f"{object_id}-hb")
+                                 or str(cand_obj.get("object_type") or "").strip().lower()
+                                 == str(object_type or "").strip().lower())):
+                        return self._advance_construction(
+                            agent_ref, action, cand_id, cand_obj,
+                            rung_record, heartbeat_number,
+                        )
             base_id = str(object_id)
             candidate_id = f"{base_id}-hb{heartbeat_number}"
             suffix = 2
@@ -4812,6 +4938,12 @@ class FirstPairRuntime:
             timber_min = (
                 timber_min + _ADDON_STRUCTURAL_DISCOUNT_DIVISOR - 1
             ) // _ADDON_STRUCTURAL_DISCOUNT_DIVISOR
+        holdings = self._get_agent_inventory(agent_ref)
+        homestead_holdings = (
+            self._homestead_structural_holdings(agent_ref, tile_id)
+            if structural_build else holdings
+        )
+
         if timber_min:
             declared_timber = 0
             if isinstance(materials, dict):
@@ -4820,6 +4952,24 @@ class FirstPairRuntime:
                 except (TypeError, ValueError):
                     declared_timber = 0
             if declared_timber < timber_min:
+                # Phase 10RU: this refusal NAMES THE ROUTE (10QL, 10RF, 10RH,
+                # 10RN) instead of the world quietly rewriting the declaration.
+                # A sibling lane briefly auto-filled the rung floor into the
+                # agent's declared materials whenever the model left timber out;
+                # that invents an intent the agent never expressed and hides the
+                # under-declaration, against 10QA's rule that a declared
+                # materials dict IS the whole cost. The pool is real and worth
+                # naming, so the agent can re-declare from it itself.
+                pool_note = ""
+                if structural_build:
+                    pooled = int(homestead_holdings.get("timber", 0) or 0)
+                    if pooled >= timber_min:
+                        pool_note = (
+                            f" Your homestead pool holds {pooled} timber, which "
+                            f"covers this: declare at least {timber_min} timber "
+                            f"in the materials dict, and the build draws it from "
+                            f"the pool."
+                        )
                 return {
                     "status": "rejected",
                     "reason": (
@@ -4830,6 +4980,7 @@ class FirstPairRuntime:
                         f"(flint_knife); a stone_axe is crafted from stone x2 "
                         f"plus wood x1 on a crafting_surface, and a flint_knife "
                         f"from flint x2 plus wood x1."
+                        + pool_note
                     ),
                 }
 
@@ -4894,8 +5045,6 @@ class FirstPairRuntime:
             else:
                 effective_materials[kind] = amount
 
-        holdings = self._get_agent_inventory(agent_ref)
-
         # Phase 10PW: a roofed structure starts as a visible project. Only the
         # FIRST stage's materials are spent now; the rest are spent as the
         # agent advances it, so a half-built house is an honest half-built
@@ -4951,11 +5100,16 @@ class FirstPairRuntime:
         else:
             spend = dict(effective_materials)
 
-
         for kind, amount in spend.items():
-            if holdings.get(kind, 0) < amount:
-                summary = _holdings_summary(holdings, exclude=kind)
-                reason = f"Insufficient {kind}: need {amount}, hold {holdings.get(kind, 0)}"
+            avail = (
+                homestead_holdings.get(kind, 0)
+                if (structural_build and kind in self._HOMESTEAD_STRUCTURAL_KINDS)
+                else holdings.get(kind, 0)
+            )
+            if avail < amount:
+                pool_for_summary = homestead_holdings if structural_build else holdings
+                summary = _holdings_summary(pool_for_summary, exclude=kind)
+                reason = f"Insufficient {kind}: need {amount}, hold {avail}"
                 # Phase 10PW: a staged build's first action costs only its own
                 # stage, so name the whole project too. Otherwise an agent
                 # reads "need 1" and believes one log raises a house.
@@ -4968,8 +5122,11 @@ class FirstPairRuntime:
                     reason += f"; {summary}"
                 return {"status": "rejected", "reason": reason}
 
-        for kind, amount in spend.items():
-            add_to_inventory(self._store, agent_ref, kind, -amount)
+        if structural_build:
+            self._spend_homestead_structural(agent_ref, tile_id, spend)
+        else:
+            for kind, amount in spend.items():
+                add_to_inventory(self._store, agent_ref, kind, -amount)
 
         envelope = PublicObjectRecord(
             object_id=object_id,
@@ -5157,7 +5314,7 @@ class FirstPairRuntime:
         }
 
     def _execute_inspect_public_object(self, action: dict) -> dict:
-        obj_id = action.get("target_object_id")
+        obj_id = action.get("target_object_id") or action.get("object_id")
         if not obj_id or not isinstance(obj_id, str):
             return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
         obj = self._world_state.public_objects.get(obj_id)
@@ -5187,7 +5344,7 @@ class FirstPairRuntime:
         hold contents — type-blind, same principle as the sightline
         extension. The object must be on the agent's current tile.
         """
-        obj_id = action.get("target_object_id")
+        obj_id = action.get("target_object_id") or action.get("object_id")
         # Phase 10QL: knapping needs no object to target. `hew_timber` already
         # promises "with 2 stone and 1 wood a blade can be knapped on the
         # spot", and a craft with no target at all is that act. Any other
@@ -5246,6 +5403,15 @@ class FirstPairRuntime:
                     "reason": f"Object is on {obj_tile}, not your current tile"}
 
         operation = action.get("operation", "inspect")
+        if str(operation).strip().lower() == "drink":
+            return self._execute_drink(
+                agent_ref,
+                {
+                    "target_object_id": obj_id,
+                    "reason": action.get("reason", "drink from container"),
+                },
+                heartbeat_number,
+            )
         if operation not in ("deposit", "extract", "inspect", "smelt", "craft", "cook"):
             return {"status": "rejected",
                     "reason": f"Unknown operation: {operation}. Use deposit, extract, inspect, smelt, craft, or cook."}
@@ -5450,10 +5616,15 @@ class FirstPairRuntime:
                     # (10QL), and for an EMPTY container the next step is where
                     # that kind actually comes from.
                     if contained <= 0:
+                        held_now = int(self._get_agent_inventory(agent_ref).get(kind, 0) or 0)
+                        held_note = (
+                            f" You already carry {held_now} {kind} in your belongings."
+                            if held_now > 0 else ""
+                        )
                         return {"status": "rejected", "reason": (
                             f"{obj_id} is EMPTY: it holds no {kind} to extract, "
                             f"and a {obj_type} gives back only what was put into "
-                            f"it. {self._kind_source_hint(kind)}")}
+                            f"it. {self._kind_source_hint(kind)}{held_note}")}
                     return {"status": "rejected", "reason": (
                         f"{obj_id} holds {contained} of {kind}, less than the "
                         f"{amount} you asked for. Extracting {contained} would "
@@ -5626,7 +5797,7 @@ class FirstPairRuntime:
 
     def _execute_modify_owned_public_object(self, agent_ref: str, action: dict, heartbeat_number: int) -> dict:
         view = self._agent_view(agent_ref)
-        obj_id = action.get("target_object_id")
+        obj_id = action.get("target_object_id") or action.get("object_id")
         if not obj_id or not isinstance(obj_id, str):
             return {"status": "rejected", "reason": "Missing or invalid target_object_id"}
         obj = self._world_state.public_objects.get(obj_id)

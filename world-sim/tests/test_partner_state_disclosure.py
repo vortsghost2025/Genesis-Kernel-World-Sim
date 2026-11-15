@@ -61,9 +61,18 @@ def test_partner_state_is_disclosed_when_the_partner_is_merely_poor():
     assert "vitality 62" in prompt
 
 
-def test_no_partner_state_means_no_partner_line():
+def test_no_partner_state_means_no_partner_state_line():
+    """The partner STATE line is what must be absent.
+
+    Asserted on the state line's own wording rather than on the bare phrase
+    "your partner is": a rule about materials legitimately mentions a partner
+    ("materials your partner is carrying next to you, and materials stored in
+    your home's containers, can fund a build"), and that is not partner state.
+    """
     prompt = m.build_system_prompt(_ctx())
-    assert "your partner is" not in prompt
+    for marker in ("Fact: your partner is collapsed at",
+                   "Fact: your partner is at"):
+        assert marker not in prompt, marker
 
 
 def test_the_partner_line_carries_no_directive_phrasing():

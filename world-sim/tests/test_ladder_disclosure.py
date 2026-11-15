@@ -126,3 +126,152 @@ def test_it_reaches_the_prompt():
     assert "warmth holds near 62 inside" in prompt
     assert "warmth comes from the BEST rung" in prompt
     assert "The generic `shelter` type counts as rung 1" in prompt
+
+
+def test_settlement_line_computes_comfort_floor_from_best_rung_not_tier_weight():
+    """Live bug caught 2026-11-15: `settlement_lines` passed `tier_weight`
+    (footprint + rung_bonus = 70 in West!) into `_home_network_tier()`, printing
+    `comfort floor is 82` on line 1 for a rung-1 shanty town while line 4 printed
+    `warmth holds near 45 inside`. Comfort floor on line 1 must use
+    `_home_thermal_index(best_rung)` so rung 1 prints `comfort floor is 45`
+    regardless of footprint."""
+    import dataclasses
+
+    ctx = dataclasses.replace(
+        _ctx(),
+        home_network_footprint=69,
+        home_rung={"best_rung": 1, "rung": 1, "type": "shelter"},
+    )
+    prompt = m.build_system_prompt(ctx)
+    assert "comfort floor is 45" in prompt, prompt
+    assert "comfort floor is 82" not in prompt, prompt
+
+
+def test_homestead_timber_pool_and_project_continuation_let_partner_build_cabin(tmp_path):
+    """Live bug caught 2026-11-15 (West HB 13923): `west_eve` held `wood: 206,
+    timber: 0` while `west_adam` held `timber: 221, stone: 42`, and her `cabin`
+    build was rejected because she had 0 personal timber and declared 0 timber.
+
+    Phase 10RU reworked the answer to that. The homestead pool is KEPT -- a
+    builder can draw structural materials from containers at the site and from a
+    partner standing beside them -- but the world no longer fills the missing
+    timber into the agent's declaration for it. A short declaration is refused
+    with the pool named, so the agent re-declares from it itself; a declaration
+    that names the floor succeeds by drawing on the pool. The project
+    continuation half is unchanged and still asserted: repeating the build with
+    an existing object_id advances the unfinished project on the current tile
+    instead of spawning duplicate `-hb` foundations."""
+    from backend.world.first_pair_persistence import FirstPairPersistenceStore, add_to_inventory
+    from backend.world.first_pair_runtime import FirstPairRuntime
+
+    store = FirstPairPersistenceStore(tmp_path / "homestead_store")
+    rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+    rt._load_or_initialize()
+    tile = "cont_a_gen_0_0"
+    rt._world_state.tile_occupancy["east_eve"] = tile
+    rt._world_state.tile_occupancy["east_adam"] = tile
+
+    # Existing object with same id on another tile (triggers the -hb suffix path)
+    rt._world_state.public_objects["my_cabin_01"] = {
+        "object_id": "my_cabin_01",
+        "object_type": "shelter",
+        "tile_id": "cont_a_gen_5_5",
+        "creator_agent_id": rt._agent_view("east_eve")["agent_id"],
+    }
+
+    # Eve has wood only; Adam has the timber & stone hoard
+    add_to_inventory(store, "east_eve", "wood", 50)
+    add_to_inventory(store, "east_adam", "timber", 30)
+    add_to_inventory(store, "east_adam", "stone", 20)
+
+    stages_seen = []
+
+    # Phase 10RU: the world does not invent the missing timber. Eve declares
+    # wood only, holds no timber, and the pool (Adam, beside her) has 30 --
+    # so the refusal must SAY that rather than silently adding it.
+    short = rt._execute_build(
+        "east_eve",
+        {
+            "action_type": "build",
+            "object_id": "my_cabin_01",
+            "object_type": "cabin",
+            "tile_id": tile,
+            "materials": {"wood": 10},
+            "description": "A proper timber cabin for our homestead.",
+        },
+        heartbeat_number=99,
+    )
+    assert short["status"] == "rejected", short
+    assert "you declared 0" in short["reason"], short["reason"]
+    assert "homestead pool holds" in short["reason"], short["reason"]
+
+    for hb in range(100, 105):
+        res = rt._execute_build(
+            "east_eve",
+            {
+                "action_type": "build",
+                "object_id": "my_cabin_01",
+                "object_type": "cabin",
+                "tile_id": tile,
+                "materials": {"timber": 3, "stone": 4, "wood": 10},
+                "description": "A proper timber cabin for our homestead.",
+            },
+            heartbeat_number=hb,
+        )
+        assert res["status"] == "success", res
+        stages_seen.append(res.get("stage", "foundation"))
+
+    assert stages_seen == ["foundation", "frame", "walls", "roofed", "finished"]
+    # Only ONE project was created on `tile`, not 5 duplicate `-hb` foundations
+    on_tile = [
+        oid for oid, obj in rt._world_state.public_objects.items()
+        if isinstance(obj, dict) and obj.get("tile_id") == tile
+    ]
+    assert len(on_tile) == 1, on_tile
+    built = rt._world_state.public_objects[on_tile[0]]
+    assert built["structure_rung"] == 3
+    assert built["construction_stage"] == "finished"
+
+
+def test_use_object_drink_and_empty_extract_inventory_reminder(tmp_path):
+    """Live bugs caught 2026-11-15:
+    1) `use_object` with `operation='drink'` was refused as unknown operation;
+    2) `use_object` with `operation='extract'` on an empty cache did not remind
+       the agent when they already carried that resource in their own pack."""
+    from backend.world.first_pair_persistence import FirstPairPersistenceStore, add_to_inventory
+    from backend.world.first_pair_runtime import FirstPairRuntime
+
+    store = FirstPairPersistenceStore(tmp_path / "east_store")
+    rt = FirstPairRuntime(heartbeat_limit=1, store=store)
+    rt._load_or_initialize()
+    tile = "cont_a_gen_0_0"
+    rt._world_state.tile_occupancy["east_adam"] = tile
+
+    rt._world_state.public_objects["water_pot"] = {
+        "object_id": "water_pot",
+        "object_type": "storage",
+        "tile_id": tile,
+        "creator_agent_id": rt._agent_view("east_adam")["agent_id"],
+        "contents": {"fresh_water": 2},
+    }
+    rt._ensure_life_state("east_adam", 1)
+    rt._vitals_for("east_adam")["thirst"] = 50.0
+
+    # 1) use_object(operation="drink") routes to _execute_drink and succeeds
+    drink_res = rt._execute_use_object(
+        "east_adam",
+        {"object_id": "water_pot", "operation": "drink"},
+        heartbeat_number=10,
+    )
+    assert drink_res["status"] == "success", drink_res
+
+    # 2) Empty container extract reminds agent of what they already carry
+    rt._world_state.public_objects["water_pot"]["contents"] = {}
+    add_to_inventory(store, "east_adam", "fresh_water", 1291)
+    ext_res = rt._execute_use_object(
+        "east_adam",
+        {"object_id": "water_pot", "operation": "extract", "materials": {"fresh_water": 2}},
+        heartbeat_number=11,
+    )
+    assert ext_res["status"] == "rejected"
+    assert "You already carry 1291 fresh_water in your belongings." in ext_res["reason"]

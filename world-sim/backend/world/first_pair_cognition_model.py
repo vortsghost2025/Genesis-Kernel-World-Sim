@@ -1275,14 +1275,23 @@ def _home_network_description() -> str:
             f"{downed:g}/hb, warmth approach {approach:g}"
         )
     return (
-        "- Connected roofed home footprint: adjacent shelter, hut, roof, "
-        "tent, lean-to, cabin, stable, and cellar structures form one "
-        "connected home network; `cabin` counts as two footprint units and "
-        "each tile counts at most once. "
+        "- Connected roofed home footprint and thermal tier table (warmth and "
+        "recovery are indexed by the network's BEST structure rung rather than "
+        "raw tile count, while roofed footprint scales storage-cellar food "
+        "capacity): adjacent shelter, hut, roof, "
+        "tent, lean-to, cabin, house, longhouse, cistern, stable, and cellar "
+        "structures form one connected home network; `cabin` counts as two "
+        "footprint units and each tile counts at most once. "
         + "; ".join(rows)
         + ". Storage-cellars in the same connected home share a food "
         "budget of 20 units x connected footprint, and food in a cellar keeps "
-        "for (4 + connected footprint) x its ordinary lifetime."
+        "for (4 + connected footprint) x its ordinary lifetime. A build's "
+        "structural materials (timber, stone, clay, wood) are drawn from a "
+        "HOMESTEAD POOL: your own belongings first, then any container on the "
+        "build tile or the tile beside it, then the pack of your partner IF they "
+        "are standing on the build tile or beside it. So materials your partner "
+        "is carrying next to you, and materials stored in your home's "
+        "containers, can fund a build you declare."
     )
 
 
@@ -2169,21 +2178,24 @@ def build_system_prompt(context: AgentContext) -> str:
 
     footprint = int(getattr(context, "home_network_footprint", 0) or 0)
     if footprint > 0:
-        # Phase 10QC: the tier weight is the number the physics reads, so it
-        # is the number disclosed. A 46-tile settlement of cabins and a
-        # single longhouse were both reading "past the end of the table"
-        # before this; now the ladder continues and both numbers are facts.
+        # Phase 10QC / 10QU: warmth and recovery follow the best structure rung
+        # via _home_thermal_index, while tier_weight governs storage-cellar
+        # food budget. Both lines in SETTLEMENT must report the same comfort
+        # floor that the physics actually grants.
         from backend.world.first_pair_runtime import (
             _FOOTPRINT_SATURATION,
             _home_tier_weight,
             _home_network_tier,
+            _home_thermal_index,
         )
         best_rung = 0
         home = getattr(context, "home_rung", {}) or {}
         if isinstance(home, dict):
-            best_rung = int(home.get("best_rung", 0) or 0)
+            best_rung = int(home.get("best_rung") or home.get("rung") or 0)
         tier_weight = _home_tier_weight(footprint, best_rung)
-        floor, decay, regen, downed, approach = _home_network_tier(tier_weight)
+        floor, decay, regen, downed, approach = _home_network_tier(
+            _home_thermal_index(best_rung)
+        )
         settlement_lines.append(
             f"Fact: connected roofed home footprint is {footprint} "
             f"(saturates at {_FOOTPRINT_SATURATION}); best structure rung in "
