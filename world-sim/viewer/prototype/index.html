@@ -232,31 +232,34 @@ header {
 /* 3D Camera & Overlay Toolbar */
 .camera-toolbar {
   position: absolute;
-  top: 16px;
+  top: 14px;
   right: 16px;
   display: flex;
-  gap: 6px;
-  z-index: 30;
-  background: rgba(8, 12, 20, 0.85);
+  flex-wrap: wrap;
+  gap: 4px;
+  z-index: 32;
+  background: rgba(8, 12, 20, 0.88);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-line);
-  padding: 4px;
+  padding: 4px 6px;
   border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 .cam-btn {
   background: transparent;
   border: none;
   color: var(--text-secondary);
   font-family: var(--font-ui);
-  font-size: 0.72rem;
+  font-size: 0.70rem;
   font-weight: 600;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  white-space: nowrap;
 }
 .cam-btn:hover {
   color: #fff;
@@ -271,13 +274,13 @@ header {
 /* Continent Scale Telemetry HUD */
 .continent-scale-hud {
   position: absolute;
-  top: 16px;
+  top: 60px;
   left: 16px;
   background: rgba(8, 12, 20, 0.88);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border-line);
   border-radius: 10px;
-  padding: 12px 18px;
+  padding: 10px 16px;
   z-index: 30;
   display: flex;
   flex-direction: column;
@@ -1168,9 +1171,9 @@ const knownCoordsByContinent = { cont_a: new Set(), cont_b: new Set() };
 
 // Seasonal Uniforms shared across both continent terrain shaders
 const terrainSeasonUniforms = {
-  uSeasonMeadowSunlit: { value: new THREE.Vector3(0.47, 0.75, 0.14) },
-  uSeasonMeadowLush:   { value: new THREE.Vector3(0.22, 0.52, 0.10) },
-  uSeasonMeadowAccent: { value: new THREE.Vector3(0.62, 0.78, 0.18) },
+  uSeasonMeadowSunlit: { value: new THREE.Vector3(0.32, 0.52, 0.18) },
+  uSeasonMeadowLush:   { value: new THREE.Vector3(0.18, 0.36, 0.11) },
+  uSeasonMeadowAccent: { value: new THREE.Vector3(0.45, 0.54, 0.22) },
   uSeasonForestDark:   { value: new THREE.Vector3(0.06, 0.18, 0.07) },
   uSeasonForestLit:    { value: new THREE.Vector3(0.15, 0.34, 0.11) },
   uSeasonSnowOffset:   { value: 0.0 }
@@ -1220,9 +1223,9 @@ function getSeasonPalette(seasonName) {
   if (s.includes("sum")) {
     return {
       name: "Summer",
-      meadowSunlit: [0.34, 0.68, 0.12],
-      meadowLush:   [0.15, 0.44, 0.08],
-      meadowAccent: [0.52, 0.74, 0.16],
+      meadowSunlit: [0.28, 0.48, 0.16],
+      meadowLush:   [0.15, 0.33, 0.10],
+      meadowAccent: [0.42, 0.52, 0.20],
       coniferDark:  [0.05, 0.16, 0.06],
       coniferLit:   [0.13, 0.31, 0.10],
       coniferTintHex: 0xeaf5e4,
@@ -1233,9 +1236,9 @@ function getSeasonPalette(seasonName) {
   if (s.includes("aut") || s.includes("fall")) {
     return {
       name: "Autumn",
-      meadowSunlit: [0.68, 0.56, 0.16],
-      meadowLush:   [0.42, 0.36, 0.11],
-      meadowAccent: [0.84, 0.44, 0.12],
+      meadowSunlit: [0.56, 0.48, 0.18],
+      meadowLush:   [0.36, 0.32, 0.12],
+      meadowAccent: [0.72, 0.42, 0.15],
       coniferDark:  [0.08, 0.17, 0.06],
       coniferLit:   [0.22, 0.32, 0.10],
       coniferTintHex: 0xf5ecd8,
@@ -1258,9 +1261,9 @@ function getSeasonPalette(seasonName) {
   }
   return {
     name: "Spring",
-    meadowSunlit: [0.47, 0.75, 0.14],
-    meadowLush:   [0.22, 0.52, 0.10],
-    meadowAccent: [0.62, 0.78, 0.18],
+    meadowSunlit: [0.32, 0.52, 0.18],
+    meadowLush:   [0.18, 0.36, 0.11],
+    meadowAccent: [0.45, 0.54, 0.22],
     coniferDark:  [0.06, 0.18, 0.07],
     coniferLit:   [0.15, 0.34, 0.11],
     coniferTintHex: 0xffffff,
@@ -3030,14 +3033,20 @@ function buildContinentMesh(cid) {
 
           vec3 sunDir = normalize(vec3(-0.66, 0.52, 0.54));
 
-          // 1. Sunlit Val di Funes Spring/Seasonal Pasture
+          // 1. Sunlit Val di Funes Spring/Seasonal Pasture with micro-turf & loam patches
           vec3 sunlitLime = uSeasonMeadowSunlit;
           vec3 lushEmerald = uSeasonMeadowLush;
           vec3 wildflowerGold = uSeasonMeadowAccent;
+          float nTuft = noise2(wp * 8.5);
+          float nBlade = noise2(wp * 22.0);
           float contourWave = 0.5 + 0.5 * sin(wp.x * 0.24 + wp.y * 0.19 + nMacro * 4.2);
-          vec3 meadowCol = mix(lushEmerald, sunlitLime, clamp(nMacro * 0.75 + contourWave * 0.35, 0.0, 1.0));
-          meadowCol = mix(meadowCol, wildflowerGold, smoothstep(0.62, 0.88, nMeso) * 0.35);
-          meadowCol *= (0.90 + 0.20 * nFine);
+          vec3 meadowCol = mix(lushEmerald, sunlitLime, clamp(nMacro * 0.55 + nMicro * 0.30 + contourWave * 0.25, 0.0, 1.0));
+          meadowCol = mix(meadowCol, wildflowerGold, smoothstep(0.54, 0.84, nMeso * 0.65 + nTuft * 0.35) * 0.42);
+          // Warm earthy loam & stone-path dappling so the ground reads as organic soil & turf
+          vec3 warmLoam = vec3(0.32, 0.26, 0.18);
+          float loamMask = smoothstep(0.66, 0.88, (1.0 - nMicro) * 0.65 + (1.0 - nMeso) * 0.35) * (1.0 - smoothstep(4.5, 9.0, h));
+          meadowCol = mix(meadowCol, warmLoam, loamMask * 0.38);
+          meadowCol *= (0.84 + 0.16 * nFine + 0.12 * (nBlade - 0.5));
 
           // 2. Dark Evergreen Spruce / Pine Foothill Belt (3.8m right up to the 19.5m cliff base so zero bare gap exists below the rock wall)
           vec3 darkSpruce = uSeasonForestDark;
@@ -4213,7 +4222,44 @@ function updatePublicObjectsAndClearings(pn, hb) {
       landmark: { dx:  0.34, dz: -0.40 }
     };
 
+    const placedShelterPositions = [];
+    const placedConstructPositions = [];
+    const allFinishedShelterCoords = [];
+    const curAgentCoords = [];
+    const curPosTids = (PAIRS[pn] && PAIRS[pn].current_positions) ? Object.values(PAIRS[pn].current_positions) : [];
+    for (const ctid of curPosTids) {
+      const ct = tilesById.get(ctid);
+      if (ct && ct.coordinates) curAgentCoords.push({ x: ct.coordinates.x, z: ct.coordinates.y });
+    }
     for (const [tid, tileObjs] of byTile.entries()) {
+      const t = tilesById.get(tid);
+      if (!t || !t.coordinates) continue;
+      const hasFin = tileObjs.some(r => {
+        if (r.category !== "shelter") return false;
+        const p = getObjectVisualProfile(r);
+        return !(p && p.construction) && (!p || p.id !== "vis_cistern");
+      });
+      if (hasFin) {
+        allFinishedShelterCoords.push({ x: t.coordinates.x, z: t.coordinates.y, tid });
+      }
+    }
+    const sortedTileEntries = Array.from(byTile.entries()).sort((a, b) => {
+      const ta = tilesById.get(a[0]);
+      const tb = tilesById.get(b[0]);
+      const ax = (ta && ta.coordinates) ? ta.coordinates.x : 0;
+      const az = (ta && ta.coordinates) ? ta.coordinates.y : 0;
+      const bx = (tb && tb.coordinates) ? tb.coordinates.x : 0;
+      const bz = (tb && tb.coordinates) ? tb.coordinates.y : 0;
+      const da = curAgentCoords.length > 0
+        ? Math.min(...curAgentCoords.map(c => Math.hypot(c.x - ax, c.z - az)))
+        : 0;
+      const db = curAgentCoords.length > 0
+        ? Math.min(...curAgentCoords.map(c => Math.hypot(c.x - bx, c.z - bz)))
+        : 0;
+      return da - db;
+    });
+
+    for (const [tid, tileObjs] of sortedTileEntries) {
       const t = tilesById.get(tid);
       if (!t || !t.coordinates) continue;
       const px = t.coordinates.x;
@@ -4226,13 +4272,27 @@ function updatePublicObjectsAndClearings(pn, hb) {
         byCat[c].push(rec);
       }
 
+      // Check if this tile already holds a finished roofed shelter
+      const hasFinishedShelterOnTile = byCat.shelter.some(r => {
+        const p = getObjectVisualProfile(r);
+        return !(p && p.construction);
+      });
+      let shownConstructOnTile = false;
+      let shownShelterOnTile = false;
+
       let tileHasLight = false;
 
       for (const [cat, catList] of Object.entries(byCat)) {
         if (catList.length === 0) continue;
 
-        // Sort so primary named structures lead the cluster while preserving every object
+        // Sort so finished higher-rung structures lead the cluster while preserving every object
         catList.sort((a, b) => {
+          const aConstruct = a.construction_project && a.construction_stage !== "finished" ? 1 : 0;
+          const bConstruct = b.construction_project && b.construction_stage !== "finished" ? 1 : 0;
+          if (aConstruct !== bConstruct) return aConstruct - bConstruct;
+          const aRung = Number(a.structure_rung || 0);
+          const bRung = Number(b.structure_rung || 0);
+          if (aRung !== bRung) return bRung - aRung;
           const aIsTest = /test|epistemic|berry/i.test(a.object_id) ? 1 : 0;
           const bIsTest = /test|epistemic|berry/i.test(b.object_id) ? 1 : 0;
           if (aIsTest !== bIsTest) return aIsTest - bIsTest;
@@ -4268,10 +4328,50 @@ function updatePublicObjectsAndClearings(pn, hb) {
           const prof = getObjectVisualProfile(rec);
           const profScale = prof ? prof.scale : 1.0;
           const profTint = prof ? prof.color : 0xffffff;
-          const effScale = scale * profScale;
+          let effScale = scale * profScale;
+
+          // Compound visual de-cluttering: keep every canonical record in oGroup.children
+          // for runtime inspection, but suppress duplicate overlapping 3.35m cottage sprites
+          // and unfinished construction frames that collide with finished cottages.
+          let culledDuplicate = false;
+          if (prof && prof.construction) {
+            const nearFinished = hasFinishedShelterOnTile || allFinishedShelterCoords.some(
+              p => Math.hypot(p.x - ox, p.z - oz) < 5.5
+            );
+            const nearConstruct = shownConstructOnTile || placedConstructPositions.some(
+              p => Math.hypot(p.x - ox, p.z - oz) < 2.8
+            );
+            if (nearFinished || nearConstruct) {
+              culledDuplicate = true;
+            } else {
+              effScale *= 0.48;
+              shownConstructOnTile = true;
+              placedConstructPositions.push({ x: ox, z: oz });
+            }
+          } else if (cat === "shelter" && (!prof || prof.id !== "vis_cistern")) {
+            if (shownShelterOnTile) {
+              culledDuplicate = true;
+            } else {
+              const tooClose = placedShelterPositions.some(
+                p => Math.hypot(p.x - ox, p.z - oz) < 2.65
+              );
+              if (tooClose) {
+                culledDuplicate = true;
+              } else {
+                shownShelterOnTile = true;
+                placedShelterPositions.push({ x: ox, z: oz });
+              }
+            }
+          } else if (i >= 3) {
+            culledDuplicate = true;
+          }
 
           let propMesh = null;
-          if (prof && prof.construction) {
+          if (culledDuplicate) {
+            propMesh = new THREE.Group();
+            propMesh.position.set(ox, oh, oz);
+            propMesh.visible = false;
+          } else if (prof && prof.construction) {
             // Phase 10PX: grow the structure with the world's own stage.
             propMesh = createConstructionSprite(
               ox, oz, oh, prof.construction_stage, prof.structure_rung,
@@ -4295,6 +4395,7 @@ function updatePublicObjectsAndClearings(pn, hb) {
 
           propMesh.userData = {
             ...propMesh.userData,
+            culledDuplicate,
             object_id: rec.object_id,
             object_type: rec.object_type,
             category: cat,
@@ -4502,7 +4603,12 @@ function buildAlpineConiferForest(cid) {
     if (po && po.tile_id) addSettleCoord(po.tile_id);
   }
   const curPos = (PAIRS[pn] && PAIRS[pn].current_positions) ? Object.values(PAIRS[pn].current_positions) : [];
-  for (const tid of curPos) addSettleCoord(tid);
+  const curCoords = [];
+  for (const tid of curPos) {
+    addSettleCoord(tid);
+    const ct = tilesById.get(tid);
+    if (ct && ct.coordinates) curCoords.push({ x: ct.coordinates.x, z: ct.coordinates.y });
+  }
   const settleCx = cnt > 0 ? (sumX / cnt) : (cid === "cont_b" ? 45.5 : -4.3);
   const settleCz = cnt > 0 ? (sumZ / cnt) : (cid === "cont_b" ? 50.6 : -1.3);
 
@@ -4524,10 +4630,11 @@ function buildAlpineConiferForest(cid) {
       const dxS = x - settleCx;
       const dzS = y - settleCz;
       const distSettle = Math.hypot(dxS * 0.78, dzS * 1.0);
-      // Keep the foreground sightline and central sunlit village pasture (dzS > -9.5 and |dxS| < 12.5) open
+      // Keep the foreground sightline, active agent vicinity, and central sunlit village pasture open
       // and carpet the flanking V-valley foothill slopes right up to the Dolomite cliff base (h <= 16.5m) with zero bare green gap!
       if (distSettle < 10.5) continue;
       if (dzS > -9.5 && Math.abs(dxS) < 12.5) continue;
+      if (curCoords.some(c => Math.hypot(x - c.x, y - c.z) < 9.5)) continue;
 
       const idx = (y + 100) * 200 + (x + 100);
       if (waterMaskLookup[cid] && waterMaskLookup[cid][idx] > 0) continue;
@@ -4878,9 +4985,11 @@ function createCharacterFigure(name, factionColor) {
   const mat = new THREE.SpriteMaterial({
     map: tex,
     transparent: true,
-    alphaTest: 0.35
+    alphaTest: 0.35,
+    depthTest: false
   });
   const sprite = new THREE.Sprite(mat);
+  sprite.renderOrder = 15;
   sprite.scale.set(charW, charH, 1);
   // Boots sit near bottom of trimmed sprite; sink slightly (-0.03) so boots plant firmly into turf
   sprite.position.y = charH * 0.5 - 0.03;
@@ -4918,72 +5027,142 @@ const charFigures = {
 // -------------------------------------------------------------
 function createAnimalCanvasTexture(kind) {
   const c = document.createElement("canvas");
-  c.width = 128; c.height = 128;
+  c.width = 256; c.height = 256;
   const ctx = c.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
+  ctx.scale(2, 2);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
 
   if (kind === "cow") {
-    ctx.fillStyle = "#f8f9fa";
-    ctx.beginPath(); ctx.ellipse(64, 76, 42, 28, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#2f3640";
-    ctx.beginPath(); ctx.arc(52, 70, 14, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(82, 82, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#f8f9fa";
-    ctx.beginPath(); ctx.ellipse(32, 54, 18, 16, -0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#f8a5c2";
-    ctx.beginPath(); ctx.ellipse(22, 60, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#1e272e"; ctx.fillRect(28, 48, 4, 4);
-    ctx.fillStyle = "#e0dcd3"; ctx.fillRect(36, 38, 4, 8); ctx.fillRect(44, 40, 4, 8);
-    ctx.fillStyle = "#2f3640";
-    ctx.fillRect(40, 96, 7, 24); ctx.fillRect(52, 96, 7, 24);
-    ctx.fillRect(72, 96, 7, 24); ctx.fillRect(84, 96, 7, 24);
+    // Legs (back then front)
+    ctx.fillStyle = "#2b2f36";
+    ctx.fillRect(42, 92, 6, 26); ctx.fillRect(76, 92, 6, 26);
+    ctx.fillStyle = "#e8e4dc";
+    ctx.fillRect(49, 94, 6, 24); ctx.fillRect(83, 94, 6, 24);
+    ctx.fillStyle = "#1e2228";
+    ctx.fillRect(41, 114, 7, 5); ctx.fillRect(48, 114, 7, 5);
+    ctx.fillRect(75, 114, 7, 5); ctx.fillRect(82, 114, 7, 5);
+    // Tail
+    ctx.strokeStyle = "#3a3f47"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(98, 66); ctx.quadraticCurveTo(108, 78, 104, 96); ctx.stroke();
+    // Body with warm shading
+    const bg = ctx.createLinearGradient(30, 50, 96, 98);
+    bg.addColorStop(0, "#fdfbf7"); bg.addColorStop(1, "#dcd6c8");
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.ellipse(66, 76, 36, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#2f353d"; ctx.lineWidth = 2; ctx.stroke();
+    // Piebald patches
+    ctx.fillStyle = "#2f353d";
+    ctx.beginPath(); ctx.ellipse(54, 68, 13, 10, 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(80, 78, 14, 11, -0.2, 0, Math.PI * 2); ctx.fill();
+    // Udder
+    ctx.fillStyle = "#f3a6b8";
+    ctx.beginPath(); ctx.ellipse(68, 96, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+    // Neck & Head
+    ctx.fillStyle = "#f5f1e8";
+    ctx.beginPath(); ctx.ellipse(32, 58, 15, 13, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#2f353d"; ctx.lineWidth = 1.8; ctx.stroke();
+    // Horns & Ears
+    ctx.fillStyle = "#d8ccb8";
+    ctx.beginPath(); ctx.moveTo(34, 46); ctx.quadraticCurveTo(30, 35, 36, 34); ctx.quadraticCurveTo(38, 42, 38, 46); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(41, 46); ctx.quadraticCurveTo(44, 36, 48, 36); ctx.quadraticCurveTo(46, 43, 44, 47); ctx.fill();
+    // Muzzle & Eye
+    ctx.fillStyle = "#f2a7b5";
+    ctx.beginPath(); ctx.ellipse(21, 63, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1b1f24";
+    ctx.beginPath(); ctx.arc(28, 54, 2.4, 0, Math.PI * 2); ctx.fill();
   } else if (kind === "horse") {
-    ctx.fillStyle = "#8b4513";
-    ctx.beginPath(); ctx.ellipse(66, 72, 38, 22, -0.1, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(36, 46, 12, 20, 0.4, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(26, 36, 14, 10, -0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#2c1507"; ctx.fillRect(38, 32, 8, 26);
-    ctx.beginPath(); ctx.ellipse(98, 76, 8, 22, 0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#6e330a";
-    ctx.fillRect(42, 88, 5, 34); ctx.fillRect(52, 88, 5, 34);
-    ctx.fillRect(74, 88, 5, 34); ctx.fillRect(84, 88, 5, 34);
-    ctx.fillStyle = "#1e272e"; ctx.fillRect(24, 34, 3, 3);
+    // Back legs & front legs
+    ctx.fillStyle = "#4d260b";
+    ctx.fillRect(43, 86, 5, 32); ctx.fillRect(75, 86, 5, 32);
+    ctx.fillStyle = "#6e3712";
+    ctx.fillRect(50, 88, 5, 30); ctx.fillRect(83, 88, 5, 30);
+    ctx.fillStyle = "#1a1410";
+    ctx.fillRect(42, 114, 6, 5); ctx.fillRect(49, 114, 6, 5);
+    ctx.fillRect(74, 114, 6, 5); ctx.fillRect(82, 114, 6, 5);
+    // Flowing Tail
+    ctx.fillStyle = "#241205";
+    ctx.beginPath(); ctx.ellipse(99, 78, 7, 20, 0.28, 0, Math.PI * 2); ctx.fill();
+    // Muscular Chestnut Body
+    const hg = ctx.createLinearGradient(34, 48, 92, 92);
+    hg.addColorStop(0, "#a85824"); hg.addColorStop(1, "#6b3310");
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.ellipse(66, 72, 33, 18, -0.06, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#361806"; ctx.lineWidth = 2; ctx.stroke();
+    // Arching Neck & Head
+    ctx.fillStyle = "#964b1b";
+    ctx.beginPath(); ctx.ellipse(38, 50, 11, 19, 0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(27, 38, 12, 8, -0.25, 0, Math.PI * 2); ctx.fill();
+    // Dark Mane
+    ctx.fillStyle = "#241205";
+    ctx.beginPath(); ctx.ellipse(44, 46, 5, 16, 0.32, 0, Math.PI * 2); ctx.fill();
+    // Ears, Blaze & Eye
+    ctx.fillStyle = "#7a3b12";
+    ctx.beginPath(); ctx.moveTo(31, 31); ctx.lineTo(29, 22); ctx.lineTo(35, 29); ctx.fill();
+    ctx.fillStyle = "#1a120b";
+    ctx.beginPath(); ctx.arc(26, 36, 2.2, 0, Math.PI * 2); ctx.fill();
   } else if (kind === "snake") {
-    ctx.fillStyle = "#2ed573";
-    ctx.beginPath(); ctx.arc(64, 84, 28, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#1e272e";
-    ctx.beginPath(); ctx.arc(64, 84, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#26af61";
-    ctx.beginPath(); ctx.ellipse(78, 68, 14, 10, 0.4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#ff4757";
-    ctx.fillRect(92, 66, 8, 2); ctx.fillRect(98, 64, 4, 2); ctx.fillRect(98, 68, 4, 2);
-    ctx.fillStyle = "#ffa502"; ctx.fillRect(78, 64, 3, 3);
+    // Coiled emerald viper body with shaded scales
+    ctx.strokeStyle = "#163822"; ctx.lineWidth = 12;
+    ctx.beginPath(); ctx.arc(64, 90, 22, 0.2, Math.PI * 1.85); ctx.stroke();
+    ctx.strokeStyle = "#2ea85c"; ctx.lineWidth = 8.5;
+    ctx.beginPath(); ctx.arc(64, 90, 22, 0.2, Math.PI * 1.85); ctx.stroke();
+    ctx.fillStyle = "#36bf68";
+    ctx.beginPath(); ctx.ellipse(78, 70, 11, 7, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#ff4757"; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(89, 68); ctx.lineTo(98, 67); ctx.lineTo(102, 64); ctx.moveTo(98, 67); ctx.lineTo(102, 70); ctx.stroke();
+    ctx.fillStyle = "#ffa502";
+    ctx.beginPath(); ctx.arc(79, 68, 2.2, 0, Math.PI * 2); ctx.fill();
   } else if (kind === "deer") {
-    ctx.fillStyle = "#cd853f";
-    ctx.beginPath(); ctx.ellipse(64, 74, 34, 20, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(38, 50, 9, 18, 0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(28, 40, 11, 8, -0.1, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#8b5a2b"; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(32, 34); ctx.lineTo(26, 18); ctx.lineTo(20, 14); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(26, 24); ctx.lineTo(34, 18); ctx.stroke();
-    ctx.fillStyle = "#b57233";
-    ctx.fillRect(44, 90, 4, 32); ctx.fillRect(52, 90, 4, 32);
-    ctx.fillRect(72, 90, 4, 32); ctx.fillRect(80, 90, 4, 32);
+    // Slender legs
+    ctx.fillStyle = "#7d4e24";
+    ctx.fillRect(45, 86, 4, 32); ctx.fillRect(53, 88, 4, 30);
+    ctx.fillRect(73, 86, 4, 32); ctx.fillRect(81, 88, 4, 30);
+    // Graceful Tawny Body
+    const dg = ctx.createLinearGradient(36, 52, 90, 90);
+    dg.addColorStop(0, "#d9934c"); dg.addColorStop(1, "#9c6028");
+    ctx.fillStyle = dg;
+    ctx.beginPath(); ctx.ellipse(64, 74, 30, 16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#4f2e10"; ctx.lineWidth = 1.8; ctx.stroke();
+    // White tail & fawn spots
+    ctx.fillStyle = "#f7f1e3";
+    ctx.beginPath(); ctx.ellipse(93, 68, 5, 7, -0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(58, 70, 2.2, 0, Math.PI * 2); ctx.arc(68, 68, 2.0, 0, Math.PI * 2); ctx.arc(76, 72, 2.2, 0, Math.PI * 2); ctx.fill();
+    // Neck, Head & Branching Antlers
+    ctx.fillStyle = "#c47d38";
+    ctx.beginPath(); ctx.ellipse(39, 52, 8, 17, 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(29, 40, 10, 6.5, -0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#5c3c1e"; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(33, 34); ctx.lineTo(28, 18); ctx.lineTo(22, 12); ctx.moveTo(28, 22); ctx.lineTo(35, 15); ctx.moveTo(30, 27); ctx.lineTo(21, 22); ctx.stroke();
+    ctx.fillStyle = "#1e1610";
+    ctx.beginPath(); ctx.arc(27, 39, 2.0, 0, Math.PI * 2); ctx.fill();
   } else {
     // wolf
-    ctx.fillStyle = "#747d8c";
-    ctx.beginPath(); ctx.ellipse(64, 74, 36, 20, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(36, 54, 14, 14, 0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(24, 58, 12, 7, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#57606f";
-    ctx.beginPath(); ctx.moveTo(34, 44); ctx.lineTo(30, 32); ctx.lineTo(38, 38); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(96, 76, 8, 20, 0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillRect(42, 88, 5, 32); ctx.fillRect(52, 88, 5, 32);
-    ctx.fillRect(74, 88, 5, 32); ctx.fillRect(84, 88, 5, 32);
-    ctx.fillStyle = "#ffa502"; ctx.fillRect(32, 50, 3, 3);
+    ctx.fillStyle = "#3d4450";
+    ctx.fillRect(43, 86, 5, 30); ctx.fillRect(52, 88, 5, 28);
+    ctx.fillRect(74, 86, 5, 30); ctx.fillRect(83, 88, 5, 28);
+    // Bushy Tail
+    ctx.fillStyle = "#48505e";
+    ctx.beginPath(); ctx.ellipse(96, 76, 7, 17, 0.45, 0, Math.PI * 2); ctx.fill();
+    // Grey Timber Wolf Torso
+    const wg = ctx.createLinearGradient(34, 52, 90, 90);
+    wg.addColorStop(0, "#8892a0"); wg.addColorStop(1, "#4d5563");
+    ctx.fillStyle = wg;
+    ctx.beginPath(); ctx.ellipse(64, 74, 32, 17, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#23272e"; ctx.lineWidth = 2; ctx.stroke();
+    // Heavy Shoulder Ruff, Head & Snout
+    ctx.fillStyle = "#6c7585";
+    ctx.beginPath(); ctx.ellipse(39, 58, 13, 13, 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(25, 58, 10, 6, 0, 0, Math.PI * 2); ctx.fill();
+    // Pointed Ears & Amber Eye
+    ctx.fillStyle = "#3d4450";
+    ctx.beginPath(); ctx.moveTo(34, 48); ctx.lineTo(31, 35); ctx.lineTo(39, 43); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(41, 47); ctx.lineTo(40, 35); ctx.lineTo(46, 44); ctx.fill();
+    ctx.fillStyle = "#ffb142";
+    ctx.beginPath(); ctx.arc(32, 54, 2.2, 0, Math.PI * 2); ctx.fill();
   }
   const tex = new THREE.CanvasTexture(c);
-  tex.magFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;
   return tex;
 }
@@ -5227,13 +5406,41 @@ interiorGroup.visible = false;
 scene.add(interiorGroup);
 
 const floorCanvas = document.createElement("canvas");
-floorCanvas.width = 128; floorCanvas.height = 128;
+floorCanvas.width = 256; floorCanvas.height = 256;
 const fctx = floorCanvas.getContext("2d");
-fctx.fillStyle = "#4a2e18"; fctx.fillRect(0, 0, 128, 128);
-fctx.fillStyle = "#3a2210";
-for (let p = 0; p < 128; p += 16) { fctx.fillRect(0, p, 128, 2); }
+fctx.fillStyle = "#6b4423"; fctx.fillRect(0, 0, 256, 256);
+for (let p = 0; p < 256; p += 32) {
+  fctx.fillStyle = (p / 32) % 2 ? "#754c29" : "#613d1f";
+  fctx.fillRect(0, p, 256, 30);
+  fctx.fillStyle = "#3a2210";
+  fctx.fillRect(0, p + 30, 256, 2);
+  fctx.fillStyle = "rgba(255,220,170,0.08)";
+  fctx.fillRect(0, p + 3, 256, 3);
+  const jointX = ((p * 3) % 192) + 32;
+  fctx.fillStyle = "#3a2210";
+  fctx.fillRect(jointX, p, 2, 30);
+}
 const floorTex = new THREE.CanvasTexture(floorCanvas);
 const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, userData: { isSharedMaterial: true } });
+
+const windowCanvas = document.createElement("canvas");
+windowCanvas.width = 128; windowCanvas.height = 128;
+const wctx = windowCanvas.getContext("2d");
+const wgrad = wctx.createLinearGradient(0, 0, 0, 128);
+wgrad.addColorStop(0, "#68a8e8");
+wgrad.addColorStop(0.55, "#b8dcf8");
+wgrad.addColorStop(1, "#ffe29a");
+wctx.fillStyle = wgrad;
+wctx.fillRect(0, 0, 128, 128);
+wctx.strokeStyle = "#3b2310";
+wctx.lineWidth = 14;
+wctx.strokeRect(0, 0, 128, 128);
+wctx.lineWidth = 8;
+wctx.beginPath();
+wctx.moveTo(64, 0); wctx.lineTo(64, 128);
+wctx.moveTo(0, 64); wctx.lineTo(128, 64);
+wctx.stroke();
+const windowTex = new THREE.CanvasTexture(windowCanvas);
 
 // Phase 10PD: procedural log walls + thatch roof so the room reads as a
 // cabin, not a flat box.
@@ -5379,7 +5586,7 @@ function rebuildInteriorVolume() {
     lMesh.receiveShadow = true;
     interiorVolumeGroup.add(lMesh);
   }
-  const windowMat = new THREE.MeshBasicMaterial({ color: 0xffc26e, side: THREE.DoubleSide });
+  const windowMat = new THREE.MeshBasicMaterial({ map: windowTex, side: THREE.DoubleSide, userData: { isSharedMaterial: true } });
   for (const win of (spec.windows || [])) {
     const wGeom = new THREE.PlaneGeometry(win.width, win.height);
     const wMesh = new THREE.Mesh(wGeom, windowMat);
@@ -5564,43 +5771,43 @@ function rebuildInteriorProps(tileId, pairName, hb) {
   const contents = neighbourhoodObjects(pairName, hb, tileId);
   const plan = interiorPropPlan(contents);
 
-  // Slots around the room, so several of a kind sit like furniture instead of
-  // overlapping in the middle.
+  // Slots around the back and side walls so furniture frames the room and
+  // leaves the central floor and foreground camera corners clear.
   const SLOTS = [
-    { x: 0.0, z: -1.5 }, { x: -1.7, z: -1.4 }, { x: 1.7, z: -1.4 },
-    { x: -1.9, z: 0.2 }, { x: 1.9, z: 0.2 },
-    { x: -1.7, z: 1.5 }, { x: 1.7, z: 1.5 }, { x: 0.0, z: 1.7 },
-    { x: -0.9, z: -0.4 }, { x: 0.9, z: -0.4 },
-    { x: -0.9, z: 0.9 }, { x: 0.9, z: 0.9 },
-    { x: 0.0, z: 0.6 }, { x: -2.0, z: -0.6 },
+    { x: 0.0, z: -1.35 }, { x: -1.72, z: -1.35 }, { x: 1.72, z: -1.35 },
+    { x: -1.85, z: -0.55 }, { x: 1.85, z: -0.55 },
+    { x: -1.85, z: 0.05 }, { x: 1.85, z: 0.05 }, { x: -1.25, z: -1.38 },
+    { x: 1.25, z: -1.38 }, { x: -1.85, z: -0.98 },
+    { x: 1.85, z: -0.98 }, { x: -1.48, z: -0.18 },
+    { x: 1.48, z: -0.18 }, { x: 0.0, z: -1.48 },
   ];
   const slotAt = (i) => SLOTS[i % SLOTS.length];
 
   let slotCursor = 8; // kinds get their own preferred slots first
   const PREFERRED = {
-    hearth: 0, forge: 1, well: 2, ladder: 5, bed: 3, workbench: 6,
-    table: 11, chair: 12, storage: 7, tools: 9, garden: 10,
+    hearth: 0, forge: 1, well: 2, ladder: 5, bed: 3, workbench: 4,
+    table: 11, chair: 12, storage: 6, tools: 9, garden: 10,
   };
 
   for (const item of plan) {
     const slot = (item.index === 0 && PREFERRED[item.kind] != null)
       ? SLOTS[PREFERRED[item.kind]]
       : slotAt(slotCursor++);
-    const at = { x: slot.x + (item.index % 2 ? 0.18 : -0.18), z: slot.z };
+    const at = { x: slot.x + (item.index % 2 ? 0.14 : -0.14), z: slot.z };
 
     if (item.kind === "hearth") {
       const base = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.5, 0.6, 0.22, 12),
-        new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.9 }));
-      base.position.set(at.x, 0.12, at.z);
+        new THREE.CylinderGeometry(0.42, 0.46, 0.05, 16),
+        new THREE.MeshStandardMaterial({ color: 0x332e2a, roughness: 0.95 }));
+      base.position.set(at.x, 0.025, at.z);
       interiorPropsGroup.add(base);
       const light = new THREE.PointLight(0xff8822, 1.4, 9);
-      light.position.set(at.x, 0.6, at.z);
+      light.position.set(at.x, 0.55, at.z);
       interiorPropsGroup.add(light);
       const flame = new THREE.Sprite(new THREE.SpriteMaterial({
         map: propTextures.campfire, transparent: true, alphaTest: 0.3 }));
-      flame.scale.set(0.85, 0.8, 1);
-      flame.position.set(at.x, 0.5, at.z);
+      flame.scale.set(0.92, 0.82, 1);
+      flame.position.set(at.x, 0.35, at.z);
       interiorPropsGroup.add(flame);
     } else if (item.kind === "forge") {
       // A forge is a squat stone block with an ember glow: the thing the
@@ -5690,15 +5897,15 @@ function rebuildInteriorProps(tileId, pairName, hb) {
       interiorPropsGroup.add(blade);
     } else if (item.kind === "storage") {
       const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.66, 0.56, 0.66),
-        new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.8 }));
-      box.position.set(at.x, 0.3, at.z);
+        new THREE.BoxGeometry(0.48, 0.06, 0.44),
+        new THREE.MeshStandardMaterial({ color: 0x4a3016, roughness: 0.9 }));
+      box.position.set(at.x, 0.03, at.z);
       interiorPropsGroup.add(box);
-      const band = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.08, 0.7),
-        new THREE.MeshStandardMaterial({ color: 0x4a3016, roughness: 0.85 }));
-      band.position.set(at.x, 0.5, at.z);
-      interiorPropsGroup.add(band);
+      const cacheSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: propTextures.storage, transparent: true, alphaTest: 0.3 }));
+      cacheSprite.scale.set(0.68, 0.62, 1);
+      cacheSprite.position.set(at.x, 0.31, at.z);
+      interiorPropsGroup.add(cacheSprite);
     } else if (item.kind === "table") {
       const top = new THREE.Mesh(
         new THREE.BoxGeometry(1.1, 0.1, 0.75),
@@ -5748,10 +5955,12 @@ let cutawayShelterProps = [];
 function toggleInteriorCutaway(enable, sx, sz, sh, tileId = null) {
   isInteriorModeActive = enable;
   interiorGroup.visible = enable;
+  const scaleHudEl = document.getElementById("scale-hud");
+  if (scaleHudEl) scaleHudEl.style.display = enable ? "none" : "";
   // Phase 10OX: restore every prop the cutaway hid (was: only the first
   // by distance, so neighboring huts kept standing over the diorama).
   for (const prop of cutawayShelterProps) {
-    prop.visible = true;
+    prop.visible = !(prop.userData && prop.userData.culledDuplicate);
   }
   cutawayShelterProps = [];
   if (cutawayShelterProp) {
@@ -6495,7 +6704,13 @@ function applyCameraMode(mode, immediate = true) {
       targetTid = chosen.tid;
       closestDist = chosen.d;
     }
-    const sh = getTerrainHeight(cid, targetX, targetZ);
+    let sh = getTerrainHeight(cid, targetX, targetZ);
+    for (const _dx of [-2.5, 0, 2.5]) {
+      for (const _dz of [-2.2, 0, 2.2]) {
+        sh = Math.max(sh, getTerrainHeight(cid, targetX + _dx, targetZ + _dz));
+      }
+    }
+    sh += 0.08;
     // Phase 10PA: inside the room near the front-right, looking along
     // the room's length at the BACK wall (~21 deg down) — never through
     // the door gap, which faces the camera's side. Eye 1.55 under the
