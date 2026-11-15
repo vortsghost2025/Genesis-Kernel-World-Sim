@@ -2285,6 +2285,8 @@ def build_system_prompt(context: AgentContext) -> str:
 
     build_here = getattr(context, "construction_here", {}) or {}
     if isinstance(build_here, dict) and build_here:
+        from backend.world.first_pair_runtime import _CONSTRUCTION_STAGES
+
         stage = build_here.get("stage", "foundation")
         progress = build_here.get("progress", 0)
         total = build_here.get("stages_total", 5)
@@ -2293,12 +2295,24 @@ def build_system_prompt(context: AgentContext) -> str:
             f"{k} {v}" for k, v in sorted(remaining.items())
             if isinstance(v, int) and v > 0
         )
-        tail = f"; still needed: {remaining_txt}" if remaining_txt else ""
+        # Phase 10RX: measured 2026-11-15 -- west_adam asked "Which wall should I
+        # build on foundation tile cont_b_gen_26_55 to satisfy the stage plan?"
+        # SEVEN heartbeats running, and built 13 `wall` objects, while his own
+        # project sat one stage from finished with an EMPTY remaining floor. The
+        # stages are named after parts of a building, and the third is literally
+        # `walls`, so the name read as an object to construct -- and nothing said
+        # that an empty stage floor means the rest is free.
+        tail = (f"; still needed: {remaining_txt}" if remaining_txt
+                else "; no materials are needed for the rest of it")
+        stage_names = ", ".join(str(s) for s in _CONSTRUCTION_STAGES)
         settlement_lines.append(
             f"Fact: {build_here.get('object_type', 'structure')} "
             f"{build_here.get('object_id', '')} on this tile is under "
-            f"construction at stage {stage} ({progress}/{total}){tail}. "
-            "Building the same object_id again advances it one stage."
+            f"construction at stage {stage} ({progress}/{total}){tail}. Stage "
+            f"names are PHASES, not objects to build ({stage_names}). A `wall`, "
+            f"`roof` or other structural object is a separate component and does "
+            f"NOT advance this project. Calling build again with the same "
+            f"object_id on this tile advances it one stage."
         )
 
     # Phase 10PT: the partner's hoard, as a fact. West Eve hit 218
