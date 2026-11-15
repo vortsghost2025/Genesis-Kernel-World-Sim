@@ -29,6 +29,25 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+# Phase 10RJ: the actions a COLLAPSED body may take -- ONE source of truth.
+#
+# The runtime gates on this tuple and the prompt renders its menu from it, so the
+# prompt cannot offer an action the runtime refuses, or hide one it allows. It
+# lives here because both the runtime and the cognition model already import this
+# module (the runtime imports the model, so the model cannot import the runtime).
+#
+# Measured 2026-11-14: east_eve spent five consecutive heartbeats proposing
+# blocked actions (extract, then gather) while the full 18-action menu sat in
+# front of her and the runtime answered each with a refusal.
+COLLAPSED_PERMITTED_ACTIONS: tuple[str, ...] = (
+    "no_action",
+    "move",
+    "eat",
+    "drink",
+    "leave_public_message",
+    "ask_human",
+)
+
 
 @dataclass(frozen=True)
 class AgentContext:

@@ -18,7 +18,9 @@ from backend.world.world_terms import terms_change_line
 
 from openai import OpenAI
 
-from backend.world.first_pair_cognition_interface import (    AgentContext,
+from backend.world.first_pair_cognition_interface import (
+    COLLAPSED_PERMITTED_ACTIONS,
+    AgentContext,
     CognitionBackend,
     CognitionOutput,
 )
@@ -1386,6 +1388,45 @@ Available actions:
 - milk_animal: milk an adjacent tamed cow when milk is ready (requires: target_id, reason)
 """
 
+# Phase 10RJ: a COLLAPSED body's menu, rendered from the SAME tuple the runtime
+# gates on (`COLLAPSED_PERMITTED_ACTIONS`), so the prompt cannot offer an action
+# the runtime refuses or hide one it allows. The dict is keyed by action name and
+# asserted at import to cover that tuple exactly.
+#
+# Measured 2026-11-14: east_eve spent five consecutive heartbeats proposing
+# blocked actions (extract, then gather) with the whole 18-action menu in front
+# of her, while the runtime refused each one by name. Telling a small model "no,
+# not that" repeatedly is worse than not offering it.
+_COLLAPSED_ACTION_LINES = {
+    "no_action": "- no_action: do nothing this cycle",
+    "move": ("- move: CRAWL to an adjacent tile (requires: target_tile, reason)"
+             " — one edge per heartbeat, to a tile listed in available_moves"),
+    "eat": ("- eat: eat one unit of a food you are carrying (requires: "
+            "resource_kind) — this works while you are collapsed, and it is how a "
+            "downed body feeds itself"),
+    "drink": ("- drink: drink water (requires: reason; optional: source, "
+              "resource_kind, target_object_id) — a source tile drinks there; "
+              "carried fresh_water satisfies thirst by 55 and also works while "
+              "you are collapsed"),
+    "leave_public_message": ("- leave_public_message: leave a public message "
+                            "(requires: message, recipient)"),
+    "ask_human": ("- ask_human: ask a question to the human operator (requires: "
+                  "question_id, question, reason_for_asking, "
+                  "requested_human_capability, urgency)"),
+}
+assert set(_COLLAPSED_ACTION_LINES) == set(COLLAPSED_PERMITTED_ACTIONS), (
+    "the collapsed menu and the runtime's collapse gate must list the same "
+    "actions; one of them was edited without the other")
+
+_COLLAPSED_ACTIONS_DESC = (
+    "\nAvailable actions — your body has collapsed, so this is the WHOLE list:\n"
+    + "\n".join(_COLLAPSED_ACTION_LINES[a] for a in COLLAPSED_PERMITTED_ACTIONS)
+    + "\nUnavailable until you recover: gathering, building, crafting, working "
+      "an object (deposit or extract), hewing timber, planting, harvesting, "
+      "attacking and milking. The runtime refuses those while your body is "
+      "down.\n"
+)
+
 # Free speech. One optional top-level field, documented in the contract and
 # nowhere else. Deliberately carries no guidance about when to use it: the
 # world states what the fields are, never what an agent should do with them
@@ -2200,6 +2241,13 @@ def build_system_prompt(context: AgentContext) -> str:
             + "\n".join("- " + line for line in scale_lines)
         )
 
+    # Phase 10RJ: a collapsed body gets the menu it can actually use. The full
+    # list would be refused action by action by the runtime, which taught this
+    # agent nothing (five heartbeats of extract, then gather).
+    _body_now = (context.observation or {}).get("self_body") or {}
+    actions_desc = (_COLLAPSED_ACTIONS_DESC if _body_now.get("downed")
+                    else _AVAILABLE_ACTIONS_DESC)
+
     # Phase 10OU-C: resources the agent has personally observed on visited
     # tiles, from its own known map. Same factual register — absent when
     # empty, never the true map, never a suggestion.
@@ -2307,7 +2355,7 @@ Unresolved questions you have asked:
 
 Answers you have received:
 {answered_str}
-{_AVAILABLE_ACTIONS_DESC}
+{actions_desc}
 {_CRAFT_RECIPE_DESC}
 {_STRUCTURE_LADDER_DESC}
 {_HOME_NETWORK_DESC}

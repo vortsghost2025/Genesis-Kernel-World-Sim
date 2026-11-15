@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.world.first_pair_cognition_interface import (
+    COLLAPSED_PERMITTED_ACTIONS,
     AgentContext,
     CognitionBackend,
     CognitiveCycle,
@@ -4095,8 +4096,7 @@ class FirstPairRuntime:
         # the river five tiles away, the partner on the next tile and the
         # cistern at home reachable. Collapse takes your hands, not your legs.
         if self._vitals_for(agent_ref).get("downed"):
-            if action_type not in ("leave_public_message", "ask_human",
-                                   "no_action", "eat", "drink", "move"):
+            if action_type not in COLLAPSED_PERMITTED_ACTIONS:
                 return {
                     "status": "rejected",
                     "reason": self._collapsed_refusal(agent_ref, action),
