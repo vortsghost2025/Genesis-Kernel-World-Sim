@@ -150,6 +150,9 @@ class AgentContext:
     # Phase 10RL: the nearest finished roofed shelter this agent has observed,
     # with its distance and its comfort floor. Same shape as the water fact.
     nearest_known_shelter: dict = field(default_factory=dict)
+    # Phase 10RN: the nearest tile holding food this agent has observed, with
+    # its distance and which kinds. Same shape as the water and shelter facts.
+    nearest_known_food: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

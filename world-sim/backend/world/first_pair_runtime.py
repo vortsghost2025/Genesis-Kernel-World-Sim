@@ -1298,6 +1298,51 @@ class FirstPairRuntime:
                 }
         return best or {}
 
+    def _nearest_known_food_for(self, agent_ref: str) -> dict:
+        """The nearest tile holding FOOD this agent has personally observed.
+
+        Phase 10RN. Measured 2026-11-14: east_adam attempted `eat edible_roots`
+        three heartbeats running and was refused "You hold no edible_roots to
+        eat" every time -- while `nuts` sat on a tile ONE tile away that he had
+        already observed. Same shape as the water fact (10QM) and the shelter
+        fact (10RL): the world stated the situation and not the route.
+
+        Edibility is `survival.EAT_SATISFACTION`'s own key set, so this cannot
+        drift from what eating actually accepts. Facts only.
+        """
+        edible = set(survival.EAT_SATISFACTION)
+        try:
+            known = load_known_map(self._store.root, agent_ref) or {}
+        except Exception:
+            return {}
+        tiles = known.get("known_tiles") or {}
+        if not tiles:
+            return {}
+        position = (self._world_state.tile_occupancy or {}).get(agent_ref)
+        pos_xy = self._tile_xy(str(position or ""))
+        if pos_xy is None:
+            return {}
+        continent = self._tile_continent(str(position or ""))
+
+        best = None
+        for tid, entry in tiles.items():
+            if not isinstance(entry, dict):
+                continue
+            kinds = sorted({str(k) for k in (entry.get("observed_resources") or [])
+                            if str(k) in edible})
+            if not kinds:
+                continue
+            if self._tile_continent(str(tid)) != continent:
+                continue
+            xy = self._tile_xy(str(tid))
+            if xy is None:
+                continue
+            distance = max(abs(xy[0] - pos_xy[0]), abs(xy[1] - pos_xy[1]))
+            if best is None or distance < best["distance"]:
+                best = {"tile_id": str(tid), "distance": int(distance),
+                        "kinds": kinds}
+        return best or {}
+
     def _rollup_for(self, agent_ref: str) -> str:
         """Best-effort roll-up for the prompt; "" when unavailable."""
         try:
@@ -2718,6 +2763,7 @@ class FirstPairRuntime:
             observed_resource_rollup=self._rollup_for(agent_ref),
             nearest_known_water=self._nearest_known_water_for(agent_ref),
             nearest_known_shelter=self._nearest_known_shelter_for(agent_ref),
+            nearest_known_food=self._nearest_known_food_for(agent_ref),
             tool_condition=self._tool_states_for(agent_ref),
             food_freshness=self._food_freshness_for(agent_ref),
             partner_holdings=self._partner_holdings_for(agent_ref),
@@ -3730,8 +3776,26 @@ class FirstPairRuntime:
                         "reason": f"Drink target not found: {target_object_id}"}
             contents = obj.get("contents")
             if not isinstance(contents, dict) or int(contents.get("fresh_water", 0) or 0) < 1:
-                return {"status": "rejected",
-                        "reason": f"{target_object_id} holds no fresh_water"}
+                # Phase 10RN: an empty vessel is not the same as having no
+                # water. Measured 2026-11-14 east_eve targeted an empty provision
+                # object twice while carrying 148 fresh_water of her own.
+                reason = f"{target_object_id} holds no fresh_water."
+                carried = int(
+                    (load_inventory(self._store).get(agent_ref) or {})
+                    .get("fresh_water", 0) or 0)
+                if carried > 0:
+                    reason += (
+                        f" You are carrying fresh_water x{carried}, so a drink "
+                        f"with source carried (or resource_kind fresh_water) "
+                        f"comes from your own pack and works.")
+                else:
+                    nearest = self._nearest_known_water_for(agent_ref)
+                    if nearest.get("tile_id"):
+                        reason += (
+                            f" You hold no water. The nearest drinkable tile you "
+                            f"have observed is {nearest['tile_id']}, "
+                            f"{int(nearest.get('distance', 0))} tiles away.")
+                return {"status": "rejected", "reason": reason}
             obj_pos = self._entity_xy(obj.get("tile_id")) or self._tile_xy(obj.get("tile_id", ""))
             pos_xy = self._tile_xy(position or "")
             if obj_pos is None or pos_xy is None or max(
@@ -3827,8 +3891,28 @@ class FirstPairRuntime:
         inventory = dict(load_inventory(self._store).get(agent_ref, {}))
         held = inventory.get(kind, 0)
         if not isinstance(held, int) or held <= 0:
-            return {"status": "rejected",
-                    "reason": f"You hold no {kind} to eat"}
+            # Phase 10RN: name the ROUTE, not just the state. Measured
+            # 2026-11-14: east_adam asked to eat edible_roots three heartbeats
+            # running and was told only that he held none -- while nuts sat on a
+            # tile one tile away he had already observed. A refusal that reports
+            # a state is a refusal this model retries.
+            clauses = [f"You hold no {kind} to eat."]
+            foods = [f"{k} x{n}" for k, n in sorted(inventory.items())
+                     if isinstance(n, int) and n > 0
+                     and str(k) in survival.EAT_SATISFACTION]
+            if foods:
+                clauses.append("You are carrying " + ", ".join(foods) + ".")
+            nearest = self._nearest_known_food_for(agent_ref)
+            if nearest.get("tile_id"):
+                kinds = ", ".join(nearest.get("kinds") or []) or "food"
+                clauses.append(
+                    f"The nearest food you have observed is {kinds} on "
+                    f"{nearest['tile_id']}, "
+                    f"{int(nearest.get('distance', 0))} tiles away.")
+            else:
+                clauses.append(
+                    "You have not observed any food on a tile you remember.")
+            return {"status": "rejected", "reason": " ".join(clauses)}
         vitals = self._vitals_for(agent_ref)
         satisfaction = survival.eat_satisfaction(kind)
         vitals["hunger"] = round(max(0.0, vitals["hunger"] - satisfaction), 2)

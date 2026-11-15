@@ -1827,6 +1827,18 @@ def build_system_prompt(context: AgentContext) -> str:
                     f"cold it is outside, and blocking rain entirely. A "
                     f"collapsed body can crawl one tile per heartbeat."
                 )
+            # Phase 10RN: and where the FOOD is. A downed body that holds none
+            # cannot gather any, so the distance to food is the one fact that
+            # makes the crawl a plan.
+            known_food = getattr(context, "nearest_known_food", {}) or {}
+            if isinstance(known_food, dict) and known_food.get("tile_id"):
+                _lines.append(
+                    f"Fact: the nearest food you have observed is "
+                    f"{', '.join(known_food.get('kinds') or []) or 'food'} on "
+                    f"{known_food['tile_id']}, "
+                    f"{int(known_food.get('distance', 0))} tiles away, and a "
+                    f"collapsed body can crawl one tile per heartbeat."
+                )
         else:
             # Phase 10PM/10QH: the body's one-word state, as prose. The runtime
             # computes it with survival.vitals_state_label and caches it on
@@ -1934,6 +1946,21 @@ def build_system_prompt(context: AgentContext) -> str:
                     f"Fact: each food satisfies hunger ({hunger_fact_values}). "
                     "Storing food in containers protects your supply."
                 )
+                # Phase 10RN: WHERE the food is, with a distance. The block above
+                # says whether the body holds any; nothing said which way to walk,
+                # and measured 2026-11-14 east_adam retried a refused `eat` three
+                # heartbeats running while nuts sat on a tile he had already
+                # observed, one tile away.
+                known_food = getattr(context, "nearest_known_food", {}) or {}
+                if isinstance(known_food, dict) and known_food.get("tile_id"):
+                    _lines.append(
+                        f"Fact: the nearest food you have observed is "
+                        f"{', '.join(known_food.get('kinds') or []) or 'food'} on "
+                        f"{known_food['tile_id']}, "
+                        f"{int(known_food.get('distance', 0))} tiles away "
+                        f"(distance is tiles, and you cross one tile per "
+                        f"heartbeat)."
+                    )
             if (_sb.get("warmth", 100) or 100) <= 60:
                 _lines.append(
                     f"Your warmth is {round(_sb.get('warmth', 0))}/100."
