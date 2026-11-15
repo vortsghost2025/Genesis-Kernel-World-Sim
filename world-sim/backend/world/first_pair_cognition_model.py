@@ -1812,6 +1812,21 @@ def build_system_prompt(context: AgentContext) -> str:
                     f"collapsed body can crawl one tile per heartbeat, and "
                     f"drinking from that tile satisfies thirst like a river."
                 )
+            # Phase 10RL: the shelter fact belongs HERE for the same reason the
+            # water fact does -- this branch replaced the whole body section, and
+            # a collapsed body is exactly who needs to know which way the roof is.
+            known_shelter = getattr(context, "nearest_known_shelter", {}) or {}
+            if isinstance(known_shelter, dict) and known_shelter.get("tile_id"):
+                _lines.append(
+                    f"Fact: the nearest finished shelter you have observed is "
+                    f"a {known_shelter.get('object_type', 'shelter')} at "
+                    f"{known_shelter['tile_id']}, "
+                    f"{int(known_shelter.get('distance', 0))} tiles away, "
+                    f"holding warmth near "
+                    f"{known_shelter.get('comfort_floor', 45):g} inside however "
+                    f"cold it is outside, and blocking rain entirely. A "
+                    f"collapsed body can crawl one tile per heartbeat."
+                )
         else:
             # Phase 10PM/10QH: the body's one-word state, as prose. The runtime
             # computes it with survival.vitals_state_label and caches it on
@@ -1930,6 +1945,23 @@ def build_system_prompt(context: AgentContext) -> str:
                     "In rain an open fire is snuffed; a fire under a roof "
                     "keeps burning. A soaked body (wetness 50+) cannot "
                     "warm up until it dries.")
+                # Phase 10RL: the fact this section was missing -- WHERE the roof
+                # is. The rules above say a shelter solves cold and rain; nothing
+                # said which way to walk, and measured 2026-11-14 the east pair
+                # spent a winter night soaked and collapsed with their own
+                # shelter (at foundation) somewhere they could not find.
+                known_shelter = getattr(context, "nearest_known_shelter", {}) or {}
+                if isinstance(known_shelter, dict) and known_shelter.get("tile_id"):
+                    _lines.append(
+                        f"Fact: the nearest finished shelter you have observed is "
+                        f"a {known_shelter.get('object_type', 'shelter')} at "
+                        f"{known_shelter['tile_id']}, "
+                        f"{int(known_shelter.get('distance', 0))} tiles away "
+                        f"(distance is tiles, and you cross one tile per "
+                        f"heartbeat). Inside it warmth holds near "
+                        f"{known_shelter.get('comfort_floor', 45):g} however cold "
+                        f"it is outside, and it blocks rain entirely."
+                    )
 
             # Sensory awareness of the elements and primitive survival
             if _env:

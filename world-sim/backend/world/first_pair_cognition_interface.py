@@ -147,6 +147,9 @@ class AgentContext:
     # distance in tiles (Phase 10QM). Empty when they have seen no water.
     # Their own memory plus arithmetic; a fact, never a destination.
     nearest_known_water: dict = field(default_factory=dict)
+    # Phase 10RL: the nearest finished roofed shelter this agent has observed,
+    # with its distance and its comfort floor. Same shape as the water fact.
+    nearest_known_shelter: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -1233,6 +1233,71 @@ class FirstPairRuntime:
                 best = {"tile_id": str(tid), "distance": int(distance)}
         return best or {}
 
+    def _nearest_known_shelter_for(self, agent_ref: str) -> dict:
+        """The nearest FINISHED roofed shelter this agent has observed.
+
+        Phase 10RL. 10QM gave water a distance, and it produced the first
+        self-directed water trip in 13,000+ heartbeats; shelter had no
+        equivalent. Measured 2026-11-14 the east pair spent a winter night
+        soaked to wetness 100 at warmth 12 and collapsed -- with their own
+        shelter (at foundation, elsewhere in the valley) somewhere they could
+        not find, while the west pair sat at warmth 100 inside theirs.
+
+        Two deliberate differences from water:
+
+          * only a FINISHED roofed structure counts -- an unfinished frame
+            shelters nobody, and pointing at one would be a lie;
+          * it reports the comfort floor, because "three tiles away" only means
+            something if the place is warm once you get there.
+
+        Distance is arithmetic on the agent's own memory, like water's. Facts
+        only: this is a place and a number, not a destination instruction.
+        """
+        try:
+            known = load_known_map(self._store.root, agent_ref) or {}
+        except Exception:
+            return {}
+        tiles = known.get("known_tiles") or {}
+        if not tiles:
+            return {}
+        position = (self._world_state.tile_occupancy or {}).get(agent_ref)
+        pos_xy = self._tile_xy(str(position or ""))
+        if pos_xy is None:
+            return {}
+        continent = self._tile_continent(str(position or ""))
+
+        best = None
+        for record in (self._world_state.public_objects or {}).values():
+            if not isinstance(record, dict) or not self._record_shelters(record):
+                continue
+            # Defence in depth: never point an agent at a frame. The world marks a
+            # staged build with `construction_project` (and `_record_shelters`
+            # already treats it as unroofed), but a fact that says "there is a
+            # roof three tiles away" must not depend on that alone.
+            if record.get("construction_project") is True:
+                continue
+            stage = record.get("construction_stage")
+            if isinstance(stage, str) and stage and stage != "finished":
+                continue
+            tid = str(record.get("tile_id") or "")
+            if not tid or tid not in tiles:
+                continue                      # never observed it
+            if self._tile_continent(tid) != continent:
+                continue                      # coordinates are shared
+            xy = self._tile_xy(tid)
+            if xy is None:
+                continue
+            distance = max(abs(xy[0] - pos_xy[0]), abs(xy[1] - pos_xy[1]))
+            if best is None or distance < best["distance"]:
+                best = {
+                    "tile_id": tid,
+                    "distance": int(distance),
+                    "object_type": str(record.get("object_type") or "shelter"),
+                    "comfort_floor": round(
+                        float(self._shelter_params_for(tid)["comfort_floor"]), 1),
+                }
+        return best or {}
+
     def _rollup_for(self, agent_ref: str) -> str:
         """Best-effort roll-up for the prompt; "" when unavailable."""
         try:
@@ -2652,6 +2717,7 @@ class FirstPairRuntime:
             ),
             observed_resource_rollup=self._rollup_for(agent_ref),
             nearest_known_water=self._nearest_known_water_for(agent_ref),
+            nearest_known_shelter=self._nearest_known_shelter_for(agent_ref),
             tool_condition=self._tool_states_for(agent_ref),
             food_freshness=self._food_freshness_for(agent_ref),
             partner_holdings=self._partner_holdings_for(agent_ref),
