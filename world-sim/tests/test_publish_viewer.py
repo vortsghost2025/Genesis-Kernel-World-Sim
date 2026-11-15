@@ -111,3 +111,21 @@ def test_the_marker_list_is_the_viewer_s_own_code():
     html = (WORLD_SIM / "viewer" / "prototype" / "index.html").read_text(encoding="utf-8")
     missing = [m for m in MARKERS if m not in html]
     assert not missing, f"publish markers no longer exist in the viewer: {missing}"
+
+
+# --- diagnosability of a failed deploy --------------------------------------
+
+def test_a_deploy_that_yields_no_url_is_retried_once():
+    """Measured 2026-11-15 10:21: one bare "could not read a deployment URL
+    (rc=1)" with nothing else, and a manual deploy minutes later succeeded --
+    so the failure was transient and the tool had no way to show that."""
+    src = (WORLD_SIM / "scripts" / "publish_viewer.py").read_text(encoding="utf-8")
+    assert "for attempt in (1, 2):" in src, "the deploy must be retried once"
+    assert "time.sleep(15)" in src
+
+
+def test_a_failed_deploy_logs_the_cli_output_tail():
+    """So the next abort is diagnosable instead of a dead end."""
+    src = (WORLD_SIM / "scripts" / "publish_viewer.py").read_text(encoding="utf-8")
+    assert "produced no URL (rc=" in src
+    assert "tail[:400]" in src

@@ -236,10 +236,26 @@ def _publish(args, vercel: list[str]) -> int:
         return 1
 
     staging = _deploy_dir()
-    dep = _run(vercel + ["deploy", "--yes", "--project", PROJECT], cwd=staging)
-    url = parse_deploy_url((dep.stdout or "") + (dep.stderr or ""))
+    # A deploy that returns nothing readable is retried once before giving up.
+    # Measured 2026-11-15 10:21: the scheduled run logged "could not read a
+    # deployment URL (rc=1)" and nothing else, so there was no way to tell a
+    # transient CLI failure from a real problem. Now the output tail is logged
+    # too, and one retry covers the transient case.
+    url = ""
+    tail = ""
+    for attempt in (1, 2):
+        dep = _run(vercel + ["deploy", "--yes", "--project", PROJECT], cwd=staging)
+        output = (dep.stdout or "") + (dep.stderr or "")
+        url = parse_deploy_url(output) or ""
+        if url:
+            break
+        tail = " | ".join(line.strip() for line in output.strip().splitlines()[-4:])
+        _log(f"deploy attempt {attempt} produced no URL (rc={dep.returncode}): "
+             f"{tail[:400]}")
+        if attempt == 1:
+            time.sleep(15)
     if not url:
-        _log(f"ABORT: could not read a deployment URL (rc={dep.returncode}); "
+        _log("ABORT: could not read a deployment URL after 2 attempts; "
              "alias untouched")
         return 1
 
