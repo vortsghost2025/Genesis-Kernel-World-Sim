@@ -1287,7 +1287,7 @@ def _home_network_description() -> str:
 
 
 def _structure_ladder_description() -> str:
-    """Disclose the five-rung structure ladder as buildable facts.
+    """Disclose the structure ladder as buildable facts.
 
     Phase 10QC. The rung table was enforced by the runtime and advertised to
     the agents in exactly one string -- the rejection message for an unknown
@@ -1301,10 +1301,29 @@ def _structure_ladder_description() -> str:
     that enforces it: what each rung is called, what it costs, what it does,
     and how many roofed units it counts for. It states what the world IS and
     never what an agent should build.
+
+    Phase 10RS. Two corrections, both measured 2026-11-15 against the live
+    world (east 68 roofed structures, west 158, and NOT ONE above rung 1):
+
+      * the closing sentence still described the PRE-10QU mechanic -- "a
+        connected home's comfort comes from its tier weight, which is the
+        roofed footprint plus the bonus for the best rung". 10QU moved comfort
+        onto the best rung alone, so that sentence had become a lie about the
+        world, and the number that actually decides whether to climb (the
+        comfort floor each rung holds) was disclosed nowhere;
+      * `shelter` -- the type they build by far the most of -- is a LEGACY
+        ALIAS for rung 1, so it is the bottom of the ladder rather than a way
+        up it. Nothing said so, and the action menu lists `shelter` first.
+
+    Both numbers are rendered FROM the runtime's own tables, so a future change
+    to the ladder updates what the agents are told.
     """
     from backend.world.first_pair_runtime import (
         _FOOTPRINT_SATURATION,
+        _LEGACY_TYPE_RUNG,
         _STRUCTURE_RUNGS,
+        _home_network_tier,
+        _home_thermal_index,
     )
 
     entries = []
@@ -1315,18 +1334,25 @@ def _structure_ladder_description() -> str:
     for name, record in _STRUCTURE_RUNGS.items():
         floor = ", ".join(f"{kind} x{amount}"
                           for kind, amount in sorted(record["floor"].items()))
+        warmth = _home_network_tier(_home_thermal_index(record["rung"]))[0]
         entries.append(
-            f"`{name}` (rung {record['rung']}, {floor}; "
-            f"{record['effects']}; counts {record['weight']} roofed units)"
+            f"`{name}` (rung {record['rung']}, {floor}; warmth holds near "
+            f"{warmth:g} inside; {record['effects']}; counts "
+            f"{record['weight']} roofed units)"
         )
+    shelter_rung = _LEGACY_TYPE_RUNG.get("shelter", 1)
     return (
         "- Structure ladder, each rung a buildable roofed type: "
         + " | ".join(entries)
-        + ". A roofed structure only shelters from the roofed stage, and a "
-        "connected home's comfort comes from its tier weight, which is the "
-        f"roofed footprint (saturating at {_FOOTPRINT_SATURATION}) plus the "
-        "bonus for the best rung in it, so one proper home outranks the "
-        "smaller shelters it replaces."
+        + ". A roofed structure only shelters from the roofed stage. A home's "
+        f"warmth comes from the BEST rung standing in it, not from its size: "
+        f"the warmth figure above is what that rung holds however cold it is "
+        f"outside, so a lone rung-1 shelter holds 45 whatever else is around "
+        f"it, and nothing about how many roofed tiles a home covers changes "
+        f"that. The roofed footprint still governs CAPACITY -- the cellar food "
+        f"budget and a home's water store -- and it saturates at "
+        f"{_FOOTPRINT_SATURATION}. The generic `shelter` type counts as rung "
+        f"{shelter_rung}: it is where the ladder starts, not a way up it."
     )
 
 
