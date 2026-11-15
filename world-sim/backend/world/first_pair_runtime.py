@@ -3912,6 +3912,19 @@ class FirstPairRuntime:
             else:
                 clauses.append(
                     "You have not observed any food on a tile you remember.")
+            # Phase 10RQ: name the ACTION that gets food. Measured 2026-11-15:
+            # both east agents sat at hunger 100 for hours, being told correctly
+            # where food was, and kept asking to eat what they did not hold --
+            # because nothing connected "food is on that tile" to "gather takes
+            # it off the tile and into your hands". The route has three links:
+            # eat needs it held, gather is what takes it, and a collapsed body
+            # cannot gather.
+            clauses.append(
+                "Eating only consumes food you are already carrying. Food is "
+                "taken by gathering: a gather action with a resource_kind names "
+                "a resource on your current tile (no tool and no grant needed) "
+                "and puts it in your hands. A collapsed body cannot gather, so "
+                "it must be standing to take food it has found.")
             return {"status": "rejected", "reason": " ".join(clauses)}
         vitals = self._vitals_for(agent_ref)
         satisfaction = survival.eat_satisfaction(kind)

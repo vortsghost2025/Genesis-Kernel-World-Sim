@@ -140,6 +140,18 @@ def test_the_eat_refusal_names_food_the_body_does_hold(tmp_path):
     assert "You are carrying wild_berries x6" in reason, reason
 
 
+def test_eating_what_you_do_not_hold_names_the_gather_route(tmp_path):
+    """The 2026-11-15 gap: hours at hunger 100, told where food was, never told
+    that `gather` is the action that takes it -- and that a downed body cannot."""
+    rt = _runtime(tmp_path)
+    _know(rt, {"cont_a_gen_1_0": ["nuts"]})
+    reason = _act(rt, {"action_type": "eat",
+                       "resource_kind": "edible_roots"})["reason"]
+    assert "gather" in reason, reason
+    assert "no tool and no grant" in reason, reason
+    assert "collapsed body cannot gather" in reason, reason
+
+
 def test_the_eat_refusal_says_so_when_no_food_has_ever_been_seen(tmp_path):
     rt = _runtime(tmp_path)
     reason = _act(rt, {"action_type": "eat",
