@@ -2981,6 +2981,74 @@ class FirstPairRuntime:
                          "list them."),
     }
 
+    # Phase 10RH: the words for what a collapse takes away, so the refusal names
+    # the action ACTUALLY attempted. Measured 2026-11-14: east_eve was refused
+    # five heartbeats in a row for `use_object`/`extract` while the message
+    # listed only "gather, build, craft or work" -- none of which she was doing
+    # -- so she read her action as unblocked and retried, while the food in her
+    # own pack went untouched.
+    _COLLAPSED_BLOCKED_WORDS = {
+        "use_object": "work an object",
+        "gather": "gather",
+        "build": "build",
+        "craft": "craft",
+        "smelt": "smelt",
+        "cook": "cook",
+        "attack": "attack",
+        "milk_animal": "milk an animal",
+        "offer_food": "offer food",
+    }
+
+    # Kinds worth naming when a collapsed body is carrying them: these are the
+    # ones `eat`/`drink` can use from the pack (the same set whose satisfaction
+    # the auto-feed trusts).
+    _COLLAPSED_USABLE_KINDS = (
+        "fresh_water", "cooked_meal", "edible_roots", "wild_berries", "meat",
+        "fish", "nuts", "mushrooms", "wild_apples", "honeycomb", "wild_grain",
+    )
+
+    def _collapsed_refusal(self, agent_ref: str, action: dict) -> str:
+        """Why this action is refused while down, and what still works.
+
+        The attempted action is named first, because a refusal that names a
+        category the agent is not using teaches nothing (10QL, 10RF, 10RH).
+        """
+        attempted = str(action.get("action_type") or "")
+        operation = str(action.get("operation") or "")
+        if attempted == "use_object" and operation in ("deposit", "extract"):
+            named = f"{operation} from or into an object"
+        else:
+            named = self._COLLAPSED_BLOCKED_WORDS.get(attempted)
+            if named is None and attempted:
+                named = attempted.replace("_", " ")
+
+        clauses = []
+        if named:
+            clauses.append(f"You have collapsed, so you cannot {named}.")
+        else:
+            clauses.append("You have collapsed.")
+        clauses.append(
+            "Gathering, building, crafting and working an object (deposit or "
+            "extract) are all unavailable while your body is down.")
+        clauses.append(
+            "What still works: crawl to an adjacent tile, drink, eat, speak "
+            "and ask.")
+
+        inventory = self._get_agent_inventory(agent_ref) or {}
+        carrying = [
+            f"{kind} x{int(inventory.get(kind, 0) or 0)}"
+            for kind in self._COLLAPSED_USABLE_KINDS
+            if int(inventory.get(kind, 0) or 0) > 0
+        ]
+        if carrying:
+            clauses.append(
+                "You are carrying " + ", ".join(carrying) +
+                " - eating or drinking from your own pack works while down.")
+        clauses.append(
+            "Food or water brought to your tile is drunk and eaten; otherwise "
+            "rest.")
+        return " ".join(clauses)
+
     def _kind_source_hint(self, kind: str) -> str:
         known = self._KIND_SOURCES.get(str(kind))
         if known:
@@ -4031,11 +4099,7 @@ class FirstPairRuntime:
                                    "no_action", "eat", "drink", "move"):
                 return {
                     "status": "rejected",
-                    "reason": ("You have collapsed. You cannot gather, build, "
-                               "craft or work while your body is down, but you "
-                               "can crawl to an adjacent tile, drink, eat, "
-                               "speak and ask. Food or water brought to your "
-                               "tile is drunk and eaten; otherwise rest."),
+                    "reason": self._collapsed_refusal(agent_ref, action),
                 }
 
         if action_type == "eat":
