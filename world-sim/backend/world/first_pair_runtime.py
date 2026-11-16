@@ -5178,7 +5178,7 @@ class FirstPairRuntime:
                 return {
                     "status": "rejected",
                     "reason": (
-                        f"A {object_type} needs at least {timber_min} structural "
+                        f"A {object_type} needs at least {floor_timber} structural "
                         f"timber to bear its own weight; you declared "
                         f"{declared_timber}. Fell trees with hew_timber once you "
                         f"hold an axe (stone_axe, iron_axe) or knapped blade "
