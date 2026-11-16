@@ -23,6 +23,7 @@ from backend.world.first_pair_cognition_interface import (
     CognitiveCycle,
 )
 from backend.world.first_pair_cognition_model import (
+    _compass_offset,
     ModelCognitionBackend,
 )
 from backend.world.first_pair_cognition_stub import (
@@ -3794,7 +3795,7 @@ class FirstPairRuntime:
                         reason += (
                             f" You hold no water. The nearest drinkable tile you "
                             f"have observed is {nearest['tile_id']}, "
-                            f"{int(nearest.get('distance', 0))} tiles away.")
+                            f"{_compass_offset((self._world_state.tile_occupancy or {}).get(agent_ref) or '', nearest['tile_id'], int(nearest.get('distance', 0))) or str(int(nearest.get('distance', 0))) + ' tiles away'}.")
                 return {"status": "rejected", "reason": reason}
             obj_pos = self._entity_xy(obj.get("tile_id")) or self._tile_xy(obj.get("tile_id", ""))
             pos_xy = self._tile_xy(position or "")
@@ -3908,7 +3909,7 @@ class FirstPairRuntime:
                 clauses.append(
                     f"The nearest food you have observed is {kinds} on "
                     f"{nearest['tile_id']}, "
-                    f"{int(nearest.get('distance', 0))} tiles away.")
+                    f"{_compass_offset((self._world_state.tile_occupancy or {}).get(agent_ref) or '', nearest['tile_id'], int(nearest.get('distance', 0))) or str(int(nearest.get('distance', 0))) + ' tiles away'}.")
             else:
                 clauses.append(
                     "You have not observed any food on a tile you remember.")

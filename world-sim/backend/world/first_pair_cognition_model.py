@@ -1295,6 +1295,57 @@ def _home_network_description() -> str:
     )
 
 
+_COMPASS_NS = {1: "north", -1: "south"}
+_COMPASS_EW = {1: "east", -1: "west"}
+
+
+def _tile_coords(tile_id: str) -> tuple[int, int] | None:
+    m = re.search(r"_(-?\d+)_(-?\d+)$", str(tile_id or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _compass_offset(from_tile: str, to_tile: str, distance: int = 0) -> str:
+    """'3 tiles north-east' between two tile ids, or '' if unparseable.
+
+    Phase 10RZ. Measured 2026-11-15 over the full history: east's movement is
+    43-63% oscillation -- the largest single cost in the world at ~8,400
+    heartbeats -- and the model's own recorded reasons show the cause. east_eve
+    wrote "Continue eastward along row y=-6 toward public-shared-center per
+    goal-eve-010" while ALSO writing "Continuing westward return route to
+    public-shared-center", along the same row, reversing direction repeatedly;
+    and at hb2029 she noted "Breaking the hb1990-2029 oscillation" and kept
+    reversing anyway. The world named the target and never said WHICH WAY it
+    was, so every heartbeat the model re-derived a bearing from two tile ids.
+    Tile ids encode coordinates (`x` east, `y` north); nothing rendered them.
+
+    The dominant axis is used when it dominates by 3x, so a target 40 tiles
+    north and 1 east reads "north" rather than "north-east".
+    """
+    a, b = _tile_coords(from_tile), _tile_coords(to_tile)
+    if a is None or b is None:
+        return ""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if dx == 0 and dy == 0:
+        return "here"
+    # The caller's distance wins when it has one: the runtime computed it,
+    # and a bearing helper must not silently override a fact.
+    dist = int(distance) if int(distance or 0) > 0 else max(abs(dx), abs(dy))
+    ns = _COMPASS_NS.get(1 if dy > 0 else (-1 if dy < 0 else 0), "")
+    ew = _COMPASS_EW.get(1 if dx > 0 else (-1 if dx < 0 else 0), "")
+    if abs(dy) >= 3 * max(1, abs(dx)):
+        direction = ns
+    elif abs(dx) >= 3 * max(1, abs(dy)):
+        direction = ew
+    else:
+        direction = f"{ns}-{ew}" if (ns and ew) else (ns or ew)
+    return f"{dist} tile{'s' if dist != 1 else ''} {direction}"
+
+
+def _coords_text(tile_id: str) -> str:
+    xy = _tile_coords(tile_id)
+    return f"x={xy[0]}, y={xy[1]}" if xy else ""
+
+
 def _structure_ladder_description() -> str:
     """Disclose the structure ladder as buildable facts.
 
@@ -1843,7 +1894,7 @@ def build_system_prompt(context: AgentContext) -> str:
                 _lines.append(
                     f"Fact: the nearest drinkable tile you have observed is "
                     f"{known_water['tile_id']}, "
-                    f"{int(known_water.get('distance', 0))} tiles away. A "
+                    f"{_compass_offset(context.position, known_water['tile_id'], int(known_water.get('distance', 0))) or str(int(known_water.get('distance', 0))) + ' tiles away'}. A "
                     f"collapsed body can crawl one tile per heartbeat, and "
                     f"drinking from that tile satisfies thirst like a river."
                 )
@@ -1856,7 +1907,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     f"Fact: the nearest finished shelter you have observed is "
                     f"a {known_shelter.get('object_type', 'shelter')} at "
                     f"{known_shelter['tile_id']}, "
-                    f"{int(known_shelter.get('distance', 0))} tiles away, "
+                    f"{_compass_offset(context.position, known_shelter['tile_id'], int(known_shelter.get('distance', 0))) or str(int(known_shelter.get('distance', 0))) + ' tiles away'}, "
                     f"holding warmth near "
                     f"{known_shelter.get('comfort_floor', 45):g} inside however "
                     f"cold it is outside, and blocking rain entirely. A "
@@ -1871,7 +1922,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     f"Fact: the nearest food you have observed is "
                     f"{', '.join(known_food.get('kinds') or []) or 'food'} on "
                     f"{known_food['tile_id']}, "
-                    f"{int(known_food.get('distance', 0))} tiles away, and a "
+                    f"{_compass_offset(context.position, known_food['tile_id'], int(known_food.get('distance', 0))) or str(int(known_food.get('distance', 0))) + ' tiles away'}, and a "
                     f"collapsed body can crawl one tile per heartbeat."
                 )
         else:
@@ -1935,7 +1986,7 @@ def build_system_prompt(context: AgentContext) -> str:
                     _lines.append(
                         f"Fact: the nearest drinkable tile you have observed "
                         f"is {known_water['tile_id']}, "
-                        f"{int(known_water.get('distance', 0))} tiles away "
+                        f"{_compass_offset(context.position, known_water['tile_id'], int(known_water.get('distance', 0))) or str(int(known_water.get('distance', 0))) + ' tiles away'} "
                         f"(distance is tiles, and you cross one tile per "
                         f"heartbeat)."
                     )
@@ -1992,7 +2043,7 @@ def build_system_prompt(context: AgentContext) -> str:
                         f"Fact: the nearest food you have observed is "
                         f"{', '.join(known_food.get('kinds') or []) or 'food'} on "
                         f"{known_food['tile_id']}, "
-                        f"{int(known_food.get('distance', 0))} tiles away "
+                        f"{_compass_offset(context.position, known_food['tile_id'], int(known_food.get('distance', 0))) or str(int(known_food.get('distance', 0))) + ' tiles away'} "
                         f"(distance is tiles, and you cross one tile per "
                         f"heartbeat)."
                     )
@@ -2018,7 +2069,7 @@ def build_system_prompt(context: AgentContext) -> str:
                         f"Fact: the nearest finished shelter you have observed is "
                         f"a {known_shelter.get('object_type', 'shelter')} at "
                         f"{known_shelter['tile_id']}, "
-                        f"{int(known_shelter.get('distance', 0))} tiles away "
+                        f"{_compass_offset(context.position, known_shelter['tile_id'], int(known_shelter.get('distance', 0))) or str(int(known_shelter.get('distance', 0))) + ' tiles away'} "
                         f"(distance is tiles, and you cross one tile per "
                         f"heartbeat). Inside it warmth holds near "
                         f"{known_shelter.get('comfort_floor', 45):g} however cold "
@@ -2418,7 +2469,7 @@ You share this world with {context.other_agent_name} (agent ID: {context.other_a
 {operator_section}
 
 Current heartbeat: {context.heartbeat_number}
-Your position: {context.position}
+Your position: {context.position} ({_coords_text(context.position)})
 
 {context.continuity_section}
 

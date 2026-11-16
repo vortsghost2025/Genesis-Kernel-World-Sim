@@ -177,7 +177,7 @@ def test_the_standing_prompt_names_the_shelter_with_its_distance():
         "tile_id": "cont_a_gen_3_0", "distance": 3,
         "object_type": "cabin", "comfort_floor": 62.0}))
     assert "the nearest finished shelter you have observed is a cabin at " \
-           "cont_a_gen_3_0, 3 tiles away" in prompt
+           "cont_a_gen_3_0, 3 tiles east" in prompt
     assert "62" in prompt, "the comfort floor must be stated"
 
 

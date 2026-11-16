@@ -135,20 +135,20 @@ def test_a_collapsed_agent_is_told_where_the_water_is(tmp_path=None):
     told where it is. Measured 2026-11-14: both East agents collapsed at
     thirst 100 all night while the standing West agents got the line."""
     prompt = build_system_prompt(_ctx(
-        nearest_known_water={"tile_id": "cont_a_gen_-39_0", "distance": 6},
+        nearest_known_water={"tile_id": "cont_a_gen_-6_0", "distance": 6},
         observation={"self_body": {"downed": True, "thirst": 100.0,
                                     "hunger": 100.0, "vitality": 4.0,
                                     "warmth": 90.0},
                      "environment": {"drinkable_water": False}}))
-    assert "cont_a_gen_-39_0" in prompt
-    assert "6 tiles away" in prompt
+    assert "cont_a_gen_-6_0" in prompt
+    assert "6 tiles west" in prompt
     assert "crawl" in prompt.lower()
 
 
 def test_the_collapsed_water_line_has_no_directive_phrasing():
     from backend.world.first_pair_runtime import _BANNED_DIRECTIVE_PHRASES
     prompt = build_system_prompt(_ctx(
-        nearest_known_water={"tile_id": "cont_a_gen_-39_0", "distance": 6},
+        nearest_known_water={"tile_id": "cont_a_gen_-6_0", "distance": 6},
         observation={"self_body": {"downed": True, "thirst": 100.0,
                                     "hunger": 100.0, "vitality": 4.0,
                                     "warmth": 90.0},

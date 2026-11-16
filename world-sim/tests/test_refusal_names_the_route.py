@@ -128,7 +128,7 @@ def test_eating_what_you_do_not_hold_names_the_nearest_food_and_distance(tmp_pat
     reason = out["reason"]
     assert "You hold no edible_roots to eat" in reason
     assert "nuts" in reason and "cont_a_gen_1_0" in reason, reason
-    assert "1 tiles away" in reason, reason
+    assert "1 tile east" in reason, reason
 
 
 def test_the_eat_refusal_names_food_the_body_does_hold(tmp_path):
@@ -189,7 +189,7 @@ def test_drinking_from_an_empty_vessel_with_none_carried_names_the_nearest_water
     reason = _act(rt, {"action_type": "drink", "source": "target",
                        "target_object_id": obj_id})["reason"]
     assert "You hold no water" in reason, reason
-    assert "cont_a_gen_3_0" in reason and "3 tiles away" in reason, reason
+    assert "cont_a_gen_3_0" in reason and "3 tiles east" in reason, reason
 
 
 def test_drinking_from_a_filled_vessel_still_works(tmp_path):
@@ -217,9 +217,9 @@ def _ctx(downed: bool, food: dict) -> AgentContext:
 
 def test_the_hungry_prompt_names_the_nearest_food_with_a_distance():
     prompt = build_system_prompt(_ctx(False, {
-        "tile_id": "cont_a_gen_-44_5", "distance": 1, "kinds": ["nuts"]}))
-    assert "the nearest food you have observed is nuts on cont_a_gen_-44_5, " \
-           "1 tiles away" in prompt
+        "tile_id": "cont_a_gen_1_0", "distance": 1, "kinds": ["nuts"]}))
+    assert "the nearest food you have observed is nuts on cont_a_gen_1_0, " \
+           "1 tile east" in prompt
 
 
 def test_the_collapsed_prompt_names_the_food_distance_too():
