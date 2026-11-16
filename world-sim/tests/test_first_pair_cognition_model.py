@@ -977,12 +977,21 @@ class TestModelBackendMocked:
         assert result.action["question_id"] == "q-purpose"
 
     def test_gibberish_response_is_handled(self, sample_context):
-        client = _FakeClient([_make_mock_response("This is not JSON at all.")])
+        # Phase 10SJ: unusable output now gets ONE bounded re-ask (prose with no
+        # JSON was 39.5% of east's model errors and had been given no repair at
+        # all). This test pins the guarantee underneath: when BOTH the first
+        # response and the re-ask are unusable, the cycle still degrades safely
+        # to no action at zero confidence rather than crashing or inventing one.
+        client = _FakeClient([
+            _make_mock_response("This is not JSON at all."),
+            _make_mock_response("Still not JSON, even on the second try."),
+        ])
         backend = self._make_backend(client)
         result = backend.observe_and_orient(sample_context)
         assert isinstance(result, CognitionOutput)
         assert result.action is None
         assert result.confidence == 0.0
+        assert client.call_count == 2, "the re-ask is bounded to exactly one"
 
     def test_repair_attempt_on_validation_error(self, sample_context):
         """First response invalid, repair attempt succeeds."""

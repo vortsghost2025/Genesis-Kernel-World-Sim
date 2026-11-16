@@ -2527,7 +2527,7 @@ You must respond with a single JSON object containing exactly these fields:
 - observation_summary (string): a concise summary of what you observe
 - self_model_update (string or null): an optional update to your internal self-model
 - goal_updates (list): list of goal update objects, each with goal_id, agent_id, description, status
-- proposed_action (object or null): a single action object with action_type and type-specific fields, or null to take no action
+- proposed_action (object or null): either null to take no action, or ONE action object that carries action_type plus exactly the fields that action's line in "Available actions" lists, and no other keys (an extra key is a validation error)
 - memory_candidates (list): list of memory objects, each with type and content
 - questions_for_humans (list): list of question objects, each with question_id, question, reason_for_asking, related_goal_id (or null), requested_human_capability, urgency
 - uncertainty (string): what you are uncertain about
@@ -3033,16 +3033,29 @@ class ModelCognitionBackend(CognitionBackend):
 
         raw_json = _extract_json(raw_text)
         if raw_json is None:
-            return None, "no_valid_json_in_response"
+            # Phase 10SJ: a served response carrying text but NO JSON used to get
+            # no repair at all -- the single bounded re-ask below only ran when
+            # JSON was EXTRACTED and then failed validation. Measured 2026-11-16
+            # over east's 4,727 model errors: this class
+            # ("no_valid_json_in_response") was 39.5% of them (1,866), the
+            # largest single failure, and each one costs a whole heartbeat --
+            # 82% of east's `no_action` heartbeats coincide with a model error,
+            # so "the agent chose to do nothing" had been the wrong reading of
+            # the world's largest idle block. To the model, malformed JSON and
+            # no JSON are the same request ("answer again, as strict JSON"), so
+            # both now get the same single bounded round.
+            complaint = "the response contained no JSON object"
+        else:
+            validated = validate_model_output(raw_json, context.agent_id)
+            if validated.is_valid:
+                return raw_json, None
+            complaint = "; ".join(validated.validation_errors)
 
-        validated = validate_model_output(raw_json, context.agent_id)
-        if validated.is_valid:
-            return raw_json, None
-
-        # --- One bounded repair attempt (JSON repair) ---
+        # --- One bounded repair attempt (JSON re-ask) ---
         repair_prompt = (
-            f"Your previous response had validation errors: {'; '.join(validated.validation_errors)}\n"
-            "Please correct and return only a valid JSON object with the exact required fields."
+            f"Your previous response was not usable: {complaint}\n"
+            "Return ONLY a single valid JSON object with exactly the required "
+            "fields and no other keys. Do not include any text outside the JSON."
         )
         response2, err2 = self._call_with_transport_retry(
             messages=[
@@ -3075,6 +3088,10 @@ class ModelCognitionBackend(CognitionBackend):
 
         raw_json2 = _extract_json(raw_text2)
         if raw_json2 is None:
+            # Preserve the historical string when NEITHER attempt produced
+            # JSON, so the evidence stays comparable across this change.
+            if raw_json is None:
+                return None, "no_valid_json_in_response"
             return None, "repair_no_valid_json"
 
         validated2 = validate_model_output(raw_json2, context.agent_id)
