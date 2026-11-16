@@ -97,6 +97,30 @@ def test_an_ordinary_container_is_not_removed_when_emptied(tmp_path):
     assert "cache-1" in rt._world_state.public_objects
 
 
+def test_an_already_empty_provision_is_cleared_on_the_next_attempt(tmp_path):
+    """10SD removed it when an extract emptied it; an ALREADY empty one can
+    never be emptied again, so the removal would never fire. Measured
+    2026-11-16: 7 of 8 provisions per pair were already empty and both east
+    agents kept targeting one."""
+    rt = _runtime(tmp_path)
+    oid = _provision(rt, {}, "operator-provision-hb1-edible_roots-1")
+    out = _extract(rt, oid, edible_roots=3)
+    assert out["status"] == "rejected"
+    assert "is EMPTY" in out["reason"]
+    assert oid not in rt._world_state.public_objects, (
+        "an already-empty gift must be cleared, or it is permanent bait")
+
+
+def test_an_ordinary_empty_container_is_not_cleared(tmp_path):
+    rt = _runtime(tmp_path)
+    rt._world_state.public_objects["cache-9"] = {
+        "object_id": "cache-9", "object_type": "supply_cache", "tile_id": TILE,
+        "materials": {}, "contents": {}}
+    _extract(rt, "cache-9", edible_roots=3)
+    assert "cache-9" in rt._world_state.public_objects, (
+        "the agent's own empty cache is theirs to fill")
+
+
 # --- 2. a dead target stops pulling ----------------------------------------
 
 def test_a_goal_naming_a_missing_object_is_detected():

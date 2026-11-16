@@ -5712,6 +5712,16 @@ class FirstPairRuntime:
                             f" You already carry {held_now} {kind} in your belongings."
                             if held_now > 0 else ""
                         )
+                        # Phase 10SF: an operator provision is a GIFT, not a
+                        # container, and one that is ALREADY empty can never be
+                        # emptied again -- so the removal on the emptying extract
+                        # (10SD) never fires for it. Measured 2026-11-16: 7 of 8
+                        # provisions per pair were already empty and both east
+                        # agents kept targeting one. Clearing it here ends the
+                        # loop on the next attempt, and goal hygiene then retires
+                        # the goal that named it (Rule 0).
+                        if "operator-provision" in str(obj_id):
+                            self._world_state.public_objects.pop(obj_id, None)
                         return {"status": "rejected", "reason": (
                             f"{obj_id} is EMPTY: it holds no {kind} to extract, "
                             f"and a {obj_type} gives back only what was put into "
