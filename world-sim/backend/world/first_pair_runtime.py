@@ -202,6 +202,28 @@ _RESTATEMENT_PREFIXES = (
 )
 
 
+_GOAL_OBJECT_ID_SHAPE = re.compile(r"\b[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*-\d+\b")
+
+
+def _goal_names_a_missing_object(description: str, public_objects) -> bool:
+    """True when a goal names an object id the world no longer holds.
+
+    Phase 10SD. Object-id shaped tokens only: a goal may legitimately name a
+    DESTINATION TILE (`cont_b_origin_001`), and the world has no object on it, so
+    tile ids are excluded -- retiring those would silently kill travel goals.
+    """
+    desc = str(description or "").lower()
+    candidates = {m.group(0) for m in _GOAL_OBJECT_ID_SHAPE.finditer(desc)}
+    candidates = {c for c in candidates
+                  if "_gen_" not in c and not c.startswith("cont_")}
+    if not candidates:
+        return False
+    ids = set()
+    for oid in (public_objects or {}):
+        ids.add(str(oid).lower())
+    return not any(c in ids for c in candidates)
+
+
 def _goal_signature(description: str) -> frozenset[str]:
     """Order-insensitive content signature for restatement detection.
 
@@ -2049,6 +2071,17 @@ class FirstPairRuntime:
             desc = g.description or ""
             desc_lower = desc.lower()
             should_retire = False
+
+            # Rule 0 (Phase 10SD): a goal that names an object which no longer
+            # exists can never be satisfied. Checked FIRST and before the age
+            # gate, because a dead target is dead now, not after
+            # STALE_GOAL_AGE_HB. Measured 2026-11-16: an emptied operator
+            # provision was removed, but the open goal naming it kept both east
+            # agents "extracting" from a phantom supply_cache.
+            if _goal_names_a_missing_object(desc, self._world_state.public_objects):
+                g.status = "retired"
+                retired.append(g)
+                continue
 
             # Rule 1: Region surveyed
             if any(k in desc_lower for k in ("survey", "map", "mapping", "explore")):
@@ -5701,9 +5734,22 @@ class FirstPairRuntime:
                 self._record_food_birth(agent_ref, kind, amount, born_hb)
                 if kind in _TOOL_DURABILITY:
                     self._register_tool(agent_ref, kind, amount)
+            # Phase 10SD: an operator provision is a GIFT, not a container. Once
+            # emptied it lingers on the agent's own tile as a `supply_cache`
+            # whose NAME still advertises what it used to hold
+            # ("operator-provision-hb13608-edible_roots-1"), so it becomes bait.
+            # Measured 2026-11-16: 7 of 8 provisions per pair were empty, both
+            # east agents were extracting from one, and an OPEN GOAL existed to
+            # do exactly that ("Extract edible_roots from
+            # operator-provision-hb13608-edible_roots-1 supply cache"), so the
+            # loop could not end on its own. A finished gift leaves nothing.
+            if ("operator-provision" in str(obj_id)
+                    and not any(int(v or 0) > 0
+                                for v in (obj.get("contents") or {}).values())):
+                self._world_state.public_objects.pop(obj_id, None)
             return {"status": "success",
                     "detail": f"Extracted {materials} from {obj_id}",
-                    "contents": dict(obj["contents"])}
+                    "contents": dict(obj.get("contents") or {})}
 
         return {"status": "rejected", "reason": f"Unhandled operation: {operation}"}
 
