@@ -2129,6 +2129,63 @@ class FirstPairRuntime:
             save_goals(self._store, self._goals)
         return retired
 
+    _STANDING_HOMESTEAD_PREFIX = "world-standing-homestead-rung"
+
+    def _ensure_standing_homestead_goal(
+        self, agent_ref: str, heartbeat_number: int
+    ) -> GoalRecord | None:
+        """One standing objective on the ladder, kept current by the world.
+
+        Phase 10SB. Measured 2026-11-15 over the full history, and the largest
+        cost in the world that is not a refusal: goals come ONLY from the model,
+        and once the lanes had completed 258 of 277 they idled for 23,771
+        heartbeats between them -- 64% of west's entire history, with one run of
+        1,138 heartbeats doing nothing. Disclosure is not enough on its own: the
+        ladder has carried its numbers since 10RS and neither lane has EVER
+        climbed it.
+
+        The objective is derived from the ladder the world already enforces: the
+        next rung above the home's best. It advances when the home does, and it
+        disappears at the top. It states the payoff, and it is the agent's own
+        goal record, not a directive injected into the prompt.
+        """
+        position = (self._world_state.tile_occupancy or {}).get(agent_ref)
+        if not position:
+            return None
+        _fp, best_rung, _ids = self._home_network_detail(str(position))
+        best_rung = max(1, int(best_rung or 1))
+        wanted = best_rung + 1
+        type_name = next(
+            (name for name, rec in _STRUCTURE_RUNGS.items()
+             if rec["rung"] == wanted), None)
+        if type_name is None:
+            return None                      # the ladder is topped out
+
+        goal_id = f"{self._STANDING_HOMESTEAD_PREFIX}-{wanted}"
+        view = self._agent_view(agent_ref)
+        agent_id = str(view.get("agent_id") or agent_ref)
+        for g in self._goals:
+            if g.agent_id != agent_id:
+                continue
+            if not str(g.goal_id).startswith(self._STANDING_HOMESTEAD_PREFIX):
+                continue
+            if (g.goal_id == goal_id
+                    and str(getattr(g, "status", "")) in ("active", "in_progress")):
+                return None                  # already standing and current
+            if str(getattr(g, "status", "")) in ("active", "in_progress"):
+                g.status = "completed"       # the home moved on; close the old one
+        warmth = _home_network_tier(_home_thermal_index(wanted))[0]
+        record = GoalRecord(
+            goal_id=goal_id,
+            agent_id=agent_id,
+            description=(f"Raise the home's best structure rung to {wanted} "
+                         f"({type_name}): warmth holds near {warmth:g} inside it"),
+            status="active",
+            created_heartbeat=heartbeat_number,
+        )
+        self._goals.append(record)
+        return record
+
     # ------------------------------------------------------------------
     # World pressure (docs/world_pressure_spec.md)
     # ------------------------------------------------------------------
@@ -6166,8 +6223,16 @@ class FirstPairRuntime:
             self._load_tile_resources()
             self._pressure_tick = {}
             self._reconcile_capability_requests()
+            # Phase 10SB: after hygiene, keep ONE standing objective on the
+            # ladder so a completed goal list does not mean a finished agent
+            # (measured: 23,771 idle heartbeats on an exhausted goal list).
+            goal_added = False
             for ref in (self._adam_ref, self._eve_ref):
                 self.retire_stale_goals(ref, hb)
+                if self._ensure_standing_homestead_goal(ref, hb) is not None:
+                    goal_added = True
+            if goal_added:
+                save_goals(self._store, self._goals)
 
             # epistemic.4: one heartbeat of embodiment before the agents
             # reason — hunger rises, night cold bites, fires warm. The
