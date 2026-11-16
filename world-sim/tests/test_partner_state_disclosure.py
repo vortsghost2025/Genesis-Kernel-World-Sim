@@ -105,3 +105,90 @@ def test_the_runtime_reports_the_partner_state(tmp_path):
     assert state["downed"] is True
     assert state["vitality"] == 5.7
     assert state["thirst"] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 10SL: the partner fact carries a BEARING, like every other target.
+#
+# Measured 2026-11-16 over east_adam's latest 464 heartbeats: 120 moves, 70%
+# oscillation, 85 of them a two-tile bounce off his own house tile -- and his
+# own recorded reasons say "Move east toward Eve's location" at heartbeats where
+# the geometry says he moved NORTH. The position was disclosed as a bare tile id
+# and only the partner fact was left without the 10RZ bearing.
+# ---------------------------------------------------------------------------
+
+def _partner_prompt(**partner):
+    base = {"agent_ref": "east_eve", "tile_id": "cont_a_gen_-45_-2",
+            "downed": False, "vitality": 62.0, "thirst": 70.0,
+            "hunger": 30.0, "state": "hungry"}
+    base.update(partner)
+    return m.build_system_prompt(_ctx(partner_state=base))
+
+
+def test_the_partner_fact_carries_the_worlds_own_distance_and_a_bearing():
+    # the world says 7; geometry would say 45, and the world wins
+    prompt = _partner_prompt(distance=7)
+    assert "your partner is at cont_a_gen_-45_-2 (7 tiles west)" in prompt, prompt
+
+
+def test_the_bearing_names_the_direction_the_model_got_backwards():
+    """east_adam moved NORTH while writing "Move east"; with the partner due
+    north, the fact must say north."""
+    prompt = m.build_system_prompt(_ctx(position="cont_a_gen_0_0", partner_state={
+        "agent_ref": "east_eve", "tile_id": "cont_a_gen_0_4", "downed": False,
+        "vitality": 62.0, "thirst": 70.0, "hunger": 30.0, "distance": 4,
+        "state": "ok"}))
+    assert "your partner is at cont_a_gen_0_4 (4 tiles north)" in prompt, prompt
+
+
+def test_the_collapsed_branch_carries_the_bearing_too():
+    prompt = _partner_prompt(downed=True, vitality=5.7, thirst=100.0, distance=7)
+    assert "your partner is collapsed at cont_a_gen_-45_-2 (7 tiles west)" in prompt
+
+
+def test_a_co_located_partner_reads_here():
+    prompt = m.build_system_prompt(_ctx(position="cont_a_gen_0_0", partner_state={
+        "agent_ref": "east_eve", "tile_id": "cont_a_gen_0_0", "downed": False,
+        "vitality": 62.0, "thirst": 70.0, "hunger": 30.0, "distance": 0,
+        "state": "ok"}))
+    assert "your partner is at cont_a_gen_0_0 (here)" in prompt, prompt
+
+
+def test_a_named_partner_tile_carries_no_bearing_and_does_not_crash():
+    prompt = m.build_system_prompt(_ctx(position="public-start-adam", partner_state={
+        "agent_ref": "east_eve", "tile_id": "public-shared-center", "downed": False,
+        "vitality": 62.0, "thirst": 70.0, "hunger": 30.0, "state": "ok"}))
+    assert "your partner is at public-shared-center, vitality 62" in prompt, prompt
+    assert "(None)" not in prompt
+
+
+def test_the_runtime_supplies_the_world_distance(tmp_path):
+    rt = FirstPairRuntime(
+        heartbeat_limit=1,
+        store=FirstPairPersistenceStore(tmp_path / "store"))
+    rt._load_or_initialize()
+    rt._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    rt._world_state.tile_occupancy["east_eve"] = "cont_a_gen_-3_2"
+    state = rt._partner_state_for("east_adam")
+    # Chebyshev, as every other world distance in this file
+    assert state["distance"] == 3, state
+
+
+def test_the_runtime_omits_distance_for_a_named_partner_tile(tmp_path):
+    rt = FirstPairRuntime(
+        heartbeat_limit=1,
+        store=FirstPairPersistenceStore(tmp_path / "store"))
+    rt._load_or_initialize()
+    rt._world_state.tile_occupancy["east_adam"] = "cont_a_gen_0_0"
+    rt._world_state.tile_occupancy["east_eve"] = "public-shared-center"
+    state = rt._partner_state_for("east_adam")
+    assert "distance" not in state, state
+
+
+def test_the_partner_fact_still_carries_no_directive():
+    prompt = _partner_prompt(distance=7)
+    for line in prompt.splitlines():
+        if "your partner is" in line:
+            low = line.lower()
+            for banned in _BANNED_DIRECTIVE_PHRASES:
+                assert banned not in low, (banned, line[:140])

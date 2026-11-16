@@ -2317,10 +2317,20 @@ def build_system_prompt(context: AgentContext) -> str:
     # what to do about it.
     partner_state = getattr(context, "partner_state", {}) or {}
     if isinstance(partner_state, dict) and partner_state:
+        # Phase 10SL: the bearing to the partner, from the SAME helper every
+        # other target uses. Without it the model re-derived a direction each
+        # heartbeat and got it backwards (east_adam: "Move east" while moving
+        # north), which is what turned a delivery into a two-tile bounce.
+        partner_bearing = ""
+        if partner_state.get("tile_id"):
+            _pb = _compass_offset(context.position, str(partner_state["tile_id"]),
+                                  int(partner_state.get("distance", 0) or 0))
+            partner_bearing = f" ({_pb})" if _pb else ""
         if partner_state.get("downed"):
             settlement_lines.append(
                 f"Fact: your partner is collapsed at "
-                f"{partner_state.get('tile_id', 'an unknown tile')} "
+                f"{partner_state.get('tile_id', 'an unknown tile')}"
+                f"{partner_bearing} "
                 f"(vitality {partner_state.get('vitality', 0):g}, thirst "
                 f"{partner_state.get('thirst', 0):g}, hunger "
                 f"{partner_state.get('hunger', 0):g}). While you stand on "
@@ -2329,7 +2339,8 @@ def build_system_prompt(context: AgentContext) -> str:
         else:
             settlement_lines.append(
                 f"Fact: your partner is at "
-                f"{partner_state.get('tile_id', 'an unknown tile')}, "
+                f"{partner_state.get('tile_id', 'an unknown tile')}"
+                f"{partner_bearing}, "
                 f"vitality {partner_state.get('vitality', 100):g}, thirst "
                 f"{partner_state.get('thirst', 0):g}, hunger "
                 f"{partner_state.get('hunger', 0):g}.")

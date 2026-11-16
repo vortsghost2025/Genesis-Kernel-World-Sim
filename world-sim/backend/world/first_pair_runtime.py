@@ -1976,6 +1976,23 @@ class FirstPairRuntime:
             "thirst": round(float(vitals.get("thirst", 18.0)), 2),
             "hunger": round(float(vitals.get("hunger", 0.0)), 2),
         }
+        # Phase 10SL: the partner's position was disclosed as a BARE TILE ID, so
+        # the model re-derived a direction from two ids every heartbeat -- the
+        # exact failure 10RZ fixed for the water/shelter/food facts and left
+        # un-fixed here. Measured 2026-11-16 over east_adam's 464 latest
+        # heartbeats: 120 moves, 70% oscillation, 85 of them a two-tile bounce
+        # off his own house tile, and his OWN recorded reasons say "Move east
+        # toward Eve's location" at the heartbeats where the geometry says he
+        # moved NORTH. The world's own distance is authoritative, exactly as it
+        # is for the nearest-known facts, and geometry supplies only direction.
+        agent_pos = str((self._world_state.tile_occupancy or {}).get(agent_ref) or "")
+        pos_xy = self._tile_xy(agent_pos)
+        par_xy = self._tile_xy(str(partner_pos))
+        if (pos_xy is not None and par_xy is not None
+                and self._tile_continent(str(partner_pos))
+                == self._tile_continent(agent_pos)):
+            state["distance"] = int(
+                max(abs(pos_xy[0] - par_xy[0]), abs(pos_xy[1] - par_xy[1])))
         state["state"] = survival.vitals_state_label(vitals)
         return state
 
