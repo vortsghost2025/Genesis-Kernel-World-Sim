@@ -1512,7 +1512,7 @@ Available actions:
 - harvest_crop: harvest mature produce and seed units from an enclosed garden bed (requires: target_id, reason)
 - use_object: interact with a public object on your current tile (requires: target_object_id, operation; "deposit" and "extract" also require materials dict, "inspect" requires only the target, "smelt", "craft", and "cook" also require materials dict) — deposit puts materials from your belongings into the object, extract takes materials from the object into your belongings, inspect returns what the object contains, smelt converts ore to metal (only works on furnace objects), craft combines materials into tools (knives, spears, axes, baskets, pots on crafting_surface objects), cook prepares hot meals from food materials over a fire or hearth
 - eat: eat one unit of a food you are carrying (requires: resource_kind) — satisfies hunger; the observation's self_body shows your body's state, environment shows the hour and temperature
-- drink: drink water (requires: reason; optional: source, resource_kind, target_object_id) — the environment states whether your current tile is drinkable; source tile drinks there (satisfies thirst by 75), source carried or resource_kind fresh_water consumes carried fresh water (satisfies thirst by 55), or target_object_id names a clay_pot on your tile/adjacent tile holding fresh water (satisfies thirst by 55). Thirst rises each heartbeat; at 88+ vitality drains. Rain is not a drink source.
+- drink: drink water (requires: reason; optional: source, resource_kind, target_object_id) — exactly three forms work, and nothing else does. (1) From your CURRENT TILE: leave source empty, or set source to the exact word "tile"; the environment states whether your current tile is drinkable; satisfies thirst by 75. (2) From what you CARRY: set source to the exact word "carried" (or set resource_kind to "fresh_water"); satisfies thirst by 55. (3) From a VESSEL: set target_object_id to a clay_pot on your tile or the tile beside it that holds fresh_water; satisfies thirst by 55. "carried" is a source VALUE, not a name to combine: writing source "carried fresh_water" is none of those three and is refused. Thirst rises each heartbeat; at 88+ vitality drains. Rain is not a drink source.
 - attack: strike an animal standing on your tile or beside it (requires: target_id) - a deer killed drops 4 meat; a wolf struck and defeated leaves 2 meat and flees the area; a snake struck and defeated leaves 1 meat. Tools matter: spears, axes, and iron strike decisively in one blow; bare hands require two strikes. Wolves will not enter the light of a fire
 - offer_food: offer one unit of animal food to an adjacent cow or horse (requires: target_id, resource_kind, reason) - accepted animal foods are wild_berries, edible_roots, wild_apples, wild_grain, and fiber_plants
 - milk_animal: milk an adjacent tamed cow when milk is ready (requires: target_id, reason)
@@ -1535,9 +1535,12 @@ _COLLAPSED_ACTION_LINES = {
             "resource_kind) — this works while you are collapsed, and it is how a "
             "downed body feeds itself"),
     "drink": ("- drink: drink water (requires: reason; optional: source, "
-              "resource_kind, target_object_id) — a source tile drinks there; "
-              "carried fresh_water satisfies thirst by 55 and also works while "
-              "you are collapsed"),
+              "resource_kind, target_object_id) - source \"tile\" (or empty) "
+              "drinks from your current tile; source \"carried\", or resource_kind "
+              "\"fresh_water\", drinks what you carry and satisfies thirst by 55; "
+              "a clay_pot on your tile or beside it holding fresh_water also works. "
+              "\"carried fresh_water\" is not a source value and is refused. Both "
+              "the tile and carried forms work while you are collapsed"),
     "leave_public_message": ("- leave_public_message: leave a public message "
                             "(requires: message, recipient)"),
     "ask_human": ("- ask_human: ask a question to the human operator (requires: "
@@ -2442,6 +2445,37 @@ def build_system_prompt(context: AgentContext) -> str:
         if parts:
             settlement_lines.append(
                 "Fact: your companion holds " + ", ".join(parts) + "."
+            )
+
+    # Phase 10SX: WHERE THE MATERIALS ARE. Measured 2026-11-16: west asked
+    # "What is the nearest location where I can find stone?" and "What mechanism
+    # do I need to obtain structural timber or an axe?" EVERY HOUR for SIXTEEN
+    # HOURS, and the world held the answer in that agent's own known map the
+    # whole time -- while already disclosing the nearest water, shelter and food.
+    # Facts drawn from the agent's own memory: a distance and a bearing, never an
+    # instruction about what to do with it.
+    materials = getattr(context, "nearest_known_materials", {}) or {}
+    if isinstance(materials, dict) and materials:
+        parts = []
+        for kind, where in sorted(
+                materials.items(),
+                key=lambda kv: int((kv[1] or {}).get("distance", 0)
+                                   if isinstance(kv[1], dict) else 0)):
+            if not isinstance(where, dict) or not where.get("tile_id"):
+                continue
+            dist = int(where.get("distance", 0) or 0)
+            if dist == 0:
+                parts.append(f"{kind}: your current tile")
+                continue
+            bearing = _compass_offset(
+                context.position, str(where["tile_id"]), dist)
+            parts.append(
+                f"{kind}: {where['tile_id']} "
+                f"({bearing or str(dist) + ' tiles away'})")
+        if parts:
+            settlement_lines.append(
+                "Fact: the nearest tiles you have observed holding the materials "
+                "a build needs, by distance -- " + "; ".join(parts) + "."
             )
 
     settlement_section = ""

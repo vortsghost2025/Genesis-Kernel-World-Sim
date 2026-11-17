@@ -147,6 +147,12 @@ class AgentContext:
     # distance in tiles (Phase 10QM). Empty when they have seen no water.
     # Their own memory plus arithmetic; a fact, never a destination.
     nearest_known_water: dict = field(default_factory=dict)
+    # Phase 10SX: nearest PERSONALLY observed tile per material the ladder needs
+    # (stone, clay, wood, flint, iron_ore), each with its distance. Same shape
+    # and same arithmetic-on-memory rule as the water/shelter/food facts -- the
+    # world answers "where is the stone" instead of leaving an agent to ask for
+    # sixteen hours.
+    nearest_known_materials: dict = field(default_factory=dict)
     # Phase 10RL: the nearest finished roofed shelter this agent has observed,
     # with its distance and its comfort floor. Same shape as the water fact.
     nearest_known_shelter: dict = field(default_factory=dict)
