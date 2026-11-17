@@ -185,6 +185,27 @@ def record_dead_key_file(key: str, path: Path | None = None) -> bool:
         return False
 
 
+def _lane_key_family(config: "ProviderConfig") -> str:
+    """Which credential POOL belongs to this lane.
+
+    Phase 10SS. `build_lane_key_pool` keys off the provider TYPE, but a lane
+    configured from the vault resolves as ``explicit_url``, which maps to NO
+    pool -- which is why the vault's key pools were inert for the heartbeat no
+    matter how many keys it held. Prefer the family the runner exported; fall
+    back to the endpoint, so a lane configured outside `build_clean_env` still
+    finds its own pool.
+    """
+    kind = (os.environ.get("GENESIS_FIRST_PAIR_KEY_KIND", "") or "").strip().lower()
+    if kind in ("nvidia", "openrouter"):
+        return kind
+    base = (getattr(config, "base_url", "") or "").lower()
+    if "nvidia.com" in base:
+        return "nvidia"
+    if "openrouter.ai" in base:
+        return "openrouter"
+    return (getattr(config, "provider_type", "") or "")
+
+
 def build_lane_key_pool(provider_type: str,
                         denylist: set[str] | None = None) -> list[str]:
     """Credential pool for a provider lane, ordered, denylisted, deduped.
@@ -2630,6 +2651,20 @@ class ModelCognitionBackend(CognitionBackend):
                 api_key=self._config.api_key,
             )
 
+        # Phase 10SS: per-agent KEY override, the same shape as the model one,
+        # for the operator's intent that each agent spend its OWN credential so
+        # one agent's quota cannot starve another's.
+        agent_key = os.environ.get(
+            f"GENESIS_FIRST_PAIR_API_KEY_{agent_ref.upper()}", ""
+        ).strip()
+        if agent_key:
+            self._config = ProviderConfig(
+                provider_type=self._config.provider_type,
+                base_url=self._config.base_url,
+                model=self._config.model,
+                api_key=agent_key,
+            )
+
         self._fallback_config = resolve_fallback_provider(self._config)
         self._fallback_client = None
         self._client = client or OpenAI(
@@ -2641,6 +2676,30 @@ class ModelCognitionBackend(CognitionBackend):
         self._last_serving_provider_type = self._config.provider_type
         self._last_fallback_used = False
         self._last_primary_failure = ""
+
+        # Phase 10SS: the PRODUCTION path never built a credential pool. The
+        # pool wiring lived only in `with_client`, and production reaches this
+        # class through `_get_cognition_backend`, which calls
+        # `ModelCognitionBackend(ref)` -- so `_call_with_transport_retry` found
+        # no `_key_pool`, rotated NOTHING, and spent the single
+        # `GENESIS_FIRST_PAIR_API_KEY` while the vault's pools sat inert. The
+        # tests did not catch it because `test_cognition_key_rotation` assigns
+        # `backend._key_pool` by hand instead of letting the constructor build
+        # one, so the suite proved rotation works and never that it is WIRED.
+        #
+        # An injected client means a fake transport: build no pool, exactly as
+        # `with_client` documents, so a fake is never replaced by a real client
+        # made from ambient credentials. An agent with its OWN key gets an empty
+        # pool too -- the whole point is that it cannot spend anyone else's.
+        self._denylist_path = _DEADKEYS_PATH
+        self._key_pool_denylist = load_denylist_file(self._denylist_path)
+        if client is not None or agent_key:
+            self._key_pool = []
+        else:
+            self._key_pool = build_lane_key_pool(
+                _lane_key_family(self._config),
+                denylist=self._key_pool_denylist)
+        self._key_pool_dead: list[str] = []
 
     @classmethod
     def from_provider_config(
@@ -2705,10 +2764,22 @@ class ModelCognitionBackend(CognitionBackend):
         # one built from ambient environment credentials.
         self._denylist_path = _DEADKEYS_PATH
         self._key_pool_denylist = load_denylist_file(self._denylist_path)
-        self._key_pool = (list(key_pool) if key_pool is not None else
-                          build_lane_key_pool(
-                              config.provider_type,
-                              denylist=self._key_pool_denylist))
+        # Phase 10SS: the documented invariant is that an injected client is
+        # never silently replaced by a real one built from ambient credentials.
+        # The rotation path in `_call_with_transport_retry` DOES replace it when
+        # the pool is non-empty -- it constructs `OpenAI(...)` from a pool key --
+        # so an injected client with no explicitly-passed pool must yield NO
+        # pool. Otherwise an ambient NVIDIA_API_KEYS/OPENROUTER_API_KEYS diverts
+        # a fake transport straight onto the network, which is what a leaked
+        # environment variable did to eight transport tests.
+        if key_pool is not None:
+            self._key_pool = list(key_pool)
+        elif client is not None:
+            self._key_pool = []
+        else:
+            self._key_pool = build_lane_key_pool(
+                _lane_key_family(config),
+                denylist=self._key_pool_denylist)
         self._key_pool_dead: list[str] = []
         return self
 
@@ -2873,15 +2944,21 @@ class ModelCognitionBackend(CognitionBackend):
         # Comparing them directly would deny nothing, so a dead key would be
         # retried forever. Fingerprint every candidate, as _filter_denied does.
         raw_pool = [k for k in (pool_attr or []) if k]
-        pool = [k for k in raw_pool
-                if key_fingerprint(k) not in dead and k != use_config.api_key]
-        # A pool that exists with credentials in it, yet nothing usable left
-        # after denylisting, means every credential on this lane is known
-        # dead: fail closed rather than spend a request on one we have
-        # already written off. An EMPTY pool is not that case - it means this
-        # process has no vault credentials and the lane is running on the
-        # single configured key, which is the historical behavior and stays.
-        if client is None and raw_pool and not pool:
+        # Denylisting is the ONLY reason to write a credential off. The
+        # configured key is excluded from ROTATION -- it is already the first
+        # attempt -- but it must NOT count as "unusable". Phase 10SS: wiring the
+        # pool into production exposed this, because the NVIDIA lane's pool holds
+        # exactly the configured key (`NVIDIA_API_KEYS` == `NVIDIA_NIM_API_KEY`),
+        # so `pool` came out empty and the guard below refused EVERY heartbeat.
+        alive = [k for k in raw_pool if key_fingerprint(k) not in dead]
+        pool = [k for k in alive if k != use_config.api_key]
+        # A pool that exists with credentials in it, yet has NOTHING ALIVE left,
+        # means every credential on this lane is known dead: fail closed rather
+        # than spend a request on one already written off. An EMPTY pool is not
+        # that case - it means this process has no vault credentials and the
+        # lane is running on the single configured key, which is the historical
+        # behavior and stays.
+        if client is None and raw_pool and not alive:
             return None, "no usable provider keys in pool: refusing network call"
         cursor = 0
         attempts_used = 0

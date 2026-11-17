@@ -140,10 +140,15 @@ _STRIPPED_ENV_KEYS = (
     "GENESIS_FIRST_PAIR_API_KEY",
     "GENESIS_FIRST_PAIR_MODEL",
     "GENESIS_FIRST_PAIR_FALLBACK_MODEL",
+    "GENESIS_FIRST_PAIR_KEY_KIND",
     "GENESIS_FIRST_PAIR_MODEL_EAST_ADAM",
     "GENESIS_FIRST_PAIR_MODEL_EAST_EVE",
     "GENESIS_FIRST_PAIR_MODEL_WEST_ADAM",
     "GENESIS_FIRST_PAIR_MODEL_WEST_EVE",
+    "GENESIS_FIRST_PAIR_API_KEY_EAST_ADAM",
+    "GENESIS_FIRST_PAIR_API_KEY_EAST_EVE",
+    "GENESIS_FIRST_PAIR_API_KEY_WEST_ADAM",
+    "GENESIS_FIRST_PAIR_API_KEY_WEST_EVE",
     "NVIDIA_API_KEY",
     "OPENROUTER_API_KEY",
     "OLLAMA_HOST",
@@ -246,6 +251,12 @@ def build_clean_env(vault_path: Path) -> dict:
     env["GENESIS_FIRST_PAIR_BASE_URL"] = primary_base
     env["GENESIS_FIRST_PAIR_API_KEY"] = primary_key
     env["GENESIS_FIRST_PAIR_MODEL"] = primary_model
+    # Phase 10SS: WHICH credential family this lane spends. `resolve_provider`
+    # reports the lane as "explicit_url", which tells the backend nothing about
+    # which vault key POOL belongs to it, so `build_lane_key_pool` could never
+    # find one and the pool stayed empty however many keys the vault held. The
+    # family is known right here, so it is exported explicitly.
+    env["GENESIS_FIRST_PAIR_KEY_KIND"] = primary_key_kind
     # A POINTER to the source of truth, so resolution_proof can recompute the
     # expected lane from the vault rather than from the environment it is
     # checking. Set unconditionally so an ambient value cannot point the
@@ -256,6 +267,18 @@ def build_clean_env(vault_path: Path) -> dict:
     env["GENESIS_FIRST_PAIR_MODEL_EAST_EVE"] = primary_model
     env["GENESIS_FIRST_PAIR_MODEL_WEST_ADAM"] = primary_model
     env["GENESIS_FIRST_PAIR_MODEL_WEST_EVE"] = primary_model
+    # Phase 10SS: per-agent overrides from the VAULT ONLY, so the operator can
+    # give an agent its own model and its own credential by editing vault lines
+    # (`NVIDIA_MODEL_<REF>`, `NVIDIA_API_KEY_<REF>`) with no code change -- the
+    # same promise the primary-lane line already makes. Absent lines change
+    # nothing, so an unchanged vault cannot alter the sim by accident.
+    for _ref in ("EAST_ADAM", "EAST_EVE", "WEST_ADAM", "WEST_EVE"):
+        _m = (vault.get(f"NVIDIA_MODEL_{_ref}", "") or "").strip()
+        if _m:
+            env[f"GENESIS_FIRST_PAIR_MODEL_{_ref}"] = _m
+        _k = (vault.get(f"NVIDIA_API_KEY_{_ref}", "") or "").strip()
+        if _k:
+            env[f"GENESIS_FIRST_PAIR_API_KEY_{_ref}"] = _k
     # Credential pools ride from the VAULT only, never ambient: rotation
     # across operator keys without letting ambient values hijack the lane.
     # Absent plurals simply leave single-key behavior unchanged.
