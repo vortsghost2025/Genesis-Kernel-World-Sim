@@ -2181,6 +2181,38 @@ class FirstPairRuntime:
 
     _STANDING_HOMESTEAD_PREFIX = "world-standing-homestead-rung"
 
+    def _apply_model_goal_updates(self, goal_updates, heartbeat_number: int) -> None:
+        """Apply the model's goal updates, EXCEPT the world's standing objective.
+
+        Phase 10SV. The world's standing ladder objective is the WORLD's record.
+        The model sees it in context and occasionally echo-edited it, which
+        re-activated a stale rung and REPLACED the rung wording -- measured
+        2026-11-16, one record read "Complete house at cont_a_gen_-43_5: hew
+        timber..." instead of the rung it was created as. That is how an agent
+        ended up holding rung-2 AND rung-4 at once: the world was telling it two
+        different things. An update naming a standing goal is dropped by name.
+        """
+        for gu in (goal_updates if isinstance(goal_updates, list) else []):
+            if not isinstance(gu, dict):
+                continue
+            if str(gu.get("goal_id", "")).startswith(
+                    self._STANDING_HOMESTEAD_PREFIX):
+                continue
+            existing = next(
+                (g for g in self._goals if g.goal_id == gu.get("goal_id")), None
+            )
+            if existing:
+                existing.status = gu.get("status", existing.status)
+                existing.description = gu.get("description", existing.description)
+            else:
+                self._goals.append(GoalRecord(
+                    goal_id=gu["goal_id"],
+                    agent_id=gu["agent_id"],
+                    description=gu["description"],
+                    status=gu.get("status", "active"),
+                    created_heartbeat=gu.get("created_heartbeat", heartbeat_number),
+                ))
+
     def _ensure_standing_homestead_goal(
         self, agent_ref: str, heartbeat_number: int
     ) -> GoalRecord | None:
@@ -2208,28 +2240,53 @@ class FirstPairRuntime:
         type_name = next(
             (name for name, rec in _STRUCTURE_RUNGS.items()
              if rec["rung"] == wanted), None)
-        if type_name is None:
-            return None                      # the ladder is topped out
-
-        goal_id = f"{self._STANDING_HOMESTEAD_PREFIX}-{wanted}"
+        goal_id = (f"{self._STANDING_HOMESTEAD_PREFIX}-{wanted}"
+                   if type_name is not None else None)
         view = self._agent_view(agent_ref)
         agent_id = str(view.get("agent_id") or agent_ref)
-        for g in self._goals:
-            if g.agent_id != agent_id:
+        canonical = (
+            f"Raise the home's best structure rung to {wanted} ({type_name}): "
+            f"warmth holds near "
+            f"{_home_network_tier(_home_thermal_index(wanted))[0]:g} inside it"
+        ) if type_name is not None else None
+
+        standing = [
+            g for g in self._goals
+            if g.agent_id == agent_id
+            and str(g.goal_id).startswith(self._STANDING_HOMESTEAD_PREFIX)
+        ]
+        # Phase 10SV: normalize on EVERY pass, with NO early return. The old
+        # version returned the moment it found one current record, so anything
+        # later in the list was never closed -- and whether an agent ended up
+        # holding CONTRADICTORY objectives (rung-2 AND rung-4) or a duplicate
+        # rung-4 depended on list order. Measured 2026-11-16: east_adam and
+        # west_adam each held three active standing goals, two of them
+        # contradictory. The world was telling them two different things.
+        changed = False
+        keeper = None
+        for g in standing:
+            if str(getattr(g, "status", "")) not in ("active", "in_progress"):
                 continue
-            if not str(g.goal_id).startswith(self._STANDING_HOMESTEAD_PREFIX):
+            if goal_id is not None and g.goal_id == goal_id and keeper is None:
+                keeper = g                      # the newest current one wins
                 continue
-            if (g.goal_id == goal_id
-                    and str(getattr(g, "status", "")) in ("active", "in_progress")):
-                return None                  # already standing and current
-            if str(getattr(g, "status", "")) in ("active", "in_progress"):
-                g.status = "completed"       # the home moved on; close the old one
-        warmth = _home_network_tier(_home_thermal_index(wanted))[0]
+            g.status = "completed"              # wrong rung, or a duplicate
+            changed = True
+        if type_name is None:
+            return None                          # topped out: all closed above
+        if keeper is not None:
+            # The world owns this sentence. The model sees the goal in context
+            # and sometimes echoes it with its own wording, which silently
+            # REPLACED the rung description (one record read "Complete house at
+            # cont_a_gen_-43_5: hew timber..."), so it is restored here.
+            if str(getattr(keeper, "description", "")) != canonical:
+                keeper.description = canonical
+                changed = True
+            return keeper if changed else None
         record = GoalRecord(
             goal_id=goal_id,
             agent_id=agent_id,
-            description=(f"Raise the home's best structure rung to {wanted} "
-                         f"({type_name}): warmth holds near {warmth:g} inside it"),
+            description=canonical,
             status="active",
             created_heartbeat=heartbeat_number,
         )
@@ -6166,24 +6223,7 @@ class FirstPairRuntime:
                 heartbeat_number,
             )
 
-        goal_updates = output.goal_updates if isinstance(output.goal_updates, list) else []
-        for gu in goal_updates:
-            if not isinstance(gu, dict):
-                continue
-            existing = next(
-                (g for g in self._goals if g.goal_id == gu.get("goal_id")), None
-            )
-            if existing:
-                existing.status = gu.get("status", existing.status)
-                existing.description = gu.get("description", existing.description)
-            else:
-                self._goals.append(GoalRecord(
-                    goal_id=gu["goal_id"],
-                    agent_id=gu["agent_id"],
-                    description=gu["description"],
-                    status=gu.get("status", "active"),
-                    created_heartbeat=gu.get("created_heartbeat", heartbeat_number),
-                ))
+        self._apply_model_goal_updates(output.goal_updates, heartbeat_number)
 
         # --- Continuity metadata (piggyback, never a veto) ---
         # getattr-guarded: outputs predating the slot have no such field.
@@ -6296,15 +6336,18 @@ class FirstPairRuntime:
             self._load_tile_resources()
             self._pressure_tick = {}
             self._reconcile_capability_requests()
-            # Phase 10SB: after hygiene, keep ONE standing objective on the
+            # Phase 10SB/10SV: after hygiene, keep ONE standing objective on the
             # ladder so a completed goal list does not mean a finished agent
-            # (measured: 23,771 idle heartbeats on an exhausted goal list).
-            goal_added = False
+            # (measured: 23,771 idle heartbeats on an exhausted goal list). The
+            # call also NORMALIZES -- closing stale and duplicate standing goals
+            # -- so the goals are saved whenever it reports a change, not only
+            # when a new rung opens.
+            goal_changed = False
             for ref in (self._adam_ref, self._eve_ref):
                 self.retire_stale_goals(ref, hb)
                 if self._ensure_standing_homestead_goal(ref, hb) is not None:
-                    goal_added = True
-            if goal_added:
+                    goal_changed = True
+            if goal_changed:
                 save_goals(self._store, self._goals)
 
             # epistemic.4: one heartbeat of embodiment before the agents
