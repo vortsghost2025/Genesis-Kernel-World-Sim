@@ -65,6 +65,9 @@ RETRY_DELAY_S = 45
 # churned the chain through retry-restarts even though heartbeats
 # eventually succeeded. 1200s fits the measured latency; still finite.
 STATUS_TIMEOUT_S = 1200
+# Phase 10TA: read chunk for the streaming heartbeat count. A module constant so
+# the straddle fix can be tested with a small chunk instead of a 123MB file.
+CHUNK_BYTES = 1024 * 1024
 SNAPSHOT_EVERY = 10
 
 # Detached runners spawned this run (their status files carry the pid).
@@ -127,18 +130,30 @@ def _count_heartbeat_records(path) -> int:
 
     Counts '"heartbeat_number":' (the JSON key with its colon). The
     records are dict-serialized with alphabetically sorted keys, so
-    heartbeat_number is never the FIRST key — counting the key-colon
+    heartbeat_number is never the FIRST key - counting the key-colon
     pair is the correct pattern. The colon excludes prose mentions
     in agent reasoning text.
+
+    Phase 10TA: the pattern is carried ACROSS chunk boundaries. Counting
+    inside each 1MB chunk independently loses any match that straddles a
+    boundary -- measured 2026-11-17, the east heartbeat file held 14,558
+    records and this returned 14,557, because exactly one occurrence fell
+    across a boundary of a 123MB file. A count that is quietly one short
+    is the difference between starting a chain at the right heartbeat and
+    re-running one.
     """
     count = 0
+    pattern = b'"heartbeat_number":'
     try:
         with open(path, "rb") as fh:
+            tail = b""
             while True:
-                chunk = fh.read(1024 * 1024)  # 1MB at a time
+                chunk = fh.read(CHUNK_BYTES)
                 if not chunk:
                     break
-                count += chunk.count(b'"heartbeat_number":')
+                buf = tail + chunk
+                count += buf.count(pattern)
+                tail = buf[-(len(pattern) - 1):] if len(pattern) > 1 else b""
     except OSError:
         return 0
     return count

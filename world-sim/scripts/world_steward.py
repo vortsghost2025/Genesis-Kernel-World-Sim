@@ -130,15 +130,26 @@ def _read_json(path: Path):
 
 def _count_heartbeat_records(path: Path) -> int:
     """Stream-count 'heartbeat_number' occurrences. Same technique as the
-    chain's fix — never load the full file."""
+    chain's fix - never load the full file.
+
+    Phase 10TA: the SAME chunk-boundary fix as the chain's, and the SAME
+    colon-terminated pattern. Counting bare '"heartbeat_number"' both loses a
+    match that straddles a chunk boundary AND counts prose mentions of the key
+    in agent reasoning text - this counter decides where the next chain window
+    STARTS, so being wrong in either direction mis-places a run.
+    """
     count = 0
+    pattern = b'"heartbeat_number":'
     try:
         with open(path, "rb") as fh:
+            tail = b""
             while True:
                 chunk = fh.read(1024 * 1024)
                 if not chunk:
                     break
-                count += chunk.count(b'"heartbeat_number"')
+                buf = tail + chunk
+                count += buf.count(pattern)
+                tail = buf[-(len(pattern) - 1):] if len(pattern) > 1 else b""
     except OSError:
         return 0
     return count

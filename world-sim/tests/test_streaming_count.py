@@ -40,14 +40,62 @@ class TestStreamingCount:
         p.write_text('{"data": []}', encoding="utf-8")
         assert lc._count_heartbeat_records(p) == 0
 
-    def test_real_store_counts(self):
-        """Verify against the actual east store (2,230+ records)."""
-        p = lc.STORES["east"] / "heartbeat.json"
-        streaming = lc._count_heartbeat_records(p)
-        full = len(json.loads(p.read_text(encoding="utf-8")).get("data", []))
+    def test_real_store_counts(self, tmp_path):
+        """Verify against the actual east store.
+
+        Phase 10TA: the file is SNAPSHOT first. This test used to read the live
+        heartbeat file twice while the running world rewrites it (123MB per
+        heartbeat), so it could see a mid-write state and fail for a reason that
+        has nothing to do with the counter. Snapshotting keeps the intent -- a
+        real, large, live file -- without racing the writer.
+        """
+        import shutil
+        src = lc.STORES["east"] / "heartbeat.json"
+        snap = tmp_path / "heartbeat.snapshot.json"
+        shutil.copyfile(src, snap)
+        streaming = lc._count_heartbeat_records(snap)
+        full = len(json.loads(snap.read_text(encoding="utf-8")).get("data", []))
         assert streaming == full, (
-            f"streaming={streaming} full={full} — the streaming count "
+            f"streaming={streaming} full={full} - the streaming count "
             f"must match the full parse exactly")
+
+    def test_a_match_straddling_the_read_chunk_is_not_lost(self, tmp_path, monkeypatch):
+        """The measured bug: 14,558 records counted as 14,557 because exactly one
+        occurrence fell across a 1MB boundary of a 123MB file. A small chunk makes
+        straddles certain instead of rare."""
+        monkeypatch.setattr(lc, "CHUNK_BYTES", 37)
+        p = tmp_path / "heartbeat.json"
+        p.write_text(json.dumps({"data": [
+            {"heartbeat_number": n, "observation": {}} for n in range(1, 501)]}),
+            encoding="utf-8")
+        assert lc._count_heartbeat_records(p) == 500
+
+    def test_a_chunk_that_is_exactly_the_pattern_still_counts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lc, "CHUNK_BYTES", len(b'"heartbeat_number":'))
+        p = tmp_path / "heartbeat.json"
+        p.write_text(json.dumps({"data": [
+            {"heartbeat_number": n} for n in range(1, 21)]}), encoding="utf-8")
+        assert lc._count_heartbeat_records(p) == 20
+
+    def test_the_two_counters_agree(self, tmp_path):
+        """The chain's counter and the steward's decide where a run STARTS, so
+        they must not disagree."""
+        import world_steward as wsm
+        p = tmp_path / "heartbeat.json"
+        p.write_text(json.dumps({"data": [
+            {"heartbeat_number": n, "observation": {}} for n in range(1, 301)]}),
+            encoding="utf-8")
+        assert lc._count_heartbeat_records(p) == wsm._count_heartbeat_records(p) == 300
+
+    def test_prose_naming_the_key_does_not_inflate(self, tmp_path):
+        """The colon is why the pattern is safe: a reasoning string that mentions
+        the key must not add to the count."""
+        p = tmp_path / "heartbeat.json"
+        p.write_text(json.dumps({"data": [
+            {"heartbeat_number": 1,
+             "observation": {"note": 'I wrote "heartbeat_number" in my reasoning'}}]}
+        ), encoding="utf-8")
+        assert lc._count_heartbeat_records(p) == 1
 
     def test_store_state_uses_tick_as_position(self, monkeypatch, tmp_path):
         """store_state returns the TICK as the position, not the count.
