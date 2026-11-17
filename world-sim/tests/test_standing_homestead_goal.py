@@ -62,7 +62,7 @@ def _standing(rt: FirstPairRuntime, agent: str = "east_adam") -> list:
     agent_id = str(rt._agent_view(agent).get("agent_id"))
     return [g for g in rt._goals
             if g.agent_id == agent_id
-            and str(g.goal_id).startswith("world-standing-homestead-rung")]
+            and rt._is_standing_goal(g.goal_id)]
 
 
 def test_a_rung_one_home_is_given_the_next_rung_as_an_objective(tmp_path):
@@ -99,12 +99,92 @@ def test_it_advances_when_the_home_does(tmp_path):
     assert len(_standing(rt)) == 2, "one standing, one completed"
 
 
-def test_it_disappears_at_the_top_of_the_ladder(tmp_path):
+def test_the_top_of_the_ladder_gets_a_SUPPLY_objective_instead_of_nothing(tmp_path):
+    """Phase 10SZ: it used to disappear, and measured 2026-11-17 that meant west
+    finished the ladder (274 goals complete, one left) and then stood still for
+    261 of 434 heartbeats -- 57 in a row, BOTH agents. A finished ladder must not
+    mean a finished agent."""
     rt = _runtime(tmp_path)
     top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)                  # best rung 6
-    assert rt._ensure_standing_homestead_goal("east_adam", 100) is None
-    assert _standing(rt) == []
+    _dwell(rt, HERE, "longhouse", top)                  # best rung 6 = topped
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None, "topping out must not leave the agent with nothing"
+    assert made.goal_id == "world-standing-homestead-supplied"
+    assert "water store holds 0 of 20" in made.description, made.description
+    assert "Carry fresh_water home" in made.description
+
+
+def test_the_supply_objective_states_the_measured_store(tmp_path):
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "longhouse", top)
+    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
+        "fresh_water": 7}
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert "holds 7 of 20" in made.description, made.description
+
+
+def test_a_full_store_is_stated_as_full(tmp_path):
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "longhouse", top)
+    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
+        "fresh_water": 20}
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert "is FULL" in made.description, made.description
+
+
+def test_a_cisterns_water_is_reported_SEPARATELY_not_as_the_home_store(tmp_path):
+    """A cistern keeps its OWN store. Mixing it in would let a home with a full
+    cistern read as 'the home store is 0 of 20' -- a false statement of exactly
+    the kind this world keeps having to unlearn."""
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "cistern", top)
+    rt._world_state.public_objects["cistern-cont_a_gen_0_0"]["contents"] = {
+        "fresh_water": 20}
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert "holds 0 of 20" in made.description, made.description
+    assert "the cistern holds 20" in made.description, made.description
+
+
+def test_held_is_capped_at_capacity_because_a_deposit_past_it_is_refused(tmp_path):
+    """The number shown must match what a deposit would actually accept."""
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "longhouse", top)
+    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
+        "fresh_water": 999}
+    state = rt._home_water_state_for(HERE)
+    assert state["held"] == state["capacity"] == 20, state
+
+
+def test_a_non_dwelling_does_not_add_a_water_store(tmp_path):
+    rt = _runtime(tmp_path)
+    _dwell(rt, HERE, "wall", 1)                     # not roofed, not a dwelling
+    assert rt._home_water_state_for(HERE) == {}
+
+
+def test_the_supply_objective_is_idempotent(tmp_path):
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "longhouse", top)
+    assert rt._ensure_standing_homestead_goal("east_adam", 100) is not None
+    assert rt._ensure_standing_homestead_goal("east_adam", 101) is None
+    assert len(_standing(rt)) == 1
+
+
+def test_the_model_may_not_edit_the_supply_objective(tmp_path):
+    rt = _runtime(tmp_path)
+    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+    _dwell(rt, HERE, "longhouse", top)
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    agent_id = str(rt._agent_view("east_adam")["agent_id"])
+    before = (made.status, made.description)
+    rt._apply_model_goal_updates([{
+        "goal_id": "world-standing-homestead-supplied", "agent_id": agent_id,
+        "description": "gather berries", "status": "completed"}], 101)
+    assert (made.status, made.description) == before
 
 
 def test_every_rung_it_names_is_a_real_buildable_type(tmp_path):
@@ -171,7 +251,7 @@ def _standing_active(rt, agent="east_adam"):
     agent_id = str(rt._agent_view(agent).get("agent_id"))
     return [g for g in rt._goals
             if g.agent_id == agent_id
-            and str(g.goal_id).startswith("world-standing-homestead-rung")
+            and rt._is_standing_goal(g.goal_id)
             and str(getattr(g, "status", "")) in ("active", "in_progress")]
 
 
@@ -250,7 +330,7 @@ def test_the_model_can_still_write_its_own_goals(tmp_path):
                and g.status == "active" for g in rt._goals)
 
 
-def test_at_the_top_of_the_ladder_every_standing_goal_is_closed(tmp_path):
+def test_at_the_top_a_stale_rung_objective_is_replaced_by_the_supply_objective(tmp_path):
     rt = _runtime(tmp_path)
     agent_id = str(rt._agent_view("east_adam")["agent_id"])
     top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
@@ -258,5 +338,8 @@ def test_at_the_top_of_the_ladder_every_standing_goal_is_closed(tmp_path):
     rt._goals.append(GoalRecord(
         goal_id="world-standing-homestead-rung-2", agent_id=agent_id,
         description="old", status="active", created_heartbeat=1))
-    assert rt._ensure_standing_homestead_goal("east_adam", 100) is None
-    assert _standing_active(rt) == [], "topped out means no rung objective"
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None and made.goal_id == "world-standing-homestead-supplied"
+    actives = _standing_active(rt)
+    assert len(actives) == 1, [a.goal_id for a in actives]
+    assert actives[0].goal_id == "world-standing-homestead-supplied"

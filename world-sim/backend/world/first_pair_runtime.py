@@ -2229,6 +2229,57 @@ class FirstPairRuntime:
         return retired
 
     _STANDING_HOMESTEAD_PREFIX = "world-standing-homestead-rung"
+    # Phase 10SZ: the objective for a home whose ladder is TOPPED OUT.
+    _STANDING_SUPPLY_PREFIX = "world-standing-homestead-supplied"
+
+    @classmethod
+    def _is_standing_goal(cls, goal_id) -> bool:
+        """True for any objective the WORLD owns on the homestead ladder.
+
+        Both prefixes must be covered wherever standing goals are protected:
+        one guard that matched only the rung prefix would let the model rewrite
+        the supply objective the same way it rewrote a rung (10SV).
+        """
+        gid = str(goal_id or "")
+        return gid.startswith(cls._STANDING_HOMESTEAD_PREFIX) or \
+            gid.startswith(cls._STANDING_SUPPLY_PREFIX)
+
+    def _home_water_state_for(self, tile_id: str) -> dict:
+        """How full the home's water store is: {"held", "capacity", "cistern"}, or {}.
+
+        Phase 10SZ. Water is the documented killer of this world, and
+        `_WATER_STORE_BY_RUNG` exists precisely so that "carry fresh_water home
+        and keep it" is a plan the ladder pays for. This is the measurement that
+        gives a TOPPED-OUT home something left to want.
+
+        A cistern keeps its OWN store, so it is reported SEPARATELY rather than
+        mixed into the home figure: a home with a full cistern must never read as
+        "0 of 20", which is the same class of false statement this world keeps
+        having to unlearn. Held is also capped at capacity, because a deposit is
+        refused past the store's size and the number shown must match.
+        """
+        if not tile_id:
+            return {}
+        _fp, best_rung, ids = self._home_network_detail(str(tile_id))
+        best_rung = int(best_rung or 0)
+        if best_rung < 1 or not ids:
+            return {}
+        top = max(_WATER_STORE_BY_RUNG)
+        capacity = int(_WATER_STORE_BY_RUNG[max(1, min(top, best_rung))])
+        dwelling_held = 0
+        cistern_held = 0
+        for oid in ids:
+            rec = (self._world_state.public_objects or {}).get(oid)
+            if not isinstance(rec, dict) or not self._record_shelters(rec):
+                continue
+            amount = int((rec.get("contents") or {}).get("fresh_water", 0) or 0)
+            if str(rec.get("object_type", "")).strip().lower() == "cistern":
+                cistern_held += amount
+            else:
+                dwelling_held += amount
+        return {"held": int(min(dwelling_held, capacity)),
+                "capacity": int(capacity),
+                "cistern": int(cistern_held)}
 
     def _apply_model_goal_updates(self, goal_updates, heartbeat_number: int) -> None:
         """Apply the model's goal updates, EXCEPT the world's standing objective.
@@ -2244,8 +2295,7 @@ class FirstPairRuntime:
         for gu in (goal_updates if isinstance(goal_updates, list) else []):
             if not isinstance(gu, dict):
                 continue
-            if str(gu.get("goal_id", "")).startswith(
-                    self._STANDING_HOMESTEAD_PREFIX):
+            if self._is_standing_goal(gu.get("goal_id")):
                 continue
             existing = next(
                 (g for g in self._goals if g.goal_id == gu.get("goal_id")), None
@@ -2291,18 +2341,42 @@ class FirstPairRuntime:
              if rec["rung"] == wanted), None)
         goal_id = (f"{self._STANDING_HOMESTEAD_PREFIX}-{wanted}"
                    if type_name is not None else None)
-        view = self._agent_view(agent_ref)
-        agent_id = str(view.get("agent_id") or agent_ref)
         canonical = (
             f"Raise the home's best structure rung to {wanted} ({type_name}): "
             f"warmth holds near "
             f"{_home_network_tier(_home_thermal_index(wanted))[0]:g} inside it"
         ) if type_name is not None else None
+        if type_name is None:
+            # Phase 10SZ: the ladder is topped out. It used to mean the standing
+            # objective simply VANISHED -- and measured 2026-11-17 that is
+            # exactly what happened: both lanes built the rung-6 cistern, west
+            # finished with 274 goals complete and one left, and then both its
+            # agents stood still for 261 of 434 heartbeats, 57 in a row. A
+            # finished ladder must not mean a finished agent. The store is
+            # measurable, and the ladder already pays for filling it.
+            store = self._home_water_state_for(str(position))
+            if store:
+                goal_id = self._STANDING_SUPPLY_PREFIX
+                filled = store["held"] >= store["capacity"]
+                cistern_note = (
+                    f", and the cistern holds {store['cistern']}"
+                    if store.get("cistern") else "")
+                canonical = (
+                    f"Keep the homestead supplied. Its water store holds "
+                    f"{store['held']} of {store['capacity']} units of fresh_water"
+                    + cistern_note
+                    + (" and is FULL -- keep it full, and keep food in the home"
+                       if filled else
+                       ". Carry fresh_water home and deposit it into the home "
+                       "until the store is full")
+                )
 
+        view = self._agent_view(agent_ref)
+        agent_id = str(view.get("agent_id") or agent_ref)
         standing = [
             g for g in self._goals
             if g.agent_id == agent_id
-            and str(g.goal_id).startswith(self._STANDING_HOMESTEAD_PREFIX)
+            and self._is_standing_goal(g.goal_id)
         ]
         # Phase 10SV: normalize on EVERY pass, with NO early return. The old
         # version returned the moment it found one current record, so anything
@@ -2321,8 +2395,8 @@ class FirstPairRuntime:
                 continue
             g.status = "completed"              # wrong rung, or a duplicate
             changed = True
-        if type_name is None:
-            return None                          # topped out: all closed above
+        if goal_id is None:
+            return None                          # no home here: nothing to want
         if keeper is not None:
             # The world owns this sentence. The model sees the goal in context
             # and sometimes echoes it with its own wording, which silently
