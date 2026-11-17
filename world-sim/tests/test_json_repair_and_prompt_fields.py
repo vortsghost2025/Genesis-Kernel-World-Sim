@@ -160,8 +160,52 @@ def test_prose_twice_still_fails_closed_with_the_historical_string():
     ])
     raw, err = backend._call_model_with_repair("system prompt", _ctx())
     assert raw is None
-    assert err == "no_valid_json_in_response", err
+    # Phase 10SP: the historical token stays the PREFIX so classification is
+    # unchanged, and the evidence follows after the delimiter.
+    assert err.startswith("no_valid_json_in_response"), err
     assert len(log) == 2, "bounded: never more than one re-ask"
+
+
+def test_the_no_json_failure_keeps_the_evidence():
+    """The class that was 39.5% of all model errors used to be a verdict with no
+    evidence -- the raw text was discarded, so it could only be counted."""
+    backend, log = _backend([
+        "I will continue mapping the western hill cluster tile by tile.",
+        "Still prose: walking north along the ridge toward the shelter.",
+    ])
+    raw, err = backend._call_model_with_repair("system prompt", _ctx())
+    assert raw is None
+    assert " | raw: " in err, err
+    # the SECOND attempt is the one that also failed, so it is the evidence
+    assert "walking north along the ridge" in err, err
+
+
+def test_the_evidence_is_bounded_and_does_not_overflow_the_sanitiser_cap():
+    from backend.world.first_pair_cognition_model import sanitize_provider_error
+    backend, _ = _backend(["x" * 5000, "y" * 5000])
+    raw, err = backend._call_model_with_repair("system prompt", _ctx())
+    assert raw is None
+    safe = sanitize_provider_error(Exception(err))       # what the world stores
+    assert safe.startswith("no_valid_json_in_response")
+    assert len(safe) <= 500, len(safe)
+    assert "y" * 500 not in safe, "a whole completion must not be persisted"
+
+
+def test_the_evidence_carries_no_credential():
+    backend, _ = _backend([
+        "prose",
+        "here is my key nvapi-SUPERSECRETVALUE123 and still no json",
+    ])
+    raw, err = backend._call_model_with_repair("system prompt", _ctx())
+    assert raw is None
+    assert "SUPERSECRETVALUE123" not in err, err
+
+
+def test_the_evidence_helper_never_raises():
+    from backend.world.first_pair_cognition_model import _failure_evidence
+    for bad in (None, "", "   ", 12345, {"a": 1}, []):
+        assert _failure_evidence(bad) == ""
+    assert _failure_evidence("plain") == " | raw: plain"
 
 
 def test_a_recovered_re_ask_can_also_be_rejected_by_validation():

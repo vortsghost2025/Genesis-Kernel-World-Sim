@@ -452,6 +452,29 @@ from backend.world.provider_resolver import (
 _PROVIDER_SAFE_MESSAGE_RE = re.compile(r"[^\x20-\x7e]")
 
 
+def _failure_evidence(raw_text: str | None, limit: int = 300) -> str:
+    """A bounded, redacted head of a response that could not be used.
+
+    Phase 10SP. `no_valid_json_in_response` was 39.5% of all model errors and was
+    a VERDICT with no evidence: the raw text was discarded inside
+    `_call_model_with_repair`, so the one class that needed diagnosis could only
+    be counted. 300 characters is enough to tell apart the three shapes it hides
+    -- the model answered in prose, in the wrong JSON shape, or in a chain of
+    thought -- without persisting a whole completion per failure.
+
+    Goes through the same sanitiser as any provider error, so an echoed
+    credential is redacted and a runaway completion is truncated. Never raises:
+    diagnostics must not break a heartbeat.
+    """
+    try:
+        if not raw_text or not isinstance(raw_text, str) or not raw_text.strip():
+            return ""
+        head = sanitize_provider_error(Exception(raw_text.strip()[:limit]))
+        return f" | raw: {head}"
+    except Exception:
+        return ""
+
+
 def sanitize_provider_error(exc: Exception) -> str:
     msg = str(exc)
     # Strip any non-printable characters
@@ -3099,16 +3122,23 @@ class ModelCognitionBackend(CognitionBackend):
 
         raw_json2 = _extract_json(raw_text2)
         if raw_json2 is None:
-            # Preserve the historical string when NEITHER attempt produced
-            # JSON, so the evidence stays comparable across this change.
+            # Phase 10SP: attach the evidence. If NEITHER attempt produced JSON
+            # the historical string stays the PREFIX, so classification is
+            # unchanged, and the head of the last unusable response follows
+            # after a delimiter -- the world must not throw away the only thing
+            # that can diagnose its largest failure class.
             if raw_json is None:
-                return None, "no_valid_json_in_response"
-            return None, "repair_no_valid_json"
+                return None, ("no_valid_json_in_response"
+                              + _failure_evidence(raw_text2 or raw_text))
+            return None, "repair_no_valid_json" + _failure_evidence(raw_text2)
 
         validated2 = validate_model_output(raw_json2, context.agent_id)
         if validated2.is_valid:
             return raw_json2, None
 
+        # No evidence here on purpose: this JSON PARSED, so the validation
+        # errors already name the offending fields, and the 500-char cap in
+        # sanitize_provider_error is better spent on them.
         return None, f"repair_failed: {'; '.join(validated2.validation_errors)}"
 
     def propose_goal(self, context: AgentContext) -> dict | None:
