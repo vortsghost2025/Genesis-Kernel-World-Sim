@@ -2537,7 +2537,7 @@ Answers you have received:
 You must respond with a single JSON object containing exactly these fields:
 - observation_summary (string): a concise summary of what you observe
 - self_model_update (string or null): an optional update to your internal self-model
-- goal_updates (list): list of goal update objects, each with goal_id, agent_id, description, status
+- goal_updates (list): list of goal update objects, each with exactly goal_id, agent_id, description and status, and no other keys. status is ONE of these four tokens, spelled exactly: active, in_progress, completed, abandoned (note the underscore in in_progress; "in progress" with a space is not a status)
 - proposed_action (object or null): either null to take no action, or ONE action object that carries action_type plus exactly the fields that action's line in "Available actions" lists, and no other keys (an extra key is a validation error)
 - memory_candidates (list): list of memory objects, each with type and content
 - questions_for_humans (list): list of question objects, each with question_id, question, reason_for_asking, related_goal_id (or null), requested_human_capability, urgency

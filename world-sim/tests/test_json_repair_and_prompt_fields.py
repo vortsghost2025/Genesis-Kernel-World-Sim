@@ -217,3 +217,54 @@ def test_a_phantom_key_in_a_response_is_still_rejected():
         {"action_type": "move", "target_tile": "public-shared-center",
          "reason": "go", "type-specific": {}}, "genesis-agent-test")
     assert any("unknown_field:type-specific" in e for e in errs), errs
+
+
+# --- the goal_updates vocabulary -------------------------------------------
+#
+# Same family as the phantom key, found in the same audit: the world defines a
+# controlled vocabulary of statuses and never told the model. east's single
+# remaining post-10SJ error was
+#     "repair_failed: goal_updates[0]:invalid_status:in progress"
+# -- the human spelling of `in_progress`. An invalid goal_update fails the WHOLE
+# response, so the typo also discarded the action.
+
+def test_the_prompt_names_every_valid_goal_status():
+    src = Path(fpcm.__file__).read_text(encoding="utf-8")
+    for status in fpcm._VALID_STATUSES:
+        assert status in src, status
+
+
+def test_the_prompt_status_list_cannot_drift_from_the_validator():
+    """The four tokens in the prompt must be exactly `_VALID_STATUSES`."""
+    prompt = fpcm.build_system_prompt(_ctx())
+    line = next(l for l in prompt.splitlines() if "goal_updates (list)" in l)
+    for status in fpcm._VALID_STATUSES:
+        assert status in line, (status, line)
+    assert "\"in progress\" with a space is not a status" in line, line
+
+
+def test_the_prompt_says_goal_updates_carries_no_other_keys():
+    prompt = fpcm.build_system_prompt(_ctx())
+    line = next(l for l in prompt.splitlines() if "goal_updates (list)" in l)
+    assert "no other keys" in line, line
+
+
+def test_the_human_spelling_of_the_status_is_still_rejected():
+    """Disclosure, not relaxation: `in progress` is still not a status."""
+    from backend.world.first_pair_cognition_model import validate_model_output
+    bad = json.loads(_valid_payload())
+    bad["goal_updates"] = [{"goal_id": "g1", "agent_id": "genesis-agent-test",
+                            "description": "d", "status": "in progress"}]
+    out = validate_model_output(bad, "genesis-agent-test")
+    assert not out.is_valid
+    assert any("invalid_status" in e for e in out.validation_errors), \
+        out.validation_errors
+
+
+def test_the_documented_token_is_accepted():
+    from backend.world.first_pair_cognition_model import validate_model_output
+    good = json.loads(_valid_payload())
+    good["goal_updates"] = [{"goal_id": "g1", "agent_id": "genesis-agent-test",
+                             "description": "d", "status": "in_progress"}]
+    out = validate_model_output(good, "genesis-agent-test")
+    assert out.is_valid, out.validation_errors
