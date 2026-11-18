@@ -98,10 +98,42 @@ Before producing output following a context reset:
      west_eve 100 → 1.6; all four fed and hydrated for the first time in a
      day.
 
+9. **RUN THE SHOW; SPEAK ONLY WHEN HARD-BLOCKED** (2026-11-18, explicit Sean
+   instruction: *"you basically run the show... dont ask me fix it... problem
+   solve it until u hit a blocker you absolutly cannot bypass without me...
+   then you need to run the command that speaks to me in my speakers"*).
+   - See something to fix → fix it. See something that could be better → make
+     it better. Hit a problem → solve it. Asking first is a FAILURE, not
+     caution: he cannot read the screen, so a question is work he cannot do.
+   - The only permitted interruption is a genuine hard blocker — something
+     needing his hands, his credentials, or a decision only he can make.
+   - Then, and only then, run `world-sim/scripts/speak.py --blocked "<what and
+     why>"`. It speaks through his speakers via Windows SAPI (verified live
+     2026-11-18), logs every alert to `.scratch/speak.log`, and with
+     `--telegram` also pushes it, since he may be away from the machine.
+   - NOT for progress, summaries, or questions with a discoverable answer. A
+     blocker alert that is not a blocker trains him to ignore the one that is.
+
 ---
 
 ## WORKING STYLE (operational protocols)
 
+- **Sean is nearly blind and works by TTS. He cannot read a snippet, open a
+  file, or edit anything — so NEVER end a turn by handing him a step, a paste,
+  a path to change, or a question whose answer is discoverable. If it can be
+  done, DO IT, and report the OUTCOME.** Handing him output that expects his
+  hands reads to him as *"task done"*: he moves on, the task evaporates, and
+  nothing ever gets done — a loop he has described as a "fuck circle". He sits
+  two inches from a 50-inch TV at 300% zoom on 24pt text and still cannot see
+  it. Measured 2026-11-18: two consecutive turns asked him to paste a JSON
+  block into his own OpenCode config; the fix was four lines and took under a
+  minute to do directly. He had to spell out, in pain, that this is the
+  failure. Do not make him do it again.
+- **Standing rule 6 protects tooling from an accidental edit; it is NOT a
+  reason to send work back to Sean.** For things outside the repo (OpenCode
+  configs, workstation settings), the correct move is: back up, make the
+  minimal change, validate it, and state what changed — then tell him the
+  outcome, not the procedure. He has confirmed this directly.
 - Call out friction **honestly**; don't smooth it over.
 - When Sean corrects precisely, **internalize and apply without
   re-litigating** (e.g. the CRLF correction: keep the check, run it once).
