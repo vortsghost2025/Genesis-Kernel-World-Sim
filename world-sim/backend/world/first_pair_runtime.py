@@ -5172,11 +5172,39 @@ class FirstPairRuntime:
                     existing_obj.get("object_type", "object")
                     if isinstance(existing_obj, dict) else "object"
                 )
+                # Phase 10TG: name the remedy. Measured 2026-11-20: west_adam
+                # spent two heartbeats on "Duplicate object_id: hall_eve_001
+                # (existing: hall on cont_b_gen_27_58)" -- he had copied his
+                # partner's id, and the hall was already FINISHED, so there was
+                # nothing to advance and nothing told him what to do instead.
+                # The three situations need different answers.
+                stage = (str(existing_obj.get("construction_stage") or "")
+                         if isinstance(existing_obj, dict) else "")
+                creator = (existing_obj.get("creator_agent_id")
+                           if isinstance(existing_obj, dict) else None)
+                is_project = bool(existing_obj.get("construction_project")) \
+                    if isinstance(existing_obj, dict) else False
+                if not is_project or stage == "finished":
+                    remedy = (
+                        f"{object_id} is already a finished {existing_type} on "
+                        f"{existing_tile}, so there is nothing left to build "
+                        f"there. To raise something NEW, choose a new object_id.")
+                elif creator and creator != view["agent_id"]:
+                    remedy = (
+                        f"{object_id} is your partner's {existing_type}, still "
+                        f"under construction on {existing_tile}; only its builder "
+                        f"can advance it. To start your own, choose a new "
+                        f"object_id.")
+                else:
+                    remedy = (
+                        f"{object_id} already exists on {existing_tile} "
+                        f"({existing_type}). Choose a new object_id to build "
+                        f"something else.")
                 return {
                     "status": "rejected",
                     "reason": (
                         f"Duplicate object_id: {object_id} "
-                        f"(existing: {existing_type} on {existing_tile})"
+                        f"(existing: {existing_type} on {existing_tile}). {remedy}"
                     ),
                 }
             if structural_build:
