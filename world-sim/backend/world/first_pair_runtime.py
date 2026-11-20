@@ -429,6 +429,25 @@ _STRUCTURE_RUNGS = {
         "rung": 6, "weight": 2, "floor": {"timber": 2, "stone": 8, "clay": 6},
         "effects": "holds fresh water for the home; a filled cistern makes its tile drinkable",
     },
+    # Phase 10TC: the ladder USED to stop at the cistern, and measured
+    # 2026-11-19 that left a finished homestead with nothing left to want. Both
+    # lanes reached rung 6, stocked the store full, and then sat still -- west
+    # idled 88% of 500 heartbeats, and west_eve's own memory says why, every
+    # heartbeat: "no_action. Homestead fully supplied". A ladder that ends is a
+    # world that ends. `hall` and `stead` were named in the ladder's own design
+    # from the start and never built; this builds them.
+    "hall": {
+        "rung": 7, "weight": 5,
+        "floor": {"timber": 12, "stone": 14, "wood": 8},
+        "effects": ("the settlement's seat: the home banks more water and holds "
+                    "a second hearth"),
+    },
+    "stead": {
+        "rung": 8, "weight": 6,
+        "floor": {"timber": 16, "stone": 20, "wood": 12, "clay": 8},
+        "effects": ("a complete steading: the largest water store and the "
+                    "strongest warmth a home can hold"),
+    },
 }
 
 # Dwellings already in the live lanes. Mapped to their rung so existing objects
@@ -597,7 +616,7 @@ _CISTERN_WATER_CAPACITY = 20
 # than nothing: a dwelling that holds water was ALREADY drinkable at its tile
 # (10QJ generalised _cistern_on_tile to any object holding fresh_water), so
 # this must remove no capability -- it gives the capacity a name and a ladder.
-_WATER_STORE_BY_RUNG = {1: 3, 2: 6, 3: 10, 4: 14, 5: 18, 6: 20}
+_WATER_STORE_BY_RUNG = {1: 3, 2: 6, 3: 10, 4: 14, 5: 18, 6: 20, 7: 24, 8: 28}
 
 # Phase 10QC: roofed tiles past this many stop adding warmth. The operator
 # has been rejecting the "15 single houses beside each other" settlement
@@ -614,7 +633,7 @@ _FOOTPRINT_SATURATION = 12
 #   house   3 + 7 = 10   longhouse 4 + 11 = 15
 # One house (tier weight 10, comfort floor 75) clears seven lean-tos
 # (7 units, floor 68), which is the whole point of the change.
-_RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
+_RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13, 7: 16, 8: 19}
 
 # Phase 10QU: the WARMTH ladder is keyed to what a home IS -- its best rung --
 # not to how many tiles it covers. Maps a rung onto a row of the unchanged
@@ -626,7 +645,7 @@ _RUNG_TIER_BONUS = {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
 # 45.0) was already 25 points above FREEZE_THRESHOLD (20) -- survival stopped
 # being a reason to build anything better. Size still buys SPACE (cellar food
 # capacity, tier weight, rooms); quality now buys WARMTH and RECOVERY.
-_THERMAL_TIER_BY_RUNG = {1: 1, 2: 2, 3: 3, 4: 5, 5: 8, 6: 12}
+_THERMAL_TIER_BY_RUNG = {1: 1, 2: 2, 3: 3, 4: 5, 5: 8, 6: 12, 7: 18, 8: 26}
 
 
 def _home_tier_weight(footprint: int, best_rung: int) -> int:

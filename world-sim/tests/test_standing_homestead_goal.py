@@ -32,6 +32,7 @@ from backend.world.first_pair_persistence import (  # noqa: E402
 )
 from backend.world.first_pair_runtime import (  # noqa: E402
     _STRUCTURE_RUNGS,
+    _WATER_STORE_BY_RUNG,
     FirstPairRuntime,
 )
 
@@ -105,58 +106,58 @@ def test_the_top_of_the_ladder_gets_a_SUPPLY_objective_instead_of_nothing(tmp_pa
     261 of 434 heartbeats -- 57 in a row, BOTH agents. A finished ladder must not
     mean a finished agent."""
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)                  # best rung 6 = topped
+    _top_dwell(rt)
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
     assert made is not None, "topping out must not leave the agent with nothing"
     assert made.goal_id == "world-standing-homestead-supplied"
-    assert "water store holds 0 of 20" in made.description, made.description
+    assert f"water store holds 0 of {_cap(_top_rung())}" in made.description, \
+        made.description
     assert "Carry fresh_water home" in made.description
 
 
 def test_the_supply_objective_states_the_measured_store(tmp_path):
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)
-    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
+    _top_dwell(rt)
+    rt._world_state.public_objects[f"{_top_type()}-{HERE}"]["contents"] = {
         "fresh_water": 7}
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
-    assert "holds 7 of 20" in made.description, made.description
+    assert f"holds 7 of {_cap(_top_rung())}" in made.description, made.description
 
 
 def test_a_full_store_is_stated_as_full(tmp_path):
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)
-    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
-        "fresh_water": 20}
+    _top_dwell(rt)
+    rt._world_state.public_objects[f"{_top_type()}-{HERE}"]["contents"] = {
+        "fresh_water": _cap(_top_rung())}
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
     assert "is FULL" in made.description, made.description
 
 
 def test_a_cisterns_water_is_reported_SEPARATELY_not_as_the_home_store(tmp_path):
     """A cistern keeps its OWN store. Mixing it in would let a home with a full
-    cistern read as 'the home store is 0 of 20' -- a false statement of exactly
+    cistern read as 'the home store is empty' -- a false statement of exactly
     the kind this world keeps having to unlearn."""
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "cistern", top)
-    rt._world_state.public_objects["cistern-cont_a_gen_0_0"]["contents"] = {
-        "fresh_water": 20}
+    _top_dwell(rt)
+    rt._world_state.public_objects[f"cistern-{HERE}"] = {
+        "object_id": f"cistern-{HERE}", "object_type": "cistern",
+        "tile_id": HERE, "contents": {"fresh_water": 20},
+        "materials": {}, "structure_rung": 6,
+        "construction_stage": "finished", "construction_progress": 4,
+    }
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
-    assert "holds 0 of 20" in made.description, made.description
+    assert f"holds 0 of {_cap(_top_rung())}" in made.description, made.description
     assert "the cistern holds 20" in made.description, made.description
 
 
 def test_held_is_capped_at_capacity_because_a_deposit_past_it_is_refused(tmp_path):
     """The number shown must match what a deposit would actually accept."""
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)
-    rt._world_state.public_objects["longhouse-cont_a_gen_0_0"]["contents"] = {
+    _top_dwell(rt)
+    rt._world_state.public_objects[f"{_top_type()}-{HERE}"]["contents"] = {
         "fresh_water": 999}
     state = rt._home_water_state_for(HERE)
-    assert state["held"] == state["capacity"] == 20, state
+    assert state["held"] == state["capacity"] == _cap(_top_rung()), state
 
 
 def test_a_non_dwelling_does_not_add_a_water_store(tmp_path):
@@ -167,8 +168,7 @@ def test_a_non_dwelling_does_not_add_a_water_store(tmp_path):
 
 def test_the_supply_objective_is_idempotent(tmp_path):
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)
+    _top_dwell(rt)
     assert rt._ensure_standing_homestead_goal("east_adam", 100) is not None
     assert rt._ensure_standing_homestead_goal("east_adam", 101) is None
     assert len(_standing(rt)) == 1
@@ -176,8 +176,7 @@ def test_the_supply_objective_is_idempotent(tmp_path):
 
 def test_the_model_may_not_edit_the_supply_objective(tmp_path):
     rt = _runtime(tmp_path)
-    top = max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
-    _dwell(rt, HERE, "longhouse", top)
+    _top_dwell(rt)
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
     agent_id = str(rt._agent_view("east_adam")["agent_id"])
     before = (made.status, made.description)
@@ -253,6 +252,26 @@ def _standing_active(rt, agent="east_adam"):
             if g.agent_id == agent_id
             and rt._is_standing_goal(g.goal_id)
             and str(getattr(g, "status", "")) in ("active", "in_progress")]
+
+
+def _top_rung() -> int:
+    return max(rec["rung"] for rec in _STRUCTURE_RUNGS.values())
+
+
+def _top_type() -> str:
+    return next(n for n, rec in _STRUCTURE_RUNGS.items()
+                if rec["rung"] == _top_rung())
+
+
+def _cap(rung: int) -> int:
+    """The home water store at a rung. Derived, not hardcoded: 10TC raised the
+    ladder to rung 8 and every literal '20' in these tests silently became a
+    lie about the world."""
+    return _WATER_STORE_BY_RUNG[rung]
+
+
+def _top_dwell(rt) -> None:
+    _dwell(rt, HERE, _top_type(), _top_rung())
 
 
 def test_a_stale_rung_is_closed_even_when_it_sits_AFTER_the_current_one(tmp_path):

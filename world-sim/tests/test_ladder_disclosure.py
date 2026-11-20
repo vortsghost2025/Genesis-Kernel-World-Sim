@@ -63,7 +63,7 @@ def test_every_rung_discloses_the_floor_the_physics_uses():
 def test_the_floors_rise_with_the_rung_so_climbing_is_worth_something():
     floors = [_disclosed_floors(TEXT)[name] for name in _STRUCTURE_RUNGS]
     assert floors == sorted(floors) and len(set(floors)) == len(floors), floors
-    assert floors[0] == 45.0 and floors[-1] == 80.0, floors
+    assert floors[0] == 45.0 and floors[-1] == 88.0, floors
 
 
 # --- and the sentence that had become a lie ---------------------------------

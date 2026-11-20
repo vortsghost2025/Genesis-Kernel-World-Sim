@@ -223,5 +223,5 @@ def test_a_home_holding_water_makes_its_tile_drinkable(tmp_path):
 def test_the_pinned_tier_and_bonus_tables_are_untouched():
     assert _HOME_NETWORK_TIERS[0] == (1, 45.0, 0.45, 1.00, 0.40, 0.10)
     assert _HOME_NETWORK_TIERS[-1] == (36, 92.0, 0.06, 2.80, 1.70, 0.30)
-    assert set(_THERMAL_TIER_BY_RUNG) == {1, 2, 3, 4, 5, 6}
+    assert set(_THERMAL_TIER_BY_RUNG) == {1, 2, 3, 4, 5, 6, 7, 8}
     assert max(_THERMAL_TIER_BY_RUNG.values()) <= _HOME_NETWORK_TIERS[-1][0]

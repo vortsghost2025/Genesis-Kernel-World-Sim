@@ -126,10 +126,17 @@ def test_cistern_is_rung_six_with_its_floor_and_bonus():
 
 
 def test_the_previous_rungs_are_untouched():
-    """10QF adds a rung; it must not reprice the five that exist."""
-    assert _RUNG_TIER_BONUS == {1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
+    """10QF adds a rung; it must not reprice the five that exist.
+
+    10TC added rungs 7 and 8 for the same reason, so this now pins the SIX
+    original values rather than the dict's size -- the point was never "the
+    table has exactly six entries", it was "adding one must not reprice them".
+    """
+    assert {k: _RUNG_TIER_BONUS[k] for k in range(1, 7)} == {
+        1: 0, 2: 2, 3: 4, 4: 7, 5: 11, 6: 13}
     assert _STRUCTURE_RUNGS["house"]["floor"] == {"timber": 4, "stone": 6, "clay": 4}
     assert _STRUCTURE_RUNGS["longhouse"]["floor"] == {"timber": 8, "stone": 10, "wood": 6}
+    assert _STRUCTURE_RUNGS["cistern"]["floor"] == {"timber": 2, "stone": 8, "clay": 6}
 
 
 def test_a_cistern_is_built_through_the_staged_path(tmp_path):
