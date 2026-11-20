@@ -2272,6 +2272,38 @@ class FirstPairRuntime:
                 or gid.startswith(cls._STANDING_SUPPLY_PREFIX)
                 or gid.startswith(cls._STANDING_SURVEY_PREFIX))
 
+    def _home_site_for(self, agent_ref: str) -> tuple[str, int]:
+        """The agent's OWN best home: (tile_id, best_rung) across all they built.
+
+        Phase 10TM. The homestead objectives were computed from the tile the agent
+        happened to be STANDING on, so an agent who walked away from home was told
+        to raise a rung where they stood. Measured 2026-11-20: east_adam, owner of
+        a finished `stead` (rung 8), was carrying "raise the home's best structure
+        rung to 2 (hut)" while out surveying, and west_adam the same at rung 3.
+        That is contradictory with the survey objective it sits beside, it points
+        the agent at the wrong place, and it is the mechanism by which shacks
+        scatter across the map.
+        """
+        view = self._agent_view(agent_ref)
+        agent_id = str(view.get("agent_id") or agent_ref)
+        best_tile, best_rung = "", 0
+        seen: set[str] = set()
+        for _oid, rec in (self._world_state.public_objects or {}).items():
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("creator_agent_id") != agent_id:
+                continue
+            if self._record_rung(rec) < 1:
+                continue
+            tile = str(rec.get("tile_id") or "")
+            if not tile or tile in seen:
+                continue
+            seen.add(tile)
+            _fp, rung, _ids = self._home_network_detail(tile)
+            if int(rung or 0) > best_rung:
+                best_rung, best_tile = int(rung), tile
+        return best_tile, best_rung
+
     def _survey_target_for(self, agent_ref: str, position: str) -> dict:
         """The nearest tile beside ground this agent knows but has never seen.
 
@@ -2300,9 +2332,16 @@ class FirstPairRuntime:
         pos_xy = self._tile_xy(str(position or ""))
         if pos_xy is None:
             return {}
+        # The continents SHARE a coordinate space, so a plain (x, y) index lets a
+        # cont_b tile answer for a cont_a agent -- measured 2026-11-20, an agent
+        # standing on cont_a_gen_-41_6 was told to survey cont_b_gen_-41_6, which
+        # is not a tile away from them, it is another world.
+        here = self._tile_continent(str(position or ""))
         index: dict[tuple[int, int], dict] = {}
         for rec in (true_map.get("tiles") or []):
             if not isinstance(rec, dict):
+                continue
+            if str(rec.get("continent_id") or "") != here:
                 continue
             coords = rec.get("coordinates") or {}
             x, y = coords.get("x"), coords.get("y")
@@ -2417,7 +2456,14 @@ class FirstPairRuntime:
         position = (self._world_state.tile_occupancy or {}).get(agent_ref)
         if not position:
             return None
-        _fp, best_rung, _ids = self._home_network_detail(str(position))
+        # Phase 10TM: the objectives are about the agent's HOME, wherever it is --
+        # not about the tile their feet are on. Only when they own nothing yet
+        # does the tile they stand on define the first build.
+        home_tile, home_rung = self._home_site_for(agent_ref)
+        if not home_tile:
+            home_tile = str(position)
+            _fp, home_rung, _ids = self._home_network_detail(str(position))
+        _fp, best_rung, _ids = self._home_network_detail(str(home_tile))
         best_rung = max(1, int(best_rung or 1))
         wanted = best_rung + 1
         type_name = next(
@@ -2425,9 +2471,10 @@ class FirstPairRuntime:
              if rec["rung"] == wanted), None)
         goal_id = (f"{self._STANDING_HOMESTEAD_PREFIX}-{wanted}"
                    if type_name is not None else None)
+        at_home = "" if str(home_tile) == str(position) else f" at {home_tile}"
         canonical = (
-            f"Raise the home's best structure rung to {wanted} ({type_name}): "
-            f"warmth holds near "
+            f"Raise the home's best structure rung to {wanted} ({type_name})"
+            f"{at_home}: warmth holds near "
             f"{_home_network_tier(_home_thermal_index(wanted))[0]:g} inside it"
         ) if type_name is not None else None
         if type_name is None:
@@ -2438,7 +2485,7 @@ class FirstPairRuntime:
             # agents stood still for 261 of 434 heartbeats, 57 in a row. A
             # finished ladder must not mean a finished agent. The store is
             # measurable, and the ladder already pays for filling it.
-            store = self._home_water_state_for(str(position))
+            store = self._home_water_state_for(str(home_tile))
             if store:
                 filled = store["held"] >= store["capacity"]
                 if filled:

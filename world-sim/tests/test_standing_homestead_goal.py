@@ -51,13 +51,55 @@ def _runtime(tmp_path: Path) -> FirstPairRuntime:
     return rt
 
 
-def _dwell(rt: FirstPairRuntime, tile: str, kind: str, rung: int) -> None:
+def _dwell(rt: FirstPairRuntime, tile: str, kind: str, rung: int,
+           owner: str | None = None) -> None:
     obj_id = f"{kind}-{tile}"
-    rt._world_state.public_objects[obj_id] = {
+    rec = {
         "object_id": obj_id, "object_type": kind, "tile_id": tile,
         "materials": {}, "contents": {}, "structure_rung": rung,
         "construction_stage": "finished", "construction_progress": 4,
     }
+    if owner:
+        rec["creator_agent_id"] = str(rt._agent_view(owner)["agent_id"])
+    rt._world_state.public_objects[obj_id] = rec
+
+
+def test_the_objective_follows_the_agents_HOME_not_the_tile_they_stand_on(tmp_path):
+    """Phase 10TM. Measured 2026-11-20: east_adam, owner of a finished `stead`
+    (rung 8), was carrying "raise the home's best structure rung to 2 (hut)"
+    while out surveying -- the objective was read off the tile his feet were on,
+    which is both wrong and the mechanism that scatters shacks."""
+    rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
+    away = "cont_a_gen_7_7"
+    rt._world_state.tile_occupancy["east_adam"] = away
+    _dwell(rt, HERE, "stead", _top_rung(), owner="east_adam")
+    rt._world_state.public_objects[f"stead-{HERE}"]["contents"] = {
+        "fresh_water": _cap(_top_rung())}
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None
+    assert "rung to 2" not in made.description, made.description
+    assert made.goal_id == "world-standing-homestead-survey", made.goal_id
+
+
+def test_a_distant_agent_is_told_WHERE_its_home_is(tmp_path):
+    """When the home is not under their feet, the rung objective must say where."""
+    rt = _runtime(tmp_path)
+    away = "cont_a_gen_7_7"
+    rt._world_state.tile_occupancy["east_adam"] = away
+    _dwell(rt, HERE, "cabin", 3, owner="east_adam")       # home rung 3 -> want 4
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None and "house" in made.description, made.description
+    assert f"at {HERE}" in made.description, made.description
+
+
+def test_an_agent_who_owns_nothing_still_builds_where_they_stand(tmp_path):
+    """The fallback: with no home at all, the tile under them is the site."""
+    rt = _runtime(tmp_path)
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None
+    assert "at " not in made.description, made.description
 
 
 def _standing(rt: FirstPairRuntime, agent: str = "east_adam") -> list:
@@ -295,6 +337,32 @@ def test_the_survey_objective_is_model_proof(tmp_path):
         "goal_id": "world-standing-homestead-survey", "agent_id": agent_id,
         "description": "gather berries", "status": "completed"}], 101)
     assert (made.status, made.description) == before
+
+
+def test_the_survey_target_is_on_the_agents_OWN_continent(tmp_path):
+    """The continents share a coordinate space, so a plain (x,y) index lets a
+    cont_b tile answer for a cont_a agent -- measured 2026-11-20, an agent on
+    cont_a_gen_-41_6 was told to survey cont_b_gen_-41_6, another world."""
+    rt = _runtime(tmp_path)
+    root = _fake_world(tmp_path)
+    # a twin of every cont_a tile, same coordinates, other continent
+    p = root / "world" / "true_map.json"
+    tm = json.loads(p.read_text(encoding="utf-8"))
+    for t in list(tm["tiles"]):
+        tm["tiles"].append({**t, "tile_id": t["tile_id"].replace("cont_a", "cont_b"),
+                            "continent_id": "cont_b",
+                            "region_id": "cont_b_plains"})
+    tm["continents"].append({"continent_id": "cont_b", "name": "Other"})
+    tm["regions"].append({"region_id": "cont_b_plains", "continent_id": "cont_b",
+                          "name": "Plains"})
+    p.write_text(json.dumps(tm), encoding="utf-8")
+    rt._get_data_root = lambda: root
+    _topped_and_full(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None and made.goal_id == "world-standing-homestead-survey"
+    assert "cont_b" not in made.description, made.description
+    assert "cont_a" in made.description, made.description
 
 
 def test_a_non_dwelling_does_not_add_a_water_store(tmp_path):
