@@ -171,24 +171,35 @@ def _known(rt, agent_ref: str, tiles: dict) -> None:
     }), encoding="utf-8")
 
 
-def _a_land_tile() -> str:
-    """A real tile from the true map that has a non-ocean neighbour."""
-    from backend.world.first_pair_fog_adapter import load_true_map
-    tm = load_true_map(WORLD_SIM / "data")
-    index = {}
-    for rec in (tm.get("tiles") or []):
-        c = rec.get("coordinates") or {}
-        if isinstance(c.get("x"), int):
-            index[(c["x"], c["y"])] = rec
-    for (x, y), rec in index.items():
-        if str(rec.get("terrain", "")).lower() == "ocean":
-            continue
-        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-            n = index.get((nx, ny))
-            if n and str(n.get("terrain", "")).lower() != "ocean" \
-                    and not n.get("blocks_travel"):
-                return str(rec["tile_id"])
-    raise AssertionError("no land tile with a land neighbour found")
+def _fake_world(tmp_path: Path) -> Path:
+    """A synthetic true map.
+
+    CI has no `data/world/true_map.json` -- it is gitignored and lives only on
+    this machine -- so a test that reads the real one fails there and would have
+    shipped a broken build. The survey path is exercised against this instead.
+    """
+    root = tmp_path / "data"
+    (root / "world").mkdir(parents=True, exist_ok=True)
+    tiles = []
+    for x in range(-2, 3):
+        for y in range(-2, 3):
+            tiles.append({
+                "tile_id": f"cont_a_gen_{x}_{y}", "continent_id": "cont_a",
+                "region_id": "cont_a_plains", "coordinates": {"x": x, "y": y},
+                "terrain": "grassland", "biome": "grassland",
+                "resources": [], "hazards": [], "landmark_ids": [],
+                "blocks_travel": False,
+            })
+    (root / "world" / "true_map.json").write_text(json.dumps({
+        "schema_version": 1, "world_id": "test", "seed": 1,
+        "continents": [{"continent_id": "cont_a", "name": "Testland"}],
+        "regions": [{"region_id": "cont_a_plains", "continent_id": "cont_a",
+                     "name": "Plains"}],
+        "tiles": tiles,
+        "landmarks": [], "resources": {}, "hazards": [], "mysteries": [],
+        "travel_edges": [],
+    }), encoding="utf-8")
+    return root
 
 
 def _topped_and_full(rt) -> None:
@@ -203,6 +214,7 @@ def test_a_topped_out_AND_supplied_home_is_asked_to_SURVEY(tmp_path):
     idling returned -- the same terminal-goal shape, one rung higher. The answer
     is a purpose that cannot complete."""
     rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
     _topped_and_full(rt)
     _known(rt, "east_adam", {HERE: {"observed_resources": []}})
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
@@ -214,18 +226,34 @@ def test_a_topped_out_AND_supplied_home_is_asked_to_SURVEY(tmp_path):
 
 def test_the_survey_target_is_ground_beside_what_they_know(tmp_path):
     rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
     _topped_and_full(rt)
-    home = _a_land_tile()
-    _known(rt, "east_adam", {home: {"observed_resources": []}})
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
     assert made is not None and made.goal_id == "world-standing-homestead-survey"
-    # the named tile must NOT be one they already know
-    assert home not in made.description
+    # the named tile must be a NEIGHBOUR of known ground, never the known tile
+    assert HERE not in made.description, made.description
+    assert "cont_a_gen_" in made.description
+
+
+def test_a_frontier_is_not_named_twice_for_the_same_agent(tmp_path):
+    """It names an unseen tile, so the same agent keeps the same objective until
+    they have walked it -- idempotent by goal id, not by re-picking."""
+    rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
+    _topped_and_full(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    first = rt._ensure_standing_homestead_goal("east_adam", 100)
+    second = rt._ensure_standing_homestead_goal("east_adam", 101)
+    assert second is None
+    assert len(_standing(rt)) == 1
+    assert first.goal_id == "world-standing-homestead-survey"
 
 
 def test_with_no_known_ground_it_falls_back_to_the_supply_objective(tmp_path):
     """No frontier means no survey: the world must not invent one."""
     rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
     _topped_and_full(rt)
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
     assert made is not None
@@ -233,8 +261,21 @@ def test_with_no_known_ground_it_falls_back_to_the_supply_objective(tmp_path):
     assert "is FULL" in made.description
 
 
+def test_a_missing_true_map_falls_back_instead_of_crashing(tmp_path):
+    """CI has no true map at all. That must degrade to the supply objective, not
+    raise -- which is exactly what made the first version of these tests fail."""
+    rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: tmp_path / "nowhere"
+    _topped_and_full(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None
+    assert made.goal_id == "world-standing-homestead-supplied", made.goal_id
+
+
 def test_a_store_that_is_not_full_still_asks_for_water(tmp_path):
     rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
     _top_dwell(rt)
     _known(rt, "east_adam", {HERE: {"observed_resources": []}})
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
@@ -242,13 +283,12 @@ def test_a_store_that_is_not_full_still_asks_for_water(tmp_path):
     assert "Carry fresh_water home" in made.description
 
 
-def test_the_survey_objective_is_idempotent_and_model_proof(tmp_path):
+def test_the_survey_objective_is_model_proof(tmp_path):
     rt = _runtime(tmp_path)
+    rt._get_data_root = lambda: _fake_world(tmp_path)
     _topped_and_full(rt)
     _known(rt, "east_adam", {HERE: {"observed_resources": []}})
     made = rt._ensure_standing_homestead_goal("east_adam", 100)
-    assert rt._ensure_standing_homestead_goal("east_adam", 101) is None
-    assert len(_standing(rt)) == 1
     agent_id = str(rt._agent_view("east_adam")["agent_id"])
     before = (made.status, made.description)
     rt._apply_model_goal_updates([{
