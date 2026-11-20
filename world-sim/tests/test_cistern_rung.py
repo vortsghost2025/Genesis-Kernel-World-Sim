@@ -87,6 +87,58 @@ def _stock(rt, **amounts):
         add_to_inventory(rt._store, "east_adam", kind, amount)
 
 
+def _deposit(rt, obj_id, **materials):
+    return rt._execute_action("east_adam", {
+        "action_type": "use_object", "target_object_id": obj_id,
+        "operation": "deposit", "materials": materials}, 200)
+
+
+def _box(rt, obj_id: str = "crate-1", tile: str = TILE) -> str:
+    rt._world_state.public_objects[obj_id] = {
+        "object_id": obj_id, "object_type": "storage_box", "tile_id": tile,
+        "materials": {}, "contents": {},
+    }
+    return obj_id
+
+
+# --- Phase 10TE: an ordinary container cannot hold a lake -------------------
+
+def test_a_plain_container_caps_its_water(tmp_path):
+    """Measured 2026-11-19: west_eve carried 4,756 fresh_water, gathered only 15
+    times in her life, and EXTRACTED the rest from a container with no ceiling.
+    'Carry water home' had a bypass: stuff it in a crate."""
+    from backend.world.first_pair_runtime import _CONTAINER_WATER_CAPACITY as CAP
+    rt = _runtime(tmp_path)
+    obj_id = _box(rt)
+    _stock(rt, fresh_water=CAP + 10)
+
+    assert _deposit(rt, obj_id, fresh_water=CAP)["status"] == "success"
+    over = _deposit(rt, obj_id, fresh_water=1)
+    assert over["status"] == "rejected", over
+    assert str(CAP) in over["reason"]
+    assert rt._world_state.public_objects[obj_id]["contents"]["fresh_water"] == CAP
+
+
+def test_a_cistern_keeps_its_own_capacity_not_the_container_one(tmp_path):
+    """The container rule must not claw capability back from a cistern."""
+    rt = _runtime(tmp_path)
+    _stock(rt, timber=8, stone=12, clay=10, fresh_water=40)
+    _build(rt, "c1", "cistern", TILE, timber=2, stone=8, clay=6)
+    _finish(rt, "c1", "cistern", TILE, timber=2, stone=8, clay=6)
+    assert _deposit(rt, "c1", fresh_water=_CISTERN_WATER_CAPACITY)["status"] == "success"
+
+
+def test_a_container_may_still_hold_a_build_stash(tmp_path):
+    """The cap is on WATER. Materials for a build must still pool in a container,
+    or the homestead pool loses its store and builds get harder."""
+    rt = _runtime(tmp_path)
+    obj_id = _box(rt)
+    _stock(rt, stone=60, timber=40)
+    assert _deposit(rt, obj_id, stone=60)["status"] == "success"
+    assert rt._world_state.public_objects[obj_id]["contents"]["stone"] == 60
+    assert _deposit(rt, obj_id, timber=40)["status"] == "success"
+
+
 def _built_cistern(rt, tile=TILE):
     _stock(rt, timber=8, stone=12, clay=10)
     assert _build(rt, "cistern-1", "cistern", tile,

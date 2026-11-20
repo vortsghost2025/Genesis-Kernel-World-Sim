@@ -610,6 +610,12 @@ _CELLAR_FOOD_BUDGET_PER_FOOTPRINT = 20
 # world whose capacity is measured in units someone carried home.
 _CISTERN_WATER_CAPACITY = 20
 
+# Phase 10TE: what an ordinary container holds. The world measured water in a
+# cistern (20), in a home (by rung), and food in a cellar (20 per footprint) --
+# and left a plain box unbounded, so "carry water home" had a bypass: stuff it
+# in a crate. Same unit as everything else.
+_CONTAINER_WATER_CAPACITY = 20
+
 # Phase 10QU: what a HOME can bank, keyed to its best rung. Mirrors the cellar's
 # food budget. The cistern keeps its own 20 constant above, so the rung-6
 # cistern remains the best store in the world. A lean-to holds a little rather
@@ -5879,6 +5885,28 @@ class FirstPairRuntime:
                             f"This home stores up to {water_store} units of fresh "
                             f"water and already holds {current_water}. A better "
                             f"home stores more."
+                        ),
+                    }
+            # Phase 10TE: an ordinary container has a capacity too. Measured
+            # 2026-11-19: west_eve was carrying 4,756 fresh_water having gathered
+            # water only 15 times in her life -- she had EXTRACTED it, 608
+            # extracts deep, from a container with no ceiling. The world capped
+            # the water in a cistern (20), in a home (by rung) and the food in a
+            # cellar (20 per footprint) and then let a plain box hold a lake, so
+            # "carry it home" had a bypass: stuff it in a crate. A container that
+            # is none of those holds the world's unit -- 20 -- like everything
+            # else measured in units someone carried.
+            elif not self._record_shelters(obj):
+                current_water = int((obj.get("contents") or {}).get("fresh_water", 0) or 0)
+                incoming_water = int(materials.get("fresh_water", 0) or 0)
+                if incoming_water and current_water + incoming_water > _CONTAINER_WATER_CAPACITY:
+                    return {
+                        "status": "rejected",
+                        "reason": (
+                            f"{obj_id} holds up to {_CONTAINER_WATER_CAPACITY} "
+                            f"units of fresh_water and already holds "
+                            f"{current_water}. A cistern or a home store holds "
+                            f"more."
                         ),
                     }
             # All checks pass; move the materials via the persistence layer
