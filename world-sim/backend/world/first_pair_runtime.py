@@ -2256,18 +2256,77 @@ class FirstPairRuntime:
     _STANDING_HOMESTEAD_PREFIX = "world-standing-homestead-rung"
     # Phase 10SZ: the objective for a home whose ladder is TOPPED OUT.
     _STANDING_SUPPLY_PREFIX = "world-standing-homestead-supplied"
+    # Phase 10TI: and the objective for a home that is topped out AND supplied.
+    _STANDING_SURVEY_PREFIX = "world-standing-homestead-survey"
 
     @classmethod
     def _is_standing_goal(cls, goal_id) -> bool:
         """True for any objective the WORLD owns on the homestead ladder.
 
-        Both prefixes must be covered wherever standing goals are protected:
-        one guard that matched only the rung prefix would let the model rewrite
-        the supply objective the same way it rewrote a rung (10SV).
+        Every prefix must be covered wherever standing goals are protected: a
+        guard that matched only one would let the model rewrite the others the
+        same way it rewrote a rung (10SV).
         """
         gid = str(goal_id or "")
-        return gid.startswith(cls._STANDING_HOMESTEAD_PREFIX) or \
-            gid.startswith(cls._STANDING_SUPPLY_PREFIX)
+        return (gid.startswith(cls._STANDING_HOMESTEAD_PREFIX)
+                or gid.startswith(cls._STANDING_SUPPLY_PREFIX)
+                or gid.startswith(cls._STANDING_SURVEY_PREFIX))
+
+    def _survey_target_for(self, agent_ref: str, position: str) -> dict:
+        """The nearest tile beside ground this agent knows but has never seen.
+
+        Phase 10TI. Measured 2026-11-20: west topped the ladder (a finished
+        `stead`, rung 8) AND filled the store (28 of 28), so the standing
+        objective had nothing left to ask and the idling came back -- the SAME
+        terminal-goal shape as the rung-6 top before it, one rung higher. Patching
+        that shape rung by rung is how the ladder reached eight; the real answer
+        is a purpose that cannot complete. East keeps moving partly because it
+        carries a survey goal of its own, so the world should be able to ask for
+        one.
+
+        Derived from the agent's OWN visited tiles plus the tile graph: a frontier
+        is ground ADJACENT to somewhere they have walked -- ground whose edge they
+        can already see. No true-map knowledge of place or content is used, only
+        which adjacent tile ids exist.
+        """
+        try:
+            known = load_known_map(self._store.root, agent_ref) or {}
+            true_map = load_true_map(self._get_data_root())
+        except Exception:
+            return {}
+        known_tiles = known.get("known_tiles") or {}
+        if not known_tiles:
+            return {}
+        pos_xy = self._tile_xy(str(position or ""))
+        if pos_xy is None:
+            return {}
+        index: dict[tuple[int, int], dict] = {}
+        for rec in (true_map.get("tiles") or []):
+            if not isinstance(rec, dict):
+                continue
+            coords = rec.get("coordinates") or {}
+            x, y = coords.get("x"), coords.get("y")
+            if isinstance(x, int) and isinstance(y, int):
+                index[(x, y)] = rec
+        best: dict = {}
+        for tid in known_tiles:
+            xy = self._tile_xy(str(tid))
+            if xy is None:
+                continue
+            for nx, ny in ((xy[0] + 1, xy[1]), (xy[0] - 1, xy[1]),
+                           (xy[0], xy[1] + 1), (xy[0], xy[1] - 1)):
+                rec = index.get((nx, ny))
+                if rec is None or rec.get("blocks_travel"):
+                    continue
+                nid = str(rec.get("tile_id") or "")
+                if not nid or nid in known_tiles:
+                    continue
+                if str(rec.get("terrain", "")).lower() == "ocean":
+                    continue
+                dist = max(abs(nx - pos_xy[0]), abs(ny - pos_xy[1]))
+                if not best or dist < best["distance"]:
+                    best = {"tile_id": nid, "distance": int(dist)}
+        return best
 
     def _home_water_state_for(self, tile_id: str) -> dict:
         """How full the home's water store is: {"held", "capacity", "cistern"}, or {}.
@@ -2381,20 +2440,38 @@ class FirstPairRuntime:
             # measurable, and the ladder already pays for filling it.
             store = self._home_water_state_for(str(position))
             if store:
-                goal_id = self._STANDING_SUPPLY_PREFIX
                 filled = store["held"] >= store["capacity"]
-                cistern_note = (
-                    f", and the cistern holds {store['cistern']}"
-                    if store.get("cistern") else "")
-                canonical = (
-                    f"Keep the homestead supplied. Its water store holds "
-                    f"{store['held']} of {store['capacity']} units of fresh_water"
-                    + cistern_note
-                    + (" and is FULL -- keep it full, and keep food in the home"
-                       if filled else
-                       ". Carry fresh_water home and deposit it into the home "
-                       "until the store is full")
-                )
+                if filled:
+                    # Phase 10TI: topped out AND supplied. Both of the earlier
+                    # objectives have run out, which is the terminal-goal shape
+                    # that has been patched rung by rung. Ask for something that
+                    # cannot complete instead.
+                    survey = self._survey_target_for(agent_ref, str(position))
+                    if survey:
+                        goal_id = self._STANDING_SURVEY_PREFIX
+                        bearing = _compass_offset(
+                            str(position), survey["tile_id"],
+                            int(survey.get("distance", 0)))
+                        canonical = (
+                            f"Survey the ground beside what you know. "
+                            f"{survey['tile_id']} is "
+                            f"{bearing or str(int(survey.get('distance', 0))) + ' tiles away'} "
+                            f"and next to land you have walked, but you have "
+                            f"never seen it. Walk it and record what is there")
+                if goal_id is None:
+                    goal_id = self._STANDING_SUPPLY_PREFIX
+                    cistern_note = (
+                        f", and the cistern holds {store['cistern']}"
+                        if store.get("cistern") else "")
+                    canonical = (
+                        f"Keep the homestead supplied. Its water store holds "
+                        f"{store['held']} of {store['capacity']} units of fresh_water"
+                        + cistern_note
+                        + (" and is FULL -- keep it full, and keep food in the home"
+                           if filled else
+                           ". Carry fresh_water home and deposit it into the home "
+                           "until the store is full")
+                    )
 
         view = self._agent_view(agent_ref)
         agent_id = str(view.get("agent_id") or agent_ref)

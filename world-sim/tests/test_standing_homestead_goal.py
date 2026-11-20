@@ -19,6 +19,7 @@ the prompt: the record states the rung, the type and the payoff.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -158,6 +159,102 @@ def test_held_is_capped_at_capacity_because_a_deposit_past_it_is_refused(tmp_pat
         "fresh_water": 999}
     state = rt._home_water_state_for(HERE)
     assert state["held"] == state["capacity"] == _cap(_top_rung()), state
+
+
+def _known(rt, agent_ref: str, tiles: dict) -> None:
+    path = rt._store.root / f"known_map_{agent_ref}.json"
+    path.write_text(json.dumps({
+        "schema_version": 1, "agent_id": "x", "known_tiles": tiles,
+        "known_landmarks": {}, "named_places": {}, "routes": [],
+        "hypotheses": [], "myths": [], "contact_evidence": [],
+        "last_observation_tick": 1,
+    }), encoding="utf-8")
+
+
+def _a_land_tile() -> str:
+    """A real tile from the true map that has a non-ocean neighbour."""
+    from backend.world.first_pair_fog_adapter import load_true_map
+    tm = load_true_map(WORLD_SIM / "data")
+    index = {}
+    for rec in (tm.get("tiles") or []):
+        c = rec.get("coordinates") or {}
+        if isinstance(c.get("x"), int):
+            index[(c["x"], c["y"])] = rec
+    for (x, y), rec in index.items():
+        if str(rec.get("terrain", "")).lower() == "ocean":
+            continue
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            n = index.get((nx, ny))
+            if n and str(n.get("terrain", "")).lower() != "ocean" \
+                    and not n.get("blocks_travel"):
+                return str(rec["tile_id"])
+    raise AssertionError("no land tile with a land neighbour found")
+
+
+def _topped_and_full(rt) -> None:
+    _top_dwell(rt)
+    rt._world_state.public_objects[f"{_top_type()}-{HERE}"]["contents"] = {
+        "fresh_water": _cap(_top_rung())}
+
+
+def test_a_topped_out_AND_supplied_home_is_asked_to_SURVEY(tmp_path):
+    """Phase 10TI: measured 2026-11-20, west finished a `stead` (rung 8) AND
+    filled its store (28 of 28), so both earlier objectives had run out and the
+    idling returned -- the same terminal-goal shape, one rung higher. The answer
+    is a purpose that cannot complete."""
+    rt = _runtime(tmp_path)
+    _topped_and_full(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None
+    assert made.goal_id == "world-standing-homestead-survey", made.goal_id
+    assert "never seen it" in made.description, made.description
+    assert "Survey the ground beside what you know" in made.description
+
+
+def test_the_survey_target_is_ground_beside_what_they_know(tmp_path):
+    rt = _runtime(tmp_path)
+    _topped_and_full(rt)
+    home = _a_land_tile()
+    _known(rt, "east_adam", {home: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None and made.goal_id == "world-standing-homestead-survey"
+    # the named tile must NOT be one they already know
+    assert home not in made.description
+
+
+def test_with_no_known_ground_it_falls_back_to_the_supply_objective(tmp_path):
+    """No frontier means no survey: the world must not invent one."""
+    rt = _runtime(tmp_path)
+    _topped_and_full(rt)
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made is not None
+    assert made.goal_id == "world-standing-homestead-supplied", made.goal_id
+    assert "is FULL" in made.description
+
+
+def test_a_store_that_is_not_full_still_asks_for_water(tmp_path):
+    rt = _runtime(tmp_path)
+    _top_dwell(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert made.goal_id == "world-standing-homestead-supplied"
+    assert "Carry fresh_water home" in made.description
+
+
+def test_the_survey_objective_is_idempotent_and_model_proof(tmp_path):
+    rt = _runtime(tmp_path)
+    _topped_and_full(rt)
+    _known(rt, "east_adam", {HERE: {"observed_resources": []}})
+    made = rt._ensure_standing_homestead_goal("east_adam", 100)
+    assert rt._ensure_standing_homestead_goal("east_adam", 101) is None
+    assert len(_standing(rt)) == 1
+    agent_id = str(rt._agent_view("east_adam")["agent_id"])
+    before = (made.status, made.description)
+    rt._apply_model_goal_updates([{
+        "goal_id": "world-standing-homestead-survey", "agent_id": agent_id,
+        "description": "gather berries", "status": "completed"}], 101)
+    assert (made.status, made.description) == before
 
 
 def test_a_non_dwelling_does_not_add_a_water_store(tmp_path):
