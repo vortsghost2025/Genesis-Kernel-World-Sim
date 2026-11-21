@@ -951,11 +951,26 @@ class FirstPairRuntime:
         objects = state.public_objects or {}
         applied = 0
         remaining = []
+        # Phase 10TO: a provision that goes into a PACK leaves no object behind,
+        # so `obj_id in objects` could never mark it done -- and it was re-applied
+        # on EVERY heartbeat, forever. Measured 2026-11-21: east_eve held 1,706
+        # stone axes from a single +1 axe act queued on 2026-11-14, and both east
+        # agents held ~6,200 fresh_water from a +4 act (1,550 heartbeats x 4 =
+        # 6,200 exactly). Food spoils, so the edible_roots acts looked innocent;
+        # water and tools do not, so they grew without bound -- which is also why
+        # these agents stopped needing anything from the world.
+        applied_keys: set[str] = set()
+
+        def _act_key(a: dict) -> str:
+            # per ACT, not per object_id: the queue legitimately holds two acts
+            # that share an object_id and differ only by agent_ref.
+            return f"{a.get('object_id')}|{a.get('agent_ref')}"
+
         for act in acts:
             if not isinstance(act, dict):
                 continue
             obj_id = str(act.get("object_id") or "")
-            if not obj_id or obj_id in objects:
+            if not obj_id or obj_id in objects or _act_key(act) in applied_keys:
                 continue  # already applied, or malformed
             is_water = act.get("kind") == "fresh_water"
             amount = int(act.get("amount") or 0)
@@ -968,9 +983,13 @@ class FirstPairRuntime:
                     try:
                         from backend.world.first_pair_persistence import add_to_inventory
                         add_to_inventory(self._store, pack_agent, str(act.get("kind")), amount)
-                        applied += 1
                     except Exception:
-                        pass
+                        pass          # kept by the final pass; never silently lost
+                    else:
+                        # Phase 10TO: mark it done. There is no object to find it
+                        # by, so the queue entry IS the only record.
+                        applied_keys.add(_act_key(act))
+                        applied += 1
                 continue
             # Resolve the tile AT APPLY TIME. The agent may have crawled away
             # between the queue being written and the heartbeat that applies
@@ -1003,7 +1022,12 @@ class FirstPairRuntime:
                 return 0
         # clear what we applied; keep anything we could not (never silently)
         for act in acts:
-            if isinstance(act, dict) and str(act.get("object_id") or "") in objects:
+            if not isinstance(act, dict):
+                remaining.append(act)
+                continue
+            if str(act.get("object_id") or "") in objects:
+                continue
+            if _act_key(act) in applied_keys:
                 continue
             remaining.append(act)
         try:
