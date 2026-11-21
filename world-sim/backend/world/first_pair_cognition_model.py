@@ -777,7 +777,16 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
                     errors.append("action:bad_material_kind")
                     continue
                 if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
-                    errors.append(f"action:bad_material_amount_{kind}")
+                    # Phase 10TU: NAME THE VALUE. The message said which material
+                    # was wrong and never what was wrong with it, so the repair
+                    # round could not tell the model what to change and it
+                    # repeated the same mistake -- measured 2026-11-21, west_eve
+                    # lost 8 heartbeats to `bad_material_amount_timber` and
+                    # `bad_material_amount_wood` in a single window. Same defect as
+                    # 10SH's refusal that printed a different number than it
+                    # enforced: a sentence about a value must contain the value.
+                    errors.append(
+                        f"action:bad_material_amount_{kind}:{str(amount)[:24]}")
                     continue
                 total += amount
             if total > _MAX_BUILD_MATERIAL_TOTAL:

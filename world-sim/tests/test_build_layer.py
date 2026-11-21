@@ -149,17 +149,44 @@ class TestBuildActionValidation:
     def test_zero_amount_rejected(self):
         errors = validate_action_exact(
             _build_action(materials={"stone": 0}), ADAM_ID)
-        assert "action:bad_material_amount_stone" in errors
+        assert any(e.startswith("action:bad_material_amount_stone") for e in errors), errors
 
     def test_negative_amount_rejected(self):
         errors = validate_action_exact(
             _build_action(materials={"stone": -2}), ADAM_ID)
-        assert "action:bad_material_amount_stone" in errors
+        assert any(e.startswith("action:bad_material_amount_stone") for e in errors), errors
 
     def test_bool_amount_rejected(self):
         errors = validate_action_exact(
             _build_action(materials={"stone": True}), ADAM_ID)
-        assert "action:bad_material_amount_stone" in errors
+        assert any(e.startswith("action:bad_material_amount_stone") for e in errors), errors
+
+    def test_a_bad_amount_error_names_the_VALUE_not_just_the_field(self):
+        """Phase 10TU: the repair round cannot fix what it was never told.
+        Measured 2026-11-21: west_eve lost 8 heartbeats to
+        `bad_material_amount_timber` / `_wood` in one window, because the message
+        named the material and not the offending amount, so the model repeated it.
+        Same defect as 10SH's refusal that printed a different number than it
+        enforced."""
+        for bad, expect in ((0, "0"), (-2, "-2"), (True, "True"),
+                            ("2", "2"), (2.5, "2.5")):
+            errors = validate_action_exact(
+                _build_action(materials={"timber": bad}), ADAM_ID)
+            hit = [e for e in errors if e.startswith("action:bad_material_amount_timber")]
+            assert hit, (bad, errors)
+            assert expect in hit[0], (bad, hit)
+
+    def test_the_amount_value_is_bounded_in_the_error(self):
+        """A huge or absurd value must not be pasted whole into a prompt."""
+        errors = validate_action_exact(
+            _build_action(materials={"timber": "x" * 500}), ADAM_ID)
+        hit = [e for e in errors if "bad_material_amount_timber" in e][0]
+        assert len(hit) < 80, len(hit)
+
+    def test_a_good_amount_still_validates(self):
+        errors = validate_action_exact(
+            _build_action(materials={"timber": 2}), ADAM_ID)
+        assert not [e for e in errors if "bad_material_amount" in e], errors
 
     def test_empty_kind_rejected(self):
         errors = validate_action_exact(
