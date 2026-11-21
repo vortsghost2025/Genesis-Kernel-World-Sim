@@ -3644,11 +3644,55 @@ function createCisternSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 
   return group;
 }
 
-function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff) {
+function createShelterSprite(x, z, h, scale = 1.0, withShadow = true, tintHex = 0xffffff, rung = 1) {
   const s = EXTERIOR_SHELTER_SCALE * scale;
   const w = 5.4 * s;
   const ht = 4.4 * s;
-  return createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * s : 0, withShadow ? 2.2 * s : 0, 0.18 * s, tintHex);
+  const group = createGroundedProp(propTextures.shelter, w, ht, x, z, h, withShadow ? 2.4 * s : 0, withShadow ? 2.2 * s : 0, 0.18 * s, 0xffffff);
+  const rNum = Number(rung) || 1;
+  if (rNum >= 4) {
+    const addSpritePart = (tex, wx, wy, wz, sw, sh) => {
+      if (!tex) return;
+      const mat = new THREE.SpriteMaterial({ map: tex, color: 0xffffff, transparent: true, alphaTest: 0.42 });
+      const sp = new THREE.Sprite(mat);
+      sp.scale.set(sw, sh, 1);
+      sp.position.set(wx, wy, wz);
+      group.add(sp);
+    };
+    const addWing = (wx, wz, wScale, yBoost = 0) => {
+      const ww = w * wScale;
+      const wh = ht * wScale;
+      addSpritePart(propTextures.shelter, wx, wh * 0.5 - 0.14 * s + yBoost, wz, ww, wh);
+    };
+
+    if (rNum === 4) {
+      // Rung 4 (House): timber side annex wing + courtyard storage chest
+      addWing(1.55 * s, -0.18 * s, 0.74);
+      addSpritePart(propTextures.storage, -1.35 * s, 0.36 * s, 0.55 * s, 0.95 * s, 0.88 * s);
+    } else if (rNum >= 5) {
+      // Rung 5+ (Longhouse / Hall / Stead): symmetrical East & West timber wings
+      const wingScale = rNum >= 7 ? 0.84 : 0.76;
+      addWing(-1.75 * s, -0.18 * s, wingScale);
+      addWing(1.75 * s, -0.18 * s, wingScale);
+      addSpritePart(propTextures.storage, -1.45 * s, 0.36 * s, 0.65 * s, 0.95 * s, 0.88 * s);
+    }
+
+    if (rNum >= 7) {
+      // Rung 7+ (Great Hall / Stead): elevated rear upper-keep gable wing + courtyard stone steles & warm hearth
+      addWing(0, -0.52 * s, 0.92, 0.68 * s);
+      addSpritePart(propTextures.landmark, -2.25 * s, 0.65 * s, 0.62 * s, 1.15 * s, 1.42 * s);
+      addSpritePart(propTextures. campfire, 0, 0.34 * s, 0.98 * s, 0.85 * s, 0.74 * s);
+    }
+
+    if (rNum >= 8) {
+      // Rung 8 (Homestead Manor Stead): grand twin-gabled upper keep + courtyard granary caches & stone stele pair
+      addWing(-0.92 * s, -0.48 * s, 0.82, 0.54 * s);
+      addWing(0.92 * s, -0.48 * s, 0.82, 0.54 * s);
+      addSpritePart(propTextures.landmark, 2.25 * s, 0.65 * s, 0.62 * s, 1.15 * s, 1.42 * s);
+      addSpritePart(propTextures.storage, 1.45 * s, 0.36 * s, 0.65 * s, 0.98 * s, 0.90 * s);
+    }
+  }
+  return group;
 }
 
 // ---------------------------------------------------------------------------
@@ -3909,33 +3953,42 @@ function getObjectVisualProfile(rec) {
       };
     }
   }
-  if (rawType === "longhouse") {
-    return { id: "vis_longhouse", category: "shelter", label: "Longhouse", color: 0xd2a86b, scale: 1.25 };
+  if (rawType.includes("stead")) {
+    return { id: "vis_stead", category: "shelter", label: "Homestead Stead", color: 0xffffff, scale: 1.24, structure_rung: 8 };
   }
-  if (rawType === "house") {
-    return { id: "vis_house", category: "shelter", label: "House", color: 0xc29b68, scale: 1.12 };
+  if (rawType.includes("hall")) {
+    return { id: "vis_hall", category: "shelter", label: "Great Hall", color: 0xffffff, scale: 1.18, structure_rung: 7 };
+  }
+  if (rawType.includes("longhouse")) {
+    return { id: "vis_longhouse", category: "shelter", label: "Longhouse", color: 0xffffff, scale: 1.14, structure_rung: 5 };
+  }
+  if (rawType === "house" || rawType.includes("house")) {
+    return { id: "vis_house", category: "shelter", label: "House", color: 0xffffff, scale: 1.08, structure_rung: 4 };
+  }
+  if (rawType.includes("cabin")) {
+    return { id: "vis_cabin", category: "shelter", label: "Cabin", color: 0xffffff, scale: 1.02, structure_rung: 3 };
   }
   // Phase 10QF: a cistern is a lined pit, not a building - a low stone rim
   // with dark water in it. It draws as a shelter category so it sits with
   // the home it belongs to, and it reads as a hole, not a roof.
   if (rawType.includes("cistern")) {
-    return { id: "vis_cistern", category: "shelter", label: "Cistern", color: 0x6f8a94, scale: 0.95 };
+    return { id: "vis_cistern", category: "shelter", label: "Cistern", color: 0x6f8a94, scale: 0.95, structure_rung: 6 };
   }
 
   if (rawType.includes("fire") || rawType.includes("hearth") || rawType === "campfire") {
     return { id: "vis_campfire", category: "campfire", label: "Campfire / Hearth", color: 0xffaa44, scale: 1.0 };
   }
   if (rawType.includes("lean") || rawType.includes("leanto")) {
-    return { id: "vis_leanto", category: "shelter", label: "Lean-To", color: 0xa88454, scale: 0.9 };
+    return { id: "vis_leanto", category: "shelter", label: "Lean-To", color: 0xffffff, scale: 0.9, structure_rung: 1 };
   }
   if (rawType.includes("hut")) {
-    return { id: "vis_hut", category: "shelter", label: "Hut", color: 0xb58b5a, scale: 1.0 };
+    return { id: "vis_hut", category: "shelter", label: "Hut", color: 0xffffff, scale: 0.96, structure_rung: 2 };
   }
   if (rawType.includes("shelter")) {
-    return { id: "vis_shelter", category: "shelter", label: "Shelter", color: 0xc29b68, scale: 1.1 };
+    return { id: "vis_shelter", category: "shelter", label: "Shelter", color: 0xffffff, scale: 0.96, structure_rung: 1 };
   }
   if (rawType.includes("roof")) {
-    return { id: "vis_roof", category: "shelter", label: "Roof Canopy", color: 0x8a6d4b, scale: 1.0 };
+    return { id: "vis_roof", category: "shelter", label: "Roof Canopy", color: 0xffffff, scale: 0.95 };
   }
   if (rawType.includes("wall") || rawType.includes("palisade")) {
     return { id: "vis_wall", category: "landmark", label: "Wall Palisade", color: 0x7a7a72, scale: 0.85 };
@@ -3981,7 +4034,7 @@ function getObjectVisualProfile(rec) {
 
 function classifyPublicObjectCategory(objectType) {
   const otype = String(objectType || "").toLowerCase();
-  if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("house") || otype.includes("lean-to") || otype.includes("lean_to") || otype.includes("thatch") || otype.includes("roof") || otype.includes("wall") || otype.includes("door") || otype.includes("floor") || otype.includes("fence") || otype.includes("tent")) {
+  if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("house") || otype.includes("hall") || otype.includes("stead") || otype.includes("cistern") || otype.includes("lean-to") || otype.includes("lean_to") || otype.includes("thatch") || otype.includes("roof") || otype.includes("wall") || otype.includes("door") || otype.includes("floor") || otype.includes("fence") || otype.includes("tent")) {
     return "shelter";
   }
   if (otype.includes("fire") || otype.includes("hearth") || otype.includes("forge") || otype.includes("furnace") || otype.includes("oven")) {
@@ -4224,7 +4277,10 @@ function updatePublicObjectsAndClearings(pn, hb) {
 
     const placedShelterPositions = [];
     const placedConstructPositions = [];
+    const placedCampfirePositions = [];
+    const placedLandmarkPositions = [];
     const allFinishedShelterCoords = [];
+    const tileMaxRung = new Map();
     const curAgentCoords = [];
     const curPosTids = (PAIRS[pn] && PAIRS[pn].current_positions) ? Object.values(PAIRS[pn].current_positions) : [];
     for (const ctid of curPosTids) {
@@ -4234,16 +4290,26 @@ function updatePublicObjectsAndClearings(pn, hb) {
     for (const [tid, tileObjs] of byTile.entries()) {
       const t = tilesById.get(tid);
       if (!t || !t.coordinates) continue;
+      let maxR = 0;
       const hasFin = tileObjs.some(r => {
         if (r.category !== "shelter") return false;
         const p = getObjectVisualProfile(r);
-        return !(p && p.construction) && (!p || p.id !== "vis_cistern");
+        const isFin = !(p && p.construction) && (!p || p.id !== "vis_cistern");
+        if (isFin) {
+          const rg = Number(r.structure_rung || (p && p.structure_rung) || 1);
+          if (rg > maxR) maxR = rg;
+        }
+        return isFin;
       });
+      tileMaxRung.set(tid, maxR);
       if (hasFin) {
-        allFinishedShelterCoords.push({ x: t.coordinates.x, z: t.coordinates.y, tid });
+        allFinishedShelterCoords.push({ x: t.coordinates.x, z: t.coordinates.y, tid, maxR });
       }
     }
     const sortedTileEntries = Array.from(byTile.entries()).sort((a, b) => {
+      const ra = tileMaxRung.get(a[0]) || 0;
+      const rb = tileMaxRung.get(b[0]) || 0;
+      if (ra !== rb) return rb - ra;
       const ta = tilesById.get(a[0]);
       const tb = tilesById.get(b[0]);
       const ax = (ta && ta.coordinates) ? ta.coordinates.x : 0;
@@ -4290,8 +4356,10 @@ function updatePublicObjectsAndClearings(pn, hb) {
           const aConstruct = a.construction_project && a.construction_stage !== "finished" ? 1 : 0;
           const bConstruct = b.construction_project && b.construction_stage !== "finished" ? 1 : 0;
           if (aConstruct !== bConstruct) return aConstruct - bConstruct;
-          const aRung = Number(a.structure_rung || 0);
-          const bRung = Number(b.structure_rung || 0);
+          const pa = getObjectVisualProfile(a);
+          const pb = getObjectVisualProfile(b);
+          const aRung = Number(a.structure_rung || (pa && pa.structure_rung) || 0);
+          const bRung = Number(b.structure_rung || (pb && pb.structure_rung) || 0);
           if (aRung !== bRung) return bRung - aRung;
           const aIsTest = /test|epistemic|berry/i.test(a.object_id) ? 1 : 0;
           const bIsTest = /test|epistemic|berry/i.test(b.object_id) ? 1 : 0;
@@ -4328,11 +4396,12 @@ function updatePublicObjectsAndClearings(pn, hb) {
           const prof = getObjectVisualProfile(rec);
           const profScale = prof ? prof.scale : 1.0;
           const profTint = prof ? prof.color : 0xffffff;
+          const profRung = Number(rec.structure_rung || (prof && prof.structure_rung) || 1);
           let effScale = scale * profScale;
 
           // Compound visual de-cluttering: keep every canonical record in oGroup.children
-          // for runtime inspection, but suppress duplicate overlapping 3.35m cottage sprites
-          // and unfinished construction frames that collide with finished cottages.
+          // for runtime inspection, but suppress duplicate overlapping cottage sprites,
+          // campfire polka-dots, and landmarks colliding with cottage roofs.
           let culledDuplicate = false;
           if (prof && prof.construction) {
             const nearFinished = hasFinishedShelterOnTile || allFinishedShelterCoords.some(
@@ -4349,20 +4418,43 @@ function updatePublicObjectsAndClearings(pn, hb) {
               placedConstructPositions.push({ x: ox, z: oz });
             }
           } else if (cat === "shelter" && (!prof || prof.id !== "vis_cistern")) {
-            if (shownShelterOnTile) {
+            if (shownShelterOnTile || (prof && prof.id === "vis_roof")) {
               culledDuplicate = true;
             } else {
+              const minSep = profRung >= 7 ? 3.2 : 2.65;
               const tooClose = placedShelterPositions.some(
-                p => Math.hypot(p.x - ox, p.z - oz) < 2.65
+                p => Math.hypot(p.x - ox, p.z - oz) < minSep
               );
               if (tooClose) {
                 culledDuplicate = true;
               } else {
                 shownShelterOnTile = true;
-                placedShelterPositions.push({ x: ox, z: oz });
+                placedShelterPositions.push({ x: ox, z: oz, rung: profRung });
               }
             }
-          } else if (i >= 3) {
+          } else if (cat === "campfire") {
+            const nearShelter = placedShelterPositions.some(p => Math.hypot(p.x - ox, p.z - oz) < 1.35);
+            const nearFire = placedCampfirePositions.some(p => Math.hypot(p.x - ox, p.z - oz) < 3.6);
+            if (i > 0 || nearShelter || nearFire) {
+              culledDuplicate = true;
+            } else {
+              placedCampfirePositions.push({ x: ox, z: oz });
+            }
+          } else if (cat === "landmark") {
+            const nearShelter = allFinishedShelterCoords.some(p => Math.hypot(p.x - ox, p.z - oz) < 2.2)
+              || placedShelterPositions.some(p => Math.hypot(p.x - ox, p.z - oz) < 2.2);
+            const nearLm = placedLandmarkPositions.some(p => Math.hypot(p.x - ox, p.z - oz) < 4.2);
+            if (i > 0 || nearShelter || nearLm) {
+              culledDuplicate = true;
+            } else {
+              placedLandmarkPositions.push({ x: ox, z: oz });
+            }
+          } else if (cat === "storage") {
+            const nearShelter = placedShelterPositions.some(p => Math.hypot(p.x - ox, p.z - oz) < 1.35);
+            if (i >= 1 || nearShelter) {
+              culledDuplicate = true;
+            }
+          } else if (i >= 2) {
             culledDuplicate = true;
           }
 
@@ -4382,7 +4474,7 @@ function updatePublicObjectsAndClearings(pn, hb) {
             // draw as the generic shelter hut.
             propMesh = createCisternSprite(ox, oz, oh, effScale, withShadow, profTint);
           } else if (cat === "shelter") {
-            propMesh = createShelterSprite(ox, oz, oh, effScale, withShadow, profTint);
+            propMesh = createShelterSprite(ox, oz, oh, effScale, withShadow, profTint, profRung);
           } else if (cat === "campfire") {
             const addLight = !tileHasLight && (i === 0);
             if (addLight) tileHasLight = true;
@@ -4617,7 +4709,7 @@ function buildAlpineConiferForest(cid) {
     for (let x = -92; x <= 92; x++) {
       if (isCanonicalOcean(cid, x, y)) continue;
       const h = getTerrainHeight(cid, x, y);
-      if (h < 1.8 || h > 16.2) continue;
+      if (h < 9.5 || h > 16.2) continue;
 
       // Measure local slope so zero trees spawn on sheer Dolomite rock walls
       const hL = getTerrainHeight(cid, Math.max(-99, x - 1), y);
@@ -4631,10 +4723,10 @@ function buildAlpineConiferForest(cid) {
       const dzS = y - settleCz;
       const distSettle = Math.hypot(dxS * 0.78, dzS * 1.0);
       // Keep the foreground sightline, active agent vicinity, and central sunlit village pasture open
-      // and carpet the flanking V-valley foothill slopes right up to the Dolomite cliff base (h <= 16.5m) with zero bare green gap!
-      if (distSettle < 10.5) continue;
+      // and carpet the high mountain timberline (h >= 9.5m) with distant conifers.
+      if (distSettle < 22.0) continue;
       if (dzS > -9.5 && Math.abs(dxS) < 12.5) continue;
-      if (curCoords.some(c => Math.hypot(x - c.x, y - c.z) < 9.5)) continue;
+      if (curCoords.some(c => Math.hypot(x - c.x, y - c.z) < 16.0)) continue;
 
       const idx = (y + 100) * 200 + (x + 100);
       if (waterMaskLookup[cid] && waterMaskLookup[cid][idx] > 0) continue;
@@ -5408,34 +5500,49 @@ scene.add(interiorGroup);
 const floorCanvas = document.createElement("canvas");
 floorCanvas.width = 256; floorCanvas.height = 256;
 const fctx = floorCanvas.getContext("2d");
-fctx.fillStyle = "#6b4423"; fctx.fillRect(0, 0, 256, 256);
-for (let p = 0; p < 256; p += 32) {
-  fctx.fillStyle = (p / 32) % 2 ? "#754c29" : "#613d1f";
-  fctx.fillRect(0, p, 256, 30);
-  fctx.fillStyle = "#3a2210";
-  fctx.fillRect(0, p + 30, 256, 2);
-  fctx.fillStyle = "rgba(255,220,170,0.08)";
-  fctx.fillRect(0, p + 3, 256, 3);
-  const jointX = ((p * 3) % 192) + 32;
-  fctx.fillStyle = "#3a2210";
-  fctx.fillRect(jointX, p, 2, 30);
+fctx.fillStyle = "#4a2e18"; fctx.fillRect(0, 0, 256, 256);
+for (let p = 0; p < 256; p += 16) {
+  fctx.fillStyle = (p / 16) % 2 ? "#54351c" : "#442a15";
+  fctx.fillRect(0, p, 256, 15);
+  fctx.fillStyle = "#261509";
+  fctx.fillRect(0, p + 15, 256, 1);
+  fctx.fillStyle = "rgba(255,215,165,0.06)";
+  fctx.fillRect(0, p + 2, 256, 2);
+  const jointX = ((p * 7) % 192) + 32;
+  fctx.fillStyle = "#261509";
+  fctx.fillRect(jointX, p, 2, 15);
 }
+// Woven Alpine hearth rug in the center of the floor
+fctx.fillStyle = "#6e2b22";
+fctx.fillRect(68, 76, 120, 96);
+fctx.strokeStyle = "#c89d54";
+fctx.lineWidth = 4;
+fctx.strokeRect(74, 82, 108, 84);
+fctx.strokeStyle = "#3b1712";
+fctx.lineWidth = 2;
+fctx.strokeRect(82, 90, 92, 68);
 const floorTex = new THREE.CanvasTexture(floorCanvas);
-const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, userData: { isSharedMaterial: true } });
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.88, userData: { isSharedMaterial: true } });
 
 const windowCanvas = document.createElement("canvas");
 windowCanvas.width = 128; windowCanvas.height = 128;
 const wctx = windowCanvas.getContext("2d");
 const wgrad = wctx.createLinearGradient(0, 0, 0, 128);
-wgrad.addColorStop(0, "#68a8e8");
-wgrad.addColorStop(0.55, "#b8dcf8");
-wgrad.addColorStop(1, "#ffe29a");
+wgrad.addColorStop(0, "#5089c6");
+wgrad.addColorStop(0.52, "#9ec8ea");
+wgrad.addColorStop(0.75, "#ffe4a8");
+wgrad.addColorStop(1, "#4e763b");
 wctx.fillStyle = wgrad;
 wctx.fillRect(0, 0, 128, 128);
-wctx.strokeStyle = "#3b2310";
-wctx.lineWidth = 14;
+// Distant alpine mountain silhouette & meadow view outside the window
+wctx.fillStyle = "#5b6d82";
+wctx.beginPath(); wctx.moveTo(0, 92); wctx.lineTo(34, 52); wctx.lineTo(68, 80); wctx.lineTo(102, 46); wctx.lineTo(128, 78); wctx.lineTo(128, 128); wctx.lineTo(0, 128); wctx.fill();
+wctx.fillStyle = "#3b5e2b";
+wctx.fillRect(0, 88, 128, 40);
+wctx.strokeStyle = "#2e1a0c";
+wctx.lineWidth = 12;
 wctx.strokeRect(0, 0, 128, 128);
-wctx.lineWidth = 8;
+wctx.lineWidth = 6;
 wctx.beginPath();
 wctx.moveTo(64, 0); wctx.lineTo(64, 128);
 wctx.moveTo(0, 64); wctx.lineTo(128, 64);
@@ -5447,17 +5554,20 @@ const windowTex = new THREE.CanvasTexture(windowCanvas);
 const logCanvas = document.createElement("canvas");
 logCanvas.width = 256; logCanvas.height = 256;
 const lctx = logCanvas.getContext("2d");
-lctx.fillStyle = "#5a3818"; lctx.fillRect(0, 0, 256, 256);
-for (let y = 0; y < 256; y += 32) {
-  lctx.fillStyle = (y / 32) % 2 ? "#6e4825" : "#553514";
-  lctx.fillRect(0, y, 256, 30);
-  lctx.fillStyle = "rgba(0,0,0,0.35)";
-  lctx.fillRect(0, y + 30, 256, 2);
-  lctx.fillStyle = "rgba(255,230,180,0.12)";
-  lctx.fillRect(0, y + 4, 256, 3);
+lctx.fillStyle = "#472b14"; lctx.fillRect(0, 0, 256, 256);
+for (let y = 0; y < 256; y += 24) {
+  const lgrad = lctx.createLinearGradient(0, y, 0, y + 22);
+  lgrad.addColorStop(0, "#5c391c");
+  lgrad.addColorStop(0.5, "#4e2f16");
+  lgrad.addColorStop(1, "#38200d");
+  lctx.fillStyle = lgrad;
+  lctx.fillRect(0, y, 256, 21);
+  // Warm mortar chinking line between log courses
+  lctx.fillStyle = "#7a6b58";
+  lctx.fillRect(0, y + 21, 256, 3);
 }
 const logTex = new THREE.CanvasTexture(logCanvas);
-const logWallMat = new THREE.MeshStandardMaterial({ map: logTex, roughness: 0.9, userData: { isSharedMaterial: true } });
+const logWallMat = new THREE.MeshStandardMaterial({ map: logTex, roughness: 0.92, userData: { isSharedMaterial: true } });
 
 const thatchCanvas = document.createElement("canvas");
 thatchCanvas.width = 256; thatchCanvas.height = 256;
@@ -5771,29 +5881,29 @@ function rebuildInteriorProps(tileId, pairName, hb) {
   const contents = neighbourhoodObjects(pairName, hb, tileId);
   const plan = interiorPropPlan(contents);
 
-  // Slots around the back and side walls so furniture frames the room and
-  // leaves the central floor and foreground camera corners clear.
+  // Slots placed strictly along the back wall and far side alcoves (z <= -0.88)
+  // so no furniture ever overlaps Eve (-1.0, -0.7), Adam (0.9, -0.9), or the foreground lens.
   const SLOTS = [
-    { x: 0.0, z: -1.35 }, { x: -1.72, z: -1.35 }, { x: 1.72, z: -1.35 },
-    { x: -1.85, z: -0.55 }, { x: 1.85, z: -0.55 },
-    { x: -1.85, z: 0.05 }, { x: 1.85, z: 0.05 }, { x: -1.25, z: -1.38 },
-    { x: 1.25, z: -1.38 }, { x: -1.85, z: -0.98 },
-    { x: 1.85, z: -0.98 }, { x: -1.48, z: -0.18 },
-    { x: 1.48, z: -0.18 }, { x: 0.0, z: -1.48 },
+    { x: -0.05, z: -0.92 }, { x: -1.78, z: -1.42 }, { x: 1.78, z: -1.42 },
+    { x: -1.98, z: -1.18 }, { x: 1.98, z: -1.18 },
+    { x: -1.35, z: -1.45 }, { x: 1.35, z: -1.45 }, { x: -0.68, z: -1.45 },
+    { x: 0.68, z: -1.45 }, { x: -2.02, z: -0.92 },
+    { x: 2.02, z: -0.92 }, { x: -1.55, z: -1.38 },
+    { x: 1.55, z: -1.38 }, { x: 0.0, z: -1.48 },
   ];
   const slotAt = (i) => SLOTS[i % SLOTS.length];
 
   let slotCursor = 8; // kinds get their own preferred slots first
   const PREFERRED = {
     hearth: 0, forge: 1, well: 2, ladder: 5, bed: 3, workbench: 4,
-    table: 11, chair: 12, storage: 6, tools: 9, garden: 10,
+    table: 7, chair: 8, storage: 6, tools: 9, garden: 10,
   };
 
   for (const item of plan) {
     const slot = (item.index === 0 && PREFERRED[item.kind] != null)
       ? SLOTS[PREFERRED[item.kind]]
       : slotAt(slotCursor++);
-    const at = { x: slot.x + (item.index % 2 ? 0.14 : -0.14), z: slot.z };
+    const at = { x: slot.x + (item.index % 2 ? 0.08 : -0.08), z: slot.z };
 
     if (item.kind === "hearth") {
       const base = new THREE.Mesh(
@@ -5810,137 +5920,143 @@ function rebuildInteriorProps(tileId, pairName, hb) {
       flame.position.set(at.x, 0.35, at.z);
       interiorPropsGroup.add(flame);
     } else if (item.kind === "forge") {
-      // A forge is a squat stone block with an ember glow: the thing the
-      // lanes actually built five of and never saw.
       const block = new THREE.Mesh(
-        new THREE.BoxGeometry(0.95, 0.8, 0.7),
-        new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 }));
-      block.position.set(at.x, 0.4, at.z);
+        new THREE.BoxGeometry(0.58, 0.52, 0.46),
+        new THREE.MeshStandardMaterial({ color: 0x423e39, roughness: 0.95 }));
+      block.position.set(at.x, 0.26, at.z);
       interiorPropsGroup.add(block);
+      const hood = new THREE.Mesh(
+        new THREE.BoxGeometry(0.62, 0.14, 0.50),
+        new THREE.MeshStandardMaterial({ color: 0x2b2825, roughness: 0.9 }));
+      hood.position.set(at.x, 0.55, at.z);
+      interiorPropsGroup.add(hood);
       const ember = new THREE.Mesh(
-        new THREE.BoxGeometry(0.5, 0.12, 0.35),
-        new THREE.MeshStandardMaterial({ color: 0xd2451a, emissive: 0x7a2408,
+        new THREE.BoxGeometry(0.34, 0.08, 0.26),
+        new THREE.MeshStandardMaterial({ color: 0xd2451a, emissive: 0x8a2808,
                                          emissiveIntensity: 1.3, roughness: 0.7 }));
-      ember.position.set(at.x, 0.83, at.z);
+      ember.position.set(at.x, 0.63, at.z);
       interiorPropsGroup.add(ember);
-      const glow = new THREE.PointLight(0xff6622, 1.0, 6);
-      glow.position.set(at.x, 0.9, at.z);
+      const glow = new THREE.PointLight(0xff6622, 0.75, 5);
+      glow.position.set(at.x, 0.75, at.z);
       interiorPropsGroup.add(glow);
     } else if (item.kind === "well") {
-      // A stone ring: open, so the hole is the point.
       const ring = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.42, 0.46, 0.5, 12, 1, true),
-        new THREE.MeshStandardMaterial({ color: 0x6f6a60, roughness: 0.95,
+        new THREE.CylinderGeometry(0.32, 0.35, 0.38, 14, 1, true),
+        new THREE.MeshStandardMaterial({ color: 0x5c574f, roughness: 0.95,
                                          side: THREE.DoubleSide }));
-      ring.position.set(at.x, 0.25, at.z);
+      ring.position.set(at.x, 0.19, at.z);
       interiorPropsGroup.add(ring);
       const water = new THREE.Mesh(
-        new THREE.CircleGeometry(0.36, 14),
-        new THREE.MeshStandardMaterial({ color: 0x2f5d6b, roughness: 0.25,
+        new THREE.CircleGeometry(0.28, 14),
+        new THREE.MeshStandardMaterial({ color: 0x244e5c, roughness: 0.25,
                                          transparent: true, opacity: 0.9 }));
       water.rotation.x = -Math.PI / 2;
-      water.position.set(at.x, 0.18, at.z);
+      water.position.set(at.x, 0.14, at.z);
       interiorPropsGroup.add(water);
     } else if (item.kind === "ladder") {
-      const rail = new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.9 });
-      for (const off of [-0.16, 0.16]) {
-        const r = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.7, 0.06), rail);
-        r.position.set(at.x + off, 0.85, at.z);
+      const rail = new THREE.MeshStandardMaterial({ color: 0x4a2e16, roughness: 0.9 });
+      for (const off of [-0.14, 0.14]) {
+        const r = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.55, 0.05), rail);
+        r.position.set(at.x + off, 0.78, at.z);
         interiorPropsGroup.add(r);
       }
-      for (let s = 0; s < 6; s++) {
-        const st = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.05), rail);
-        st.position.set(at.x, 0.18 + s * 0.28, at.z);
+      for (let s = 0; s < 5; s++) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.04), rail);
+        st.position.set(at.x, 0.20 + s * 0.28, at.z);
         interiorPropsGroup.add(st);
       }
     } else if (item.kind === "bed") {
       const frame = new THREE.Mesh(
-        new THREE.BoxGeometry(1.7, 0.16, 0.9),
-        new THREE.MeshStandardMaterial({ color: 0x8a7042, roughness: 0.95 }));
-      frame.position.set(at.x, 0.12, at.z);
+        new THREE.BoxGeometry(0.88, 0.14, 0.54),
+        new THREE.MeshStandardMaterial({ color: 0x4a2e16, roughness: 0.92 }));
+      frame.position.set(at.x, 0.09, at.z);
       interiorPropsGroup.add(frame);
       const blanket = new THREE.Mesh(
-        new THREE.BoxGeometry(1.5, 0.12, 0.82),
-        new THREE.MeshStandardMaterial({ color: 0x9a5b3a, roughness: 0.98 }));
-      blanket.position.set(at.x, 0.24, at.z);
+        new THREE.BoxGeometry(0.78, 0.10, 0.48),
+        new THREE.MeshStandardMaterial({ color: 0x7a3426, roughness: 0.96 }));
+      blanket.position.set(at.x, 0.19, at.z);
       interiorPropsGroup.add(blanket);
+      const pillow = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.08, 0.38),
+        new THREE.MeshStandardMaterial({ color: 0xd8cbb8, roughness: 0.92 }));
+      pillow.position.set(at.x - 0.26, 0.25, at.z);
+      interiorPropsGroup.add(pillow);
     } else if (item.kind === "workbench") {
       const top = new THREE.Mesh(
-        new THREE.BoxGeometry(1.3, 0.12, 0.6),
-        new THREE.MeshStandardMaterial({ color: 0x825a32, roughness: 0.85 }));
-      top.position.set(at.x, 0.5, at.z);
+        new THREE.BoxGeometry(0.76, 0.08, 0.42),
+        new THREE.MeshStandardMaterial({ color: 0x5c3a1d, roughness: 0.88 }));
+      top.position.set(at.x, 0.42, at.z);
       interiorPropsGroup.add(top);
-      for (const lx of [-0.5, 0.5]) {
+      for (const lx of [-0.30, 0.30]) {
         const leg = new THREE.Mesh(
-          new THREE.BoxGeometry(0.1, 0.5, 0.5),
-          new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
-        leg.position.set(at.x + lx, 0.25, at.z);
+          new THREE.BoxGeometry(0.07, 0.40, 0.34),
+          new THREE.MeshStandardMaterial({ color: 0x3b2310, roughness: 0.92 }));
+        leg.position.set(at.x + lx, 0.20, at.z);
         interiorPropsGroup.add(leg);
       }
       const vice = new THREE.Mesh(
-        new THREE.BoxGeometry(0.22, 0.16, 0.22),
-        new THREE.MeshStandardMaterial({ color: 0x3f3b38, roughness: 0.8 }));
-      vice.position.set(at.x + 0.4, 0.63, at.z);
+        new THREE.BoxGeometry(0.14, 0.10, 0.14),
+        new THREE.MeshStandardMaterial({ color: 0x33302d, roughness: 0.8 }));
+      vice.position.set(at.x + 0.22, 0.50, at.z);
       interiorPropsGroup.add(vice);
     } else if (item.kind === "tools") {
-      // A tool rack: the 33 tool objects the lanes hold, made visible.
       const post = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 1.2, 0.1),
-        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
-      post.position.set(at.x, 0.6, at.z);
+        new THREE.BoxGeometry(0.08, 1.0, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0x422813, roughness: 0.9 }));
+      post.position.set(at.x, 0.5, at.z);
       interiorPropsGroup.add(post);
       const blade = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 0.42, 0.2),
-        new THREE.MeshStandardMaterial({ color: 0xb9b3a6, roughness: 0.55,
+        new THREE.BoxGeometry(0.06, 0.32, 0.16),
+        new THREE.MeshStandardMaterial({ color: 0x9e988c, roughness: 0.55,
                                          metalness: 0.35 }));
-      blade.position.set(at.x + 0.12, 0.95, at.z);
+      blade.position.set(at.x + 0.09, 0.78, at.z);
       interiorPropsGroup.add(blade);
     } else if (item.kind === "storage") {
       const box = new THREE.Mesh(
-        new THREE.BoxGeometry(0.48, 0.06, 0.44),
-        new THREE.MeshStandardMaterial({ color: 0x4a3016, roughness: 0.9 }));
-      box.position.set(at.x, 0.03, at.z);
+        new THREE.BoxGeometry(0.44, 0.05, 0.40),
+        new THREE.MeshStandardMaterial({ color: 0x3b2310, roughness: 0.9 }));
+      box.position.set(at.x, 0.025, at.z);
       interiorPropsGroup.add(box);
       const cacheSprite = new THREE.Sprite(new THREE.SpriteMaterial({
         map: propTextures.storage, transparent: true, alphaTest: 0.3 }));
-      cacheSprite.scale.set(0.68, 0.62, 1);
-      cacheSprite.position.set(at.x, 0.31, at.z);
+      cacheSprite.scale.set(0.62, 0.56, 1);
+      cacheSprite.position.set(at.x, 0.28, at.z);
       interiorPropsGroup.add(cacheSprite);
     } else if (item.kind === "table") {
       const top = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.1, 0.75),
-        new THREE.MeshStandardMaterial({ color: 0x6e4825, roughness: 0.85 }));
-      top.position.set(at.x, 0.48, at.z);
+        new THREE.BoxGeometry(0.72, 0.07, 0.46),
+        new THREE.MeshStandardMaterial({ color: 0x543419, roughness: 0.88 }));
+      top.position.set(at.x, 0.40, at.z);
       interiorPropsGroup.add(top);
-      for (const [lx, lz] of [[-0.45, -0.28], [0.45, -0.28], [-0.45, 0.28], [0.45, 0.28]]) {
+      for (const [lx, lz] of [[-0.28, -0.18], [0.28, -0.18], [-0.28, 0.18], [0.28, 0.18]]) {
         const leg = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, 0.46, 0.08),
-          new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
-        leg.position.set(at.x + lx, 0.23, at.z + lz);
+          new THREE.BoxGeometry(0.06, 0.38, 0.06),
+          new THREE.MeshStandardMaterial({ color: 0x3b2310, roughness: 0.9 }));
+        leg.position.set(at.x + lx, 0.19, at.z + lz);
         interiorPropsGroup.add(leg);
       }
     } else if (item.kind === "chair") {
       const seat = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, 0.09, 0.42),
-        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
-      seat.position.set(at.x, 0.42, at.z);
+        new THREE.BoxGeometry(0.30, 0.06, 0.30),
+        new THREE.MeshStandardMaterial({ color: 0x4a2e16, roughness: 0.9 }));
+      seat.position.set(at.x, 0.32, at.z);
       interiorPropsGroup.add(seat);
       const back = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, 0.44, 0.08),
-        new THREE.MeshStandardMaterial({ color: 0x5a3818, roughness: 0.9 }));
-      back.position.set(at.x, 0.64, at.z - 0.17);
+        new THREE.BoxGeometry(0.30, 0.32, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x3b2310, roughness: 0.9 }));
+      back.position.set(at.x, 0.48, at.z - 0.12);
       interiorPropsGroup.add(back);
     } else if (item.kind === "garden") {
       const soil = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.14, 0.8),
-        new THREE.MeshStandardMaterial({ color: 0x3d2a18, roughness: 1.0 }));
-      soil.position.set(at.x, 0.07, at.z);
+        new THREE.BoxGeometry(0.72, 0.10, 0.48),
+        new THREE.MeshStandardMaterial({ color: 0x332214, roughness: 1.0 }));
+      soil.position.set(at.x, 0.05, at.z);
       interiorPropsGroup.add(soil);
-      for (let g = 0; g < 5; g++) {
+      for (let g = 0; g < 4; g++) {
         const sprout = new THREE.Mesh(
-          new THREE.ConeGeometry(0.06, 0.24, 6),
-          new THREE.MeshStandardMaterial({ color: 0x4e7a34, roughness: 0.9 }));
-        sprout.position.set(at.x - 0.4 + g * 0.2, 0.24, at.z);
+          new THREE.ConeGeometry(0.05, 0.18, 6),
+          new THREE.MeshStandardMaterial({ color: 0x466e2f, roughness: 0.9 }));
+        sprout.position.set(at.x - 0.24 + g * 0.16, 0.18, at.z);
         interiorPropsGroup.add(sprout);
       }
     }
@@ -6274,7 +6390,7 @@ function getNearestShelterXY(pairName, fromX, fromZ) {
   for (const po of pobjs) {
     if (!po || !po.tile_id) continue;
     const otype = String(po.object_type || "").toLowerCase();
-    if (!(otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut"))) continue;
+    if (!(otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut") || otype.includes("house") || otype.includes("hall") || otype.includes("stead"))) continue;
     const t = tilesById.get(po.tile_id);
     let x = null, z = null;
     if (t && t.coordinates) {
@@ -6557,11 +6673,26 @@ function applyCameraMode(mode, immediate = true) {
     camera.fov = 48;
     camera.updateProjectionMatrix();
     const settle = getSettlementCentroid(pairName);
-    const cx = settle ? settle.x : (ax + ex) * 0.5;
-    const cz = settle ? settle.z : (az + ez) * 0.5;
+    let cx = settle ? settle.x : (ax + ex) * 0.5;
+    let cz = settle ? settle.z : (az + ez) * 0.5;
+    // Anchor on the highest-rung finished homestead (Rung 8 Stead / Rung 7 Hall) when built
+    const pobjsSettle = (PAIRS[pairName] && PAIRS[pairName].public_objects) ? Object.values(PAIRS[pairName].public_objects) : [];
+    let topRung = 0;
+    for (const po of pobjsSettle) {
+      if (!po || !po.tile_id || (po.construction_project && po.construction_stage !== "finished")) continue;
+      const rg = Number(po.structure_rung || 0);
+      if (rg >= 4 && rg > topRung) {
+        const ts = tilesById.get(po.tile_id);
+        if (ts && ts.coordinates) {
+          topRung = rg;
+          cx = ts.coordinates.x;
+          cz = ts.coordinates.y;
+        }
+      }
+    }
     const ch = getTerrainHeight(cid, cx, cz);
-    const camX = cx - 3.0;
-    const camZ = cz + 22.0;
+    const camX = cx - 2.2;
+    const camZ = cz + 11.5;
     let maxPathH = ch;
     for (let s = 1; s <= 10; s++) {
       const t = s / 10.0;
@@ -6569,8 +6700,8 @@ function applyCameraMode(mode, immediate = true) {
       const sz = cz + (camZ - cz) * t;
       maxPathH = Math.max(maxPathH, getTerrainHeight(cid, sx, sz));
     }
-    const eyeY = Math.max(ch + 6.2, maxPathH + 3.5);
-    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx, eyeY - 0.8, cz - 8.0), immediate);
+    const eyeY = Math.max(ch + 5.2, maxPathH + 3.2);
+    smoothMoveCamera(new THREE.Vector3(camX, eyeY, camZ), new THREE.Vector3(cx, ch + 1.1, cz - 1.5), immediate);
   } else if (mode === "adam") {
     document.getElementById("cam-focus-adam").classList.add("active");
     scene.fog.density = 0.007;
@@ -6586,6 +6717,7 @@ function applyCameraMode(mode, immediate = true) {
     // eye-level stands inside tree/hut sprites in the west cluster.
     let camX = ax - 1.2, camZ = az + 2.4;
     let lookX = ax + 0.8, lookZ = az - 0.4;
+    let farFromShelterA = false;
     if (shelterA) {
       const dx = shelterA.x - ax;
       const dz = shelterA.z - az;
@@ -6596,12 +6728,21 @@ function applyCameraMode(mode, immediate = true) {
         camZ = az - uz * 7.0;
         lookX = shelterA.x;
         lookZ = shelterA.z;
+        if (d > 4.5) {
+          farFromShelterA = true;
+          camX = ax - ux * 5.2;
+          camZ = az - uz * 5.2;
+          lookX = ax + ux * 1.2;
+          lookZ = az + uz * 1.2;
+        }
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
-    const lookV = new THREE.Vector3(lookX, Math.max(ah + 0.85, lookH * 0.55 + 0.85), lookZ);
-    const spotA = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(ah + 5.0, gH + 1.5), camZ), lookV);
+    const lookY = farFromShelterA ? (ah + 0.85) : Math.max(ah + 0.85, lookH * 0.55 + 0.85);
+    const camY = farFromShelterA ? Math.max(ah + 3.2, gH + 1.6) : Math.max(ah + 5.0, gH + 1.5);
+    const lookV = new THREE.Vector3(lookX, lookY, lookZ);
+    const spotA = clearCameraSpot(cid, new THREE.Vector3(camX, camY, camZ), lookV);
     smoothMoveCamera(new THREE.Vector3(spotA.x, spotA.y, spotA.z), lookV, immediate);
   } else if (mode === "eve") {
     document.getElementById("cam-focus-eve").classList.add("active");
@@ -6614,6 +6755,7 @@ function applyCameraMode(mode, immediate = true) {
     // Elevated shelter-ward vantage (see Focus Adam).
     let camX = ex - 1.2, camZ = ez + 2.4;
     let lookX = ex + 0.4, lookZ = ez - 0.3;
+    let farFromShelterE = false;
     if (shelterE) {
       const dx = shelterE.x - ex;
       const dz = shelterE.z - ez;
@@ -6624,12 +6766,21 @@ function applyCameraMode(mode, immediate = true) {
         camZ = ez - uz * 7.0;
         lookX = shelterE.x;
         lookZ = shelterE.z;
+        if (d > 4.5) {
+          farFromShelterE = true;
+          camX = ex - ux * 5.2;
+          camZ = ez - uz * 5.2;
+          lookX = ex + ux * 1.2;
+          lookZ = ez + uz * 1.2;
+        }
       }
     }
     const gH = getTerrainHeight(cid, camX, camZ);
     const lookH = getTerrainHeight(cid, lookX, lookZ);
-    const lookV2 = new THREE.Vector3(lookX, Math.max(eh + 0.85, lookH * 0.55 + 0.85), lookZ);
-    const spotE = clearCameraSpot(cid, new THREE.Vector3(camX, Math.max(eh + 5.0, gH + 1.5), camZ), lookV2);
+    const lookY2 = farFromShelterE ? (eh + 0.85) : Math.max(eh + 0.85, lookH * 0.55 + 0.85);
+    const camY2 = farFromShelterE ? Math.max(eh + 3.2, gH + 1.6) : Math.max(eh + 5.0, gH + 1.5);
+    const lookV2 = new THREE.Vector3(lookX, lookY2, lookZ);
+    const spotE = clearCameraSpot(cid, new THREE.Vector3(camX, camY2, camZ), lookV2);
     smoothMoveCamera(new THREE.Vector3(spotE.x, spotE.y, spotE.z), lookV2, immediate);
   } else if (mode === "topdown") {
     document.getElementById("cam-topdown").classList.add("active");
@@ -6682,7 +6833,7 @@ function applyCameraMode(mode, immediate = true) {
       if (!obj) continue;
       const otype = String(obj.object_type || "").toLowerCase();
       if (otype.includes("shelter") || otype.includes("cabin") || otype.includes("hut")
-          || otype.includes("house")) {
+          || otype.includes("house") || otype.includes("hall") || otype.includes("stead")) {
         const tid = obj.tile_id;
         const t = tilesById.get(tid);
         if (t && t.coordinates) {
@@ -6690,6 +6841,7 @@ function applyCameraMode(mode, immediate = true) {
             tid,
             x: t.coordinates.x,
             z: t.coordinates.y,
+            rung: Number(obj.structure_rung || 1),
             props: _propsNear(tid),
             d: Math.hypot(t.coordinates.x - ax, t.coordinates.y - az),
           });
@@ -6697,7 +6849,7 @@ function applyCameraMode(mode, immediate = true) {
       }
     }
     if (_interiorCandidates.length) {
-      _interiorCandidates.sort((a, b) => (b.props - a.props) || (a.d - b.d));
+      _interiorCandidates.sort((a, b) => (b.rung - a.rung) || (b.props - a.props) || (a.d - b.d));
       const chosen = _interiorCandidates[0];
       targetX = chosen.x;
       targetZ = chosen.z;
@@ -7714,6 +7866,20 @@ function updateAllAgentFigures(time) {
 
   updateAgentFigure("adam", charFigures.adam, tagAdam, "tag-act-adam");
   updateAgentFigure("eve", charFigures.eve, tagEve, "tag-act-eve");
+
+  // Keep scenery trees from growing directly through Adam or Eve's standing position
+  const sGrp = sceneryGroups && sceneryGroups[cid];
+  if (sGrp && selectedPair !== "orbit") {
+    const ax = charFigures.adam.position.x, az = charFigures.adam.position.z;
+    const ex = charFigures.eve.position.x, ez = charFigures.eve.position.z;
+    for (const child of sGrp.children) {
+      if (child.userData && child.userData.kind === "tree") {
+        const tx = child.position.x, tz = child.position.z;
+        const nearAgent = Math.hypot(tx - ax, tz - az) < 1.35 || Math.hypot(tx - ex, tz - ez) < 1.35;
+        child.visible = !nearAgent;
+      }
+    }
+  }
 }
 
 function animate(time) {
@@ -7887,6 +8053,13 @@ window.__GENESIS_PROTO__ = {
       { name: "house", rung: 4, weight: 3 },
       { name: "longhouse", rung: 5, weight: 4 },
       { name: "cistern", rung: 6, weight: 2 },
+      // Phase 10TS: rungs 7 and 8 were missing here. The backend gained `hall`
+      // (7) and `stead` (8) in 10TC; the SPRITES were registered but this table
+      // was not, so for a pair that owns both, `find(e => e.rung === 7|8)`
+      // returned undefined, neither counted, and the HUD named "next: hall" on a
+      // settlement that already had one. Both lanes are at rung 8.
+      { name: "hall", rung: 7, weight: 5 },
+      { name: "stead", rung: 8, weight: 6 },
     ];
     const rungCounts = {};
     let bestRung = 0;
@@ -8160,6 +8333,8 @@ else if (initCam === "orbit") activeCamMode = "orbit";
 else if (initCam === "adam") activeCamMode = "adam";
 else if (initCam === "eve") activeCamMode = "eve";
 else if (initCam === "topdown") activeCamMode = "topdown";
+else if (initCam === "settlement") activeCamMode = "settlement";
+else if (initCam === "interior") activeCamMode = "interior";
 
 focusCiv(initCam === "orbit" ? "orbit" : initCiv);
 
