@@ -4318,8 +4318,20 @@ class FirstPairRuntime:
                     satisfaction = survival.DRINK_SATISFACTION["carried"]
                     outcome_source = "carried"
                 else:
+                    # Phase 10TQ: the SIBLING branch (an empty vessel) already
+                    # names the nearest known water; this one withheld it.
+                    # Measured 2026-11-21: west hit this EIGHT times in 700
+                    # heartbeats while carrying no water at all.
+                    nearest = self._nearest_known_water_for(agent_ref)
+                    hint = ""
+                    if nearest.get("tile_id"):
+                        hint = (
+                            f" The nearest drinkable tile you have observed is "
+                            f"{nearest['tile_id']}, "
+                            f"{_compass_offset((self._world_state.tile_occupancy or {}).get(agent_ref) or '', nearest['tile_id'], int(nearest.get('distance', 0))) or str(int(nearest.get('distance', 0))) + ' tiles away'}.")
                     return {"status": "rejected",
-                            "reason": "This tile is not drinkable and you hold no fresh_water"}
+                            "reason": ("This tile is not drinkable and you hold no "
+                                       "fresh_water." + hint)}
         # 4. Carried water.
         elif source in ("carried", "belongings", "inventory"):
             inventory = self._get_agent_inventory(agent_ref)
@@ -5949,8 +5961,22 @@ class FirstPairRuntime:
                     return {"status": "rejected",
                             "reason": f"Cooking requires a fire, campfire, or hearth, not a {obj.get('object_type')}"}
                 if not self._is_functional_fire(obj):
+                    # Phase 10TQ: name the route, because there is a DEAD END
+                    # here. A fire is functional only if it was BUILT with
+                    # materials (`_is_functional_fire`), and depositing wood later
+                    # fills `contents`, not `materials` -- so a fire built without
+                    # fuel can never be lit. Measured 2026-11-21: east tried the
+                    # same unlit campfire FIFTEEN times in 700 heartbeats, and the
+                    # old message stated the problem without the way out.
                     return {"status": "rejected",
-                            "reason": f"The {obj.get('object_type')} at {obj_id} has no fuel materials and is unlit"}
+                            "reason": (
+                                f"The {obj.get('object_type')} at {obj_id} has no "
+                                f"fuel materials and is unlit. A fire is lit by "
+                                f"the materials DECLARED WHEN IT IS BUILT -- a "
+                                f"campfire built declaring wood 2 works. Wood "
+                                f"deposited afterwards goes into its contents and "
+                                f"does not light it, so build a new fire and "
+                                f"declare the fuel.")}
                 weather, _ = survival.weather_at(self._pair_id, heartbeat_number)
                 if weather in ("rain", "storm", "blizzard") and not self._in_shelter(obj.get("tile_id", "")):
                     return {"status": "rejected",
