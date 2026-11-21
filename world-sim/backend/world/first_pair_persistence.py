@@ -49,6 +49,10 @@ _WORLD_STATE_FILE = "world_state.json"
 _GOALS_FILE = "goals.json"
 _QUESTIONS_FILE = "questions.json"
 _HEARTBEAT_FILE = "heartbeat.json"
+# Phase 10TW: the append-only FULL history. `heartbeat.json` is a bounded WINDOW
+# of the most recent records; this file holds every one of them, appended O(1).
+_HEARTBEAT_LEDGER_FILE = "heartbeat_ledger.jsonl"
+_HEARTBEAT_WINDOW = 500
 _RUNTIME_POLICY_FILE = "runtime_policy.json"
 _CAPABILITY_GRANT_FILE = "capability_grant.json"
 _EXTRA_GRANTS_FILE = "capability_grants.json"
@@ -2986,45 +2990,242 @@ def _ensure_create_provenance(
     store._append_provenance(action, {"authorization_id": auth_id, "question_id": question_id})
 
 
+def read_heartbeat_records(store_root: Path | str) -> list[dict]:
+    """EVERY heartbeat as plain dicts, for scripts that have only a path.
+
+    Phase 10TW: `heartbeat.json` is a bounded WINDOW now, so a script that reads
+    it raw silently sees only the last few hundred. The LEDGER is the full
+    history, and this is the way to ask for it.
+
+    The two are MERGED, not chosen between. A ledger created mid-history is
+    partial -- the heartbeats already in the window predate it -- and returning
+    the ledger alone silently truncated the viewer's timeline from 14,800
+    heartbeats to the handful appended since.
+    """
+    root = Path(store_root)
+    by_number: dict = {}
+    order: list = []
+
+    def _add(rec: dict) -> None:
+        if not isinstance(rec, dict):
+            return
+        key = rec.get("heartbeat_number")
+        if key not in by_number:
+            order.append(key)
+        by_number[key] = rec              # last write wins
+
+    ledger = root / _HEARTBEAT_LEDGER_FILE
+    if ledger.is_file():
+        try:
+            with ledger.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        _add(json.loads(s))
+                    except Exception:
+                        continue
+        except OSError:
+            pass
+
+    path = root / _HEARTBEAT_FILE
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            rows = data.get("data")
+            if isinstance(rows, list):
+                # Tolerant on purpose: the old raw read was `read_json(p)["data"]`
+                # and did not require the envelope's `type`. Being stricter here
+                # silently emptied stores it used to read.
+                for r in rows:
+                    if isinstance(r, dict) and r.get("heartbeat_number") not in by_number:
+                        _add(r)
+
+    out = [by_number[k] for k in order if k in by_number]
+    out.sort(key=lambda r: r.get("heartbeat_number") or 0)
+    return out
+
+
+def _read_window_records(
+    store: FirstPairPersistenceStore,
+) -> list[HeartbeatRecord]:
+    """The records currently IN the window file (bounded, so cheap)."""
+    try:
+        data = store._read_json(store._path(_HEARTBEAT_FILE))
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        return []
+    out: list[HeartbeatRecord] = []
+    for h in rows:
+        if not isinstance(h, dict):
+            continue
+        try:
+            out.append(HeartbeatRecord(**h))
+        except Exception:
+            continue
+    return out
+
+
+def load_recent_heartbeats(
+    store: FirstPairPersistenceStore, limit: int | None = None
+) -> list[HeartbeatRecord]:
+    """The TAIL of the ledger, without ever holding the whole file.
+
+    Phase 10TW. `heartbeat.json` grew without bound -- one JSON object read in
+    full and rewritten in full on EVERY heartbeat, 330MB for the west lane and
+    ~4.3s of the ~216s heartbeat, doubling every few days. Measured 2026-11-21 it
+    reached the point where a full read raised MemoryError in a plain analysis
+    process.
+
+    The hot path only ever wants the last few records (the runtime asks for
+    `heartbeat_number - 4`, the runner wants `records[-1]`), so it reads the
+    append-only ledger's tail instead.
+    """
+    ledger = store._path(_HEARTBEAT_LEDGER_FILE)
+    if limit is None:
+        # resolved AT CALL TIME so tuning `_HEARTBEAT_WINDOW` actually takes
+        # effect for every caller -- a default bound at import would silently
+        # ignore it.
+        limit = _HEARTBEAT_WINDOW
+    if not ledger.is_file():
+        # a store written before the ledger: fall back to the window file
+        return load_heartbeat_history(store)[-limit:]
+    lines: list[str] = []
+    try:
+        with ledger.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s:
+                    continue
+                lines.append(s)
+                if len(lines) > limit:
+                    del lines[0]
+    except OSError:
+        return load_heartbeat_history(store)[-limit:]
+    out: list[HeartbeatRecord] = []
+    for s in lines:
+        try:
+            out.append(HeartbeatRecord(**json.loads(s)))
+        except Exception:
+            continue
+    # Phase 10TW: top up from the WINDOW when the ledger is shorter than the
+    # limit. A ledger born mid-history holds only the records appended since, and
+    # returning its few lines alone would hide the older heartbeats that are
+    # still sitting in the window file.
+    if len(out) < limit:
+        have = {getattr(r, "heartbeat_number", None) for r in out}
+        older = [r for r in _read_window_records(store)
+                 if getattr(r, "heartbeat_number", None) not in have]
+        if older:
+            out = (older + out)[-limit:]
+    return out
+
+
 def load_heartbeat_history(store: FirstPairPersistenceStore) -> list[HeartbeatRecord]:
+    """The FULL history, deduplicated and in order.
+
+    Kept full on purpose: the viewer's cinema timeline and the evidence exports
+    need EVERY heartbeat, so bounding this would silently truncate them. The hot
+    path must use `load_recent_heartbeats` instead.
+    """
+    by_number: dict = {}
+    order: list = []
+    ledger = store._path(_HEARTBEAT_LEDGER_FILE)
+    if ledger.is_file():
+        try:
+            with ledger.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        rec = HeartbeatRecord(**json.loads(s))
+                    except Exception:
+                        continue
+                    key = getattr(rec, "heartbeat_number", None)
+                    if key not in by_number:
+                        order.append(key)
+                    by_number[key] = rec          # last write wins
+        except OSError:
+            pass
+    # plus the window, for records the ledger does not have (pre-ledger stores)
     data = store._read_json(store._path(_HEARTBEAT_FILE))
     if data and data.get("type") == "heartbeat_record":
-        return [HeartbeatRecord(**h) for h in data["data"]]
-    return []
+        for h in data["data"]:
+            key = h.get("heartbeat_number")
+            if key in by_number:
+                continue
+            by_number[key] = HeartbeatRecord(**h)
+            order.append(key)
+    out = [by_number[k] for k in order if k in by_number]
+    out.sort(key=lambda r: getattr(r, "heartbeat_number", 0) or 0)
+    return out
 
 
 def append_heartbeat(store: FirstPairPersistenceStore, record: HeartbeatRecord) -> None:
-    """Append one heartbeat to the ledger.
+    """Append one heartbeat: O(1) to the ledger, bounded window alongside.
 
-    Guarded (Oct 19 2026): detached runner orphans can outlive their
-    chain and append late. This function used to be read-full /
-    append / write-full with NO store lock and NO idempotence check —
-    concurrent writers clobbered newer records and duplicated old ones,
-    and the duplicate-inflated count masked the loss inside the chain's
-    count==tick invariant. Now: the ledger is re-read fresh under the
-    store lock, and an already-present or older heartbeat_number is a
-    provenance-logged no-op.
+    Guarded (Oct 19 2026): detached runner orphans can outlive their chain and
+    append late. This function used to be read-full / append / write-full with NO
+    store lock and NO idempotence check -- concurrent writers clobbered newer
+    records and duplicated old ones, and the duplicate-inflated count masked the
+    loss inside the chain's count==tick invariant. The lock and the idempotence
+    check stay; what changed (Phase 10TW) is that neither reads the WHOLE history
+    any more.
+
+    The duplicate/stale check now looks at the recent WINDOW rather than all of
+    history. That is the honest trade: an orphan appends LATE, so a duplicate is
+    always near the tail, and a duplicate older than the window cannot occur from
+    the failure this guards. The full history is deduplicated on read anyway.
     """
     with store._store_lock():
-        history = load_heartbeat_history(store)
         n = getattr(record, "heartbeat_number", None)
+        # The window is extended from the PREVIOUS WINDOW, never from the ledger's
+        # tail. A ledger born mid-history has only the few records appended since,
+        # and basing the window on it rewrote a 330MB file down to a handful --
+        # destroying the history it was supposed to preserve. If the window is
+        # SHORT (born during the change, or repaired), it refills from the ledger,
+        # which is the source of truth: the window is a CACHE, not the record.
+        window = _read_window_records(store)
+        if len(window) < _HEARTBEAT_WINDOW:
+            window = load_recent_heartbeats(store, _HEARTBEAT_WINDOW)
+        recent = window if window else load_recent_heartbeats(store)
         if n is not None:
-            if any(getattr(h, "heartbeat_number", None) == n for h in history):
+            if any(getattr(h, "heartbeat_number", None) == n for h in recent):
                 store._append_provenance(
                     "heartbeat_append_skipped_duplicate",
                     {"heartbeat_number": n},
                 )
                 return
-            if any(getattr(h, "heartbeat_number", None) > n for h in history):
+            if any(getattr(h, "heartbeat_number", None) > n for h in recent):
                 store._append_provenance(
                     "heartbeat_append_skipped_stale",
                     {"heartbeat_number": n},
                 )
                 return
-        history.append(record)
+        # 1. the ledger: append-only, the authoritative FULL history
+        try:
+            ledger = store._path(_HEARTBEAT_LEDGER_FILE)
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            with ledger.open("a", encoding="utf-8", newline="\n") as fh:
+                fh.write(json.dumps(asdict(record)) + "\n")
+        except Exception:
+            pass
+        # 2. the window: what the fast readers and the raw file readers see
+        window = recent + [record]
+        if len(window) > _HEARTBEAT_WINDOW:
+            window = window[-_HEARTBEAT_WINDOW:]
         store._atomic_write(
             store._path(_HEARTBEAT_FILE),
-            {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(h) for h in history]},
+            {"type": "heartbeat_record", "schema_version": _PERSISTENCE_SCHEMA_VERSION, "data": [asdict(h) for h in window]},
         )
 
 

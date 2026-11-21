@@ -148,13 +148,19 @@ def test_cross_continent_coordinate_collision_prevention():
 
 
 def test_historical_replay_position_isolation():
-    """Prove that early heartbeat replay does not leak present-day positions."""
+    """Prove that early heartbeat replay does not leak present-day positions.
+
+    Phase 10TW: this read the raw `heartbeat.json`, which is now a bounded
+    WINDOW and no longer starts at heartbeat 1. The full history lives in the
+    ledger, and that is what a replay needs.
+    """
     hb_file = RUNTIME_ROOT / "first-pair" / "heartbeat.json"
     if not hb_file.exists():
         return
 
-    with open(hb_file, "r", encoding="utf-8") as f:
-        heartbeats = json.load(f).get("data", [])
+    from backend.world.first_pair_persistence import read_heartbeat_records
+
+    heartbeats = read_heartbeat_records(RUNTIME_ROOT / "first-pair")
 
     assert len(heartbeats) > 100, "Need history to test replay isolation"
 

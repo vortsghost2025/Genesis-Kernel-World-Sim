@@ -63,6 +63,7 @@ from backend.world.first_pair_persistence import (
     load_extra_capability_grants,
     load_goals,
     load_heartbeat_history,
+    load_recent_heartbeats,
     load_inventory,
     add_to_inventory,
     load_latest_charter,
@@ -2859,7 +2860,7 @@ class FirstPairRuntime:
         recent_failures = []
         prev_act = None
         try:
-            hist = load_heartbeat_history(self._store)
+            hist = load_recent_heartbeats(self._store)
             for rec in reversed(hist):
                 n = rec.get("heartbeat_number")
                 if n is None or n >= heartbeat_number:
@@ -2918,7 +2919,7 @@ class FirstPairRuntime:
                 caps.append(extra.capability_id)
 
         # --- Bounded memory selection ---
-        history = load_heartbeat_history(self._store)
+        history = load_recent_heartbeats(self._store)
         recent_cutoff = max(0, heartbeat_number - 4) if history else 0
 
         visible_object_ids = {o.get("object_id", "") for o in current_tile_objects}
@@ -6669,7 +6670,7 @@ class FirstPairRuntime:
             self._eve_ref: {"observation_summary": "", "decision_summary": "", "uncertainty": ""},
         }
 
-        history = load_heartbeat_history(self._store)
+        history = load_recent_heartbeats(self._store)
         if start_heartbeat is not None:
             current = start_heartbeat
         elif history:

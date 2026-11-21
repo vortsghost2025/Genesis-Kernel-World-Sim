@@ -26,6 +26,7 @@ import json
 import pathlib
 import shutil
 import sys
+from backend.world.first_pair_persistence import read_heartbeat_records  # noqa: E402
 
 WORLD_SIM = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORLD_SIM))
@@ -40,7 +41,8 @@ def load(path: pathlib.Path) -> dict:
 
 def diagnose(store: pathlib.Path) -> dict:
     """Everything needed to decide, and nothing acted upon."""
-    hb = load(store / "heartbeat.json").get("data", [])
+    # Phase 10TW: diagnose over the LEDGER, which holds every heartbeat.
+    hb = read_heartbeat_records(store)
     ws = load(store / "world_state.json").get("data", {})
 
     seen: dict[int, list[int]] = {}

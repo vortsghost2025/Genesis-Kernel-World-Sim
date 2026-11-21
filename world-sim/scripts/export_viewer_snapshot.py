@@ -26,6 +26,7 @@ import struct
 import sys
 import zlib
 from pathlib import Path
+from backend.world.first_pair_persistence import read_heartbeat_records  # noqa: E402
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
 RUNTIME_ROOT = WORLD_SIM / ".runtime"
@@ -374,7 +375,9 @@ def build_pair_snapshot(pair_name: str, store: Path, true_map: dict) -> dict | N
     if not (store / "heartbeat.json").exists() or not (store / "world_state.json").exists():
         return None
 
-    heartbeats = read_json(store / "heartbeat.json")["data"]
+    # Phase 10TW: heartbeat.json is a bounded WINDOW; the LEDGER is the
+    # full history, and the cinema timeline needs every heartbeat.
+    heartbeats = read_heartbeat_records(store)
     world_state = read_json(store / "world_state.json")["data"]
     goals = read_json(store / "goals.json")["data"] if (store / "goals.json").exists() else []
     questions = (

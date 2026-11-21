@@ -375,8 +375,13 @@ def resolution_proof(env: dict, world_sim_root: Path) -> tuple[bool, str]:
 
 
 def _store_counts(store_root: Path) -> tuple[int | None, int | None]:
-    """Read (heartbeat record count, world tick) from the authoritative
-    store; (None, None) when unparseable."""
+    """Read (heartbeat record count, world tick) from the authoritative store.
+
+    Phase 10TW: the COUNT is now the bounded window's length, not the number of
+    heartbeats ever run, so it is no longer a position. The TICK is -- the
+    codebase already decided that ("the tick is the only authoritative heartbeat
+    position"), so nothing here may require the two to agree.
+    """
     try:
         hb = _read_json(store_root / "heartbeat.json")
         count = len(hb.get("data", []))
@@ -391,21 +396,27 @@ def _store_counts(store_root: Path) -> tuple[int | None, int | None]:
 
 
 def already_persisted(store_root: Path, expect: int) -> bool:
+    """True when the world has already reached `expect`. The TICK decides."""
     count, tick = _store_counts(store_root)
-    if count is None or tick is None:
+    if tick is None:
         return False
-    return count >= expect and tick >= expect
+    return tick >= expect
 
 
 def preflight(store_root: Path, expect: int) -> tuple[bool, str]:
+    """The store must sit exactly one heartbeat behind `expect`.
+
+    Phase 10TW: the record count is no longer required to equal expect-1. It was
+    a legacy invariant from when `heartbeat.json` held every heartbeat; bounding
+    it would have made this refuse EVERY run ("record count 500 != expected
+    15260"). The tick is the position.
+    """
     count, tick = _store_counts(store_root)
-    if count is None or tick is None:
+    if tick is None:
         return False, "store parse failed (heartbeat.json/world_state.json)"
-    if count != expect - 1:
-        return False, f"record count {count} != expected {expect - 1} (expect-1)"
     if tick != expect - 1:
         return False, f"tick {tick} != expected {expect - 1} (expect-1)"
-    return True, f"record count {count}, tick {tick}"
+    return True, f"record count {count} (window), tick {tick}"
 
 
 def export_state_evidence(

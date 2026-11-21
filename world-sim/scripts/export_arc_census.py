@@ -34,6 +34,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from backend.world.first_pair_persistence import read_heartbeat_records  # noqa: E402
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
 RUNTIME_ROOT = WORLD_SIM / ".runtime"
@@ -120,7 +121,9 @@ def census_pair(store: Path, start: int, end: int) -> dict:
 
     hb_path = store / "heartbeat.json"
     if hb_path.is_file():
-        heartbeats = read_json(hb_path).get("data", [])
+        # Phase 10TW: the ledger holds the full history; the window file does
+        # not, and a census over a window would under-report.
+        heartbeats = read_heartbeat_records(store)
         if heartbeats:
             out["tick_now"] = heartbeats[-1].get("heartbeat_number")
         in_arc = [
