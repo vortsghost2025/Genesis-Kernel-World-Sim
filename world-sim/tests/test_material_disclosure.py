@@ -152,6 +152,23 @@ def test_the_materials_fact_carries_no_directive():
                 assert banned not in low, (banned, line[:140])
 
 
+def test_a_wood_tile_is_named_as_a_forest_to_hew_for_structural_timber():
+    """Phase 10UA: east_eve hit 'needs at least 1 structural timber' FIFTY times
+    in 60 heartbeats with 0 hew_timber attempts ever -- she knew where the stone
+    was, but not that a wood tile is a FOREST she can hew for structural timber.
+    A wood tile is not a wood pile: it is trees. This line must connect them."""
+    prompt = m.build_system_prompt(_ctx(nearest_known_materials={
+        "wood": {"tile_id": "cont_a_gen_-42_4", "distance": 1}}))
+    assert "is a FOREST" in prompt, prompt
+    assert "hew_timber" in prompt, prompt
+    assert "structural timber" in prompt, prompt
+
+
+def test_the_forest_note_only_appears_when_materials_are_disclosed():
+    prompt = m.build_system_prompt(_ctx())
+    assert "is a FOREST" not in prompt
+
+
 # --- the drink line ---------------------------------------------------------
 
 def _drink_line(prompt: str) -> str:

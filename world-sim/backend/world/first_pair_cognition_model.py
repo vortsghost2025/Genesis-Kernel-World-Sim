@@ -2485,9 +2485,16 @@ def build_system_prompt(context: AgentContext) -> str:
                 f"{kind}: {where['tile_id']} "
                 f"({bearing or str(dist) + ' tiles away'})")
         if parts:
+            # Phase 10UA: connect the resource to the ACTION. Measured 2026-11-22:
+            # east_eve hit "needs at least 1 structural timber" FIFTY times in 60
+            # heartbeats with 0 hew_timber attempts ever -- she knew where the
+            # stone was, but not that a wood tile is a FOREST she can hew for
+            # structural timber. A wood tile is not a wood pile: it is trees.
             settlement_lines.append(
                 "Fact: the nearest tiles you have observed holding the materials "
-                "a build needs, by distance -- " + "; ".join(parts) + "."
+                "a build needs, by distance -- " + "; ".join(parts) + ". A tile "
+                "that lists wood is a FOREST: strike it with hew_timber (an axe "
+                "or knapped blade) to get structural timber for the ladder."
             )
 
     settlement_section = ""
