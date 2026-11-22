@@ -764,11 +764,9 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
             elif _casefolded_contaminated(desc):
                 errors.append("action:contaminated_description")
         mats = raw.get("materials")
-        if mats is None or (isinstance(mats, dict) and not mats):
-            errors.append("action:empty_materials")
-        elif not isinstance(mats, dict):
+        if mats is not None and not isinstance(mats, dict):
             errors.append("action:materials_not_a_dict")
-        else:
+        elif isinstance(mats, dict):
             if len(mats) > _MAX_BUILD_MATERIAL_ENTRIES:
                 errors.append("action:too_many_materials")
             total = 0
@@ -776,15 +774,20 @@ def validate_action_exact(raw: dict, context_agent_id: str) -> list[str]:
                 if not isinstance(kind, str) or not kind.strip():
                     errors.append("action:bad_material_kind")
                     continue
-                if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+                # Phase 10TY: an EMPTY dict and a ZERO amount are NOT errors.
+                # A lean-to's stage plan is {foundation: {timber: 1}, frame: {},
+                # walls: {}, roofed: {}, finished: {}} -- every stage after the
+                # foundation is FREE, so declaring 0 is the correct declaration,
+                # and rejecting it made a lean-to unfinishable: 57 build
+                # failures in 200 heartbeats on 2026-11-22. The RUNTIME enforces
+                # cost (a new build with 0 materials is refused with its rung
+                # floor), so this does not weaken the contract.
+                if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
                     # Phase 10TU: NAME THE VALUE. The message said which material
                     # was wrong and never what was wrong with it, so the repair
                     # round could not tell the model what to change and it
-                    # repeated the same mistake -- measured 2026-11-21, west_eve
-                    # lost 8 heartbeats to `bad_material_amount_timber` and
-                    # `bad_material_amount_wood` in a single window. Same defect as
-                    # 10SH's refusal that printed a different number than it
-                    # enforced: a sentence about a value must contain the value.
+                    # repeated the same mistake. Same defect as 10SH's refusal
+                    # that printed a different number than it enforced.
                     errors.append(
                         f"action:bad_material_amount_{kind}:{str(amount)[:24]}")
                     continue

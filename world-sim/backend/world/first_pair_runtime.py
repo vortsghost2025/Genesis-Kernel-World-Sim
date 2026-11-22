@@ -5528,7 +5528,12 @@ class FirstPairRuntime:
         for kind, amount in materials.items():
             if not isinstance(kind, str) or not kind.strip():
                 return {"status": "rejected", "reason": "Invalid material kind"}
-            if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+            # Phase 10TY: a ZERO amount is NOT invalid -- every stage of a
+            # lean-to after the foundation is free, so a lean-to can never be
+            # finished if 0 is refused. Only a NEGATIVE or non-integer amount is
+            # an error here. The rung-floor check below is what enforces cost
+            # for a new build (declared_timber 0 < its floor).
+            if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
                 return {"status": "rejected", "reason": f"Invalid material amount for {kind}"}
 
         effective_materials: dict[str, int] = {}

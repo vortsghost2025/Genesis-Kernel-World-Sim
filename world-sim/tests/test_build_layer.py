@@ -131,25 +131,32 @@ class TestBuildActionValidation:
     def test_valid_accepted(self):
         assert validate_action_exact(_build_action(), ADAM_ID) == []
 
-    def test_empty_materials_rejected(self):
+    def test_empty_materials_is_valid_for_a_free_stage(self):
+        """Phase 10TY: a lean-to's stage plan is {foundation: {timber: 1},
+        frame: {}, walls: {}, roofed: {}, finished: {}} -- every stage after the
+        foundation is FREE. Declaring nothing for a free stage is correct, and
+        rejecting it made a lean-to unfinishable: 57 build failures in 200
+        heartbeats on 2026-11-22. The RUNTIME enforces cost for a new build.
+        """
         errors = validate_action_exact(_build_action(materials={}), ADAM_ID)
-        assert "action:empty_materials" in errors
+        assert "action:empty_materials" not in errors, errors
 
-    def test_missing_materials_rejected(self):
+    def test_missing_materials_is_valid_for_a_free_stage(self):
         action = _build_action()
         del action["materials"]
         errors = validate_action_exact(action, ADAM_ID)
-        assert "action:empty_materials" in errors
+        assert "action:empty_materials" not in errors, errors
 
     def test_non_dict_materials_rejected(self):
         errors = validate_action_exact(
             _build_action(materials=["stone"]), ADAM_ID)
         assert "action:materials_not_a_dict" in errors
 
-    def test_zero_amount_rejected(self):
+    def test_zero_amount_is_valid_for_a_free_stage(self):
         errors = validate_action_exact(
             _build_action(materials={"stone": 0}), ADAM_ID)
-        assert any(e.startswith("action:bad_material_amount_stone") for e in errors), errors
+        assert not [e for e in errors
+                    if e.startswith("action:bad_material_amount")], errors
 
     def test_negative_amount_rejected(self):
         errors = validate_action_exact(
@@ -168,8 +175,9 @@ class TestBuildActionValidation:
         named the material and not the offending amount, so the model repeated it.
         Same defect as 10SH's refusal that printed a different number than it
         enforced."""
-        for bad, expect in ((0, "0"), (-2, "-2"), (True, "True"),
-                            ("2", "2"), (2.5, "2.5")):
+        for bad, expect in ((-2, "-2"), (True, "True"), ("2", "2"), (2.5, "2.5")):
+            # note: 0 is deliberately NOT here -- a lean-to's later stages are
+            # free, so declaring 0 is correct (10TY).
             errors = validate_action_exact(
                 _build_action(materials={"timber": bad}), ADAM_ID)
             hit = [e for e in errors if e.startswith("action:bad_material_amount_timber")]
