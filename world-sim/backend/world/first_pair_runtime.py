@@ -1465,6 +1465,25 @@ class FirstPairRuntime:
                                   "distance": int(distance)}
         return best
 
+    def _forest_hint(self, agent_ref: str) -> str:
+        """Where the nearest forest is, if this agent has ever seen one.
+
+        Phase 10UC. Measured 2026-11-22: every tile the four agents stand on
+        lacks a wood resource, so they CANNOT hew where they stand -- and the
+        insufficient-timber refusal told them to hew without saying where to do
+        it. A wood tile IS a forest: name it and the route, not just the action.
+        """
+        where = (self._nearest_known_materials_for(agent_ref) or {}).get("wood")
+        if not isinstance(where, dict) or not where.get("tile_id"):
+            return ""
+        pos = str((self._world_state.tile_occupancy or {}).get(agent_ref) or "")
+        dist = int(where.get("distance", 0) or 0)
+        bearing = _compass_offset(pos, str(where["tile_id"]), dist)
+        return (f" The nearest forest you know is {where['tile_id']}"
+                f"{(' (' + bearing + ')') if bearing else ''}. Go there and "
+                f"hew_timber with an axe or knapped blade first, then come back "
+                f"and build.")
+
     def _rollup_for(self, agent_ref: str) -> str:
         """Best-effort roll-up for the prompt; "" when unavailable."""
         try:
@@ -5483,6 +5502,7 @@ class FirstPairRuntime:
                         f"(flint_knife); a stone_axe is crafted from stone x2 "
                         f"plus wood x1 on a crafting_surface, and a flint_knife "
                         f"from flint x2 plus wood x1."
+                        + self._forest_hint(agent_ref)
                         + pool_note
                     ),
                 }
@@ -5602,6 +5622,7 @@ class FirstPairRuntime:
                         f"(flint_knife); a stone_axe is crafted from stone x2 "
                         f"plus wood x1 on a crafting_surface, and a flint_knife "
                         f"from flint x2 plus wood x1."
+                        + self._forest_hint(agent_ref)
                     ),
                 }
             spend = stage_materials

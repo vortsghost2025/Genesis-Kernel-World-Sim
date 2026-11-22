@@ -103,6 +103,44 @@ def test_the_rung_minimum_refusal_still_states_its_own_number():
             and 'f"A {object_type} needs at least {timber_min} structural "' in src)
 
 
+def test_the_insufficient_timber_refusal_names_the_nearest_forest(tmp_path):
+    """Phase 10UC: every tile the four agents stand on lacks a wood resource, so
+    they CANNOT hew where they stand. The old message said only 'fell trees with
+    hew_timber' and never said WHERE, which is why the loop repeated for days.
+    A wood tile IS a forest: the refusal must name it and the route."""
+    from backend.world.first_pair_fog_adapter import persist_known_map
+    rt = _runtime(tmp_path)
+    persist_known_map(rt._store.root, "east_adam", {
+        "schema_version": 1, "agent_id": "x",
+        "known_tiles": {"cont_a_gen_2_0": {"observed_resources": ["wood"]}},
+        "known_landmarks": {}, "named_places": {}, "routes": [],
+        "hypotheses": [], "myths": [], "contact_evidence": [],
+        "last_observation_tick": 1,
+    })
+    add_to_inventory(rt._store, "east_adam", "timber", 5)
+    ok = _build(rt, "lean-to", {"timber": 1}, 100, "lt-forest-1")
+    assert ok["status"] == "success", ok
+
+    rt._world_state.tile_occupancy["east_adam"] = "cont_a_gen_1_0"
+    bad = _build(rt, "lean-to", {"stone": 1}, 101, "lt-forest-2", tile="cont_a_gen_1_0")
+    assert bad["status"] == "rejected", bad
+    assert "nearest forest" in bad["reason"], bad["reason"]
+    assert "cont_a_gen_2_0" in bad["reason"], bad["reason"]
+    assert "hew_timber" in bad["reason"], bad["reason"]
+    assert "1 tile east" in bad["reason"], bad["reason"]
+
+
+def test_the_forest_hint_is_silent_when_no_forest_is_known(tmp_path):
+    rt = _runtime(tmp_path)
+    add_to_inventory(rt._store, "east_adam", "timber", 5)
+    ok = _build(rt, "lean-to", {"timber": 1}, 100, "lt-forest-3")
+    assert ok["status"] == "success", ok
+    rt._world_state.tile_occupancy["east_adam"] = "cont_a_gen_1_0"
+    bad = _build(rt, "lean-to", {"stone": 1}, 101, "lt-forest-4", tile="cont_a_gen_1_0")
+    assert bad["status"] == "rejected"
+    assert "nearest forest" not in bad["reason"], bad["reason"]
+
+
 def test_a_compliant_declaration_still_advances(tmp_path):
     rt = _runtime(tmp_path)
     add_to_inventory(rt._store, "east_adam", "timber", 5)
