@@ -128,6 +128,11 @@ def test_the_insufficient_timber_refusal_names_the_nearest_forest(tmp_path):
     assert "cont_a_gen_2_0" in bad["reason"], bad["reason"]
     assert "hew_timber" in bad["reason"], bad["reason"]
     assert "1 tile east" in bad["reason"], bad["reason"]
+    # Phase 10UE: the confusion that actually caused the loop -- wood, clay and
+    # stone are NOT structural timber. Timber is hewn logs, and only hewing makes
+    # them. Without this sentence a model reads "structural timber" as wood.
+    assert "are NOT structural timber" in bad["reason"], bad["reason"]
+    assert "hewn LOGS" in bad["reason"], bad["reason"]
 
 
 def test_the_forest_hint_is_silent_when_no_forest_is_known(tmp_path):

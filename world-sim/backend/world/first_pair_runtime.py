@@ -5617,11 +5617,14 @@ class FirstPairRuntime:
                     "reason": (
                         f"A {object_type} needs at least {floor_timber} structural "
                         f"timber to bear its own weight; you declared "
-                        f"{declared_timber}. Fell trees with hew_timber once you "
-                        f"hold an axe (stone_axe, iron_axe) or knapped blade "
-                        f"(flint_knife); a stone_axe is crafted from stone x2 "
-                        f"plus wood x1 on a crafting_surface, and a flint_knife "
-                        f"from flint x2 plus wood x1."
+                        f"{declared_timber}. Wood, clay and stone are NOT structural "
+                        f"timber: timber is hewn LOGS, and the only way to get it "
+                        f"is to strike a tree with hew_timber while you hold an axe "
+                        f"(stone_axe, iron_axe) or a knapped blade (flint_knife). "
+                        f"Fell trees with hew_timber once you hold one; a stone_axe "
+                        f"is crafted from stone x2 plus wood x1 on a "
+                        f"crafting_surface, and a flint_knife from flint x2 plus "
+                        f"wood x1."
                         + self._forest_hint(agent_ref)
                     ),
                 }
