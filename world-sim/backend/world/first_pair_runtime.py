@@ -1011,8 +1011,19 @@ class FirstPairRuntime:
                 ),
                 "created_heartbeat": int(state.tick or 0),
                 "provenance": "operator-provision",
+                # Phase 10UG: a FOOD provision was created with `contents: {}` --
+                # EMPTY -- so a lean-to's cache held nothing, and 10SF's
+                # empty-provision clearing then deleted it as bait the first time
+                # an agent tried to extract it. Measured 2026-11-23, live:
+                # hb15837 rejected "operator-provision-hb15832-edible_roots-1 is
+                # EMPTY" the heartbeat after it was given, while east_eve sat at
+                # hunger 100 with an empty pack. A cache must HOLD its gift:
+                # BOTH paths read it -- the downed-feed path uses `materials`,
+                # and `use_object extract` uses `contents`. Set both, or the gift
+                # is a name on an empty box.
                 "materials": {} if is_water else {str(act.get("kind")): amount},
-                "contents": {"fresh_water": amount} if is_water else {},
+                "contents": ({"fresh_water": amount} if is_water
+                             else {str(act.get("kind")): amount}),
             }
             applied += 1
         state.public_objects = objects

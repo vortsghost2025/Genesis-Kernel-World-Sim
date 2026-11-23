@@ -83,7 +83,11 @@ def test_a_queued_food_provision_lands_in_materials(tmp_path):
     assert rt._apply_operator_provision_queue() == 1
     obj = rt._world_state.public_objects["operator-provision-hb100-edible_roots-1"]
     assert obj["materials"]["edible_roots"] == 3
-    assert obj["contents"] == {}
+    # Phase 10UG: a cache must also be EXTRACTABLE. The feed path reads materials;
+    # `use_object extract` reads contents. Before this, a food cache was created
+    # with contents == {} (empty) and 10SF's empty-provision clearing deleted it
+    # as bait the first time an agent tried to extract it -- live at hb15837.
+    assert obj["contents"]["edible_roots"] == 3
 
 
 def test_the_provision_is_drunk_and_eaten_by_a_downed_body(tmp_path):
