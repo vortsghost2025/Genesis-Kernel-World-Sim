@@ -1182,19 +1182,24 @@ class FirstPairRuntime:
             obs["discoveries"] = discoveries
         return obs
 
-    def _get_effective_adjacency(self, current_pos: str) -> list[str]:
-        """Adjacent tiles from fog-derived topology or legacy policy."""
+    def _get_effective_topology(self) -> dict:
+        """The exact allowed tiles and directed edges movement enforces."""
         if self._fog_active():
             true_map = load_true_map(self._get_data_root())
             known_maps = [
                 load_known_map(self._store.root, ref)
                 for ref in (self._adam_ref, self._eve_ref)
             ]
-            topology = derive_topology(
+            return derive_topology(
                 true_map, known_maps,
                 public_objects=self._public_object_list(),
             )
-            for tile in topology["tiles"]:
+        return self._runtime_policy.topology
+
+    def _get_effective_adjacency(self, current_pos: str) -> list[str]:
+        """Adjacent tiles from fog-derived topology or legacy policy."""
+        if self._fog_active():
+            for tile in self._get_effective_topology()["tiles"]:
                 if tile["tile_id"] == current_pos:
                     return tile["adjacent"]
             return []
@@ -1202,18 +1207,7 @@ class FirstPairRuntime:
 
     def _get_effective_allowed_tiles(self) -> list[str]:
         """Allowed tile IDs from fog-derived topology or legacy policy."""
-        if self._fog_active():
-            true_map = load_true_map(self._get_data_root())
-            known_maps = [
-                load_known_map(self._store.root, ref)
-                for ref in (self._adam_ref, self._eve_ref)
-            ]
-            topology = derive_topology(
-                true_map, known_maps,
-                public_objects=self._public_object_list(),
-            )
-            return topology["allowed_tile_ids"]
-        return self._runtime_policy.topology.get("allowed_tile_ids", [])
+        return self._get_effective_topology().get("allowed_tile_ids", [])
 
     def _public_object_list(self) -> list[dict]:
         """Flat public-object records for the wall-unlock seam.
@@ -1430,7 +1424,9 @@ class FirstPairRuntime:
     # The materials an agent's build decisions turn on. Ordered by the ladder.
     _DISCLOSED_MATERIALS = ("stone", "clay", "wood", "flint", "iron_ore")
 
-    def _nearest_known_materials_for(self, agent_ref: str) -> dict:
+    def _nearest_known_materials_for(
+        self, agent_ref: str, allowed_tile_ids: list[str] | None = None
+    ) -> dict:
         """Nearest PERSONALLY observed tile for each material the ladder needs.
 
         Phase 10SX. Measured 2026-11-16: west asked "What is the nearest location
@@ -1455,9 +1451,22 @@ class FirstPairRuntime:
         if pos_xy is None:
             return {}
         continent = self._tile_continent(str(position or ""))
+        try:
+            allowed = {
+                str(tid) for tid in (
+                    allowed_tile_ids
+                    if allowed_tile_ids is not None
+                    else self._get_effective_allowed_tiles()
+                )
+            }
+        except Exception:
+            return {}
         best: dict[str, dict] = {}
         for tid, entry in tiles.items():
             if not isinstance(entry, dict):
+                continue
+            # The effective movement graph owns eligibility, including unlocks.
+            if str(tid) not in allowed:
                 continue
             # The continents share a coordinate space, so a tile on the other
             # one is not "three tiles away" from this agent.
@@ -1466,7 +1475,8 @@ class FirstPairRuntime:
             xy = self._tile_xy(str(tid))
             if xy is None:
                 continue
-            distance = max(abs(xy[0] - pos_xy[0]), abs(xy[1] - pos_xy[1]))
+            # Ordinary movement is cardinal: a diagonal is two steps, not one.
+            distance = abs(xy[0] - pos_xy[0]) + abs(xy[1] - pos_xy[1])
             observed = entry.get("observed_resources") or []
             for kind in self._DISCLOSED_MATERIALS:
                 if kind not in observed:
@@ -1476,21 +1486,75 @@ class FirstPairRuntime:
                                   "distance": int(distance)}
         return best
 
-    def _forest_hint(self, agent_ref: str) -> str:
-        """Where the nearest forest is, if this agent has ever seen one.
+    def _nearest_reachable_forest_for(
+        self, agent_ref: str, exclude_tile_id: str = ""
+    ) -> dict:
+        """Nearest observed wood tile reachable on the effective movement graph.
 
-        Phase 10UC. Measured 2026-11-22: every tile the four agents stand on
-        lacks a wood resource, so they CANNOT hew where they stand -- and the
-        insufficient-timber refusal told them to hew without saying where to do
-        it. A wood tile IS a forest: name it and the route, not just the action.
+        Targets come only from this agent's own observations. Route eligibility
+        and distance come from the SAME directed topology as `_execute_move`, so
+        missing edges, hazardless blocked seas, and public-object unlocks cannot
+        drift from the journey the agent may actually take.
         """
-        where = (self._nearest_known_materials_for(agent_ref) or {}).get("wood")
+        try:
+            known = load_known_map(self._store.root, agent_ref) or {}
+            topology = self._get_effective_topology()
+        except Exception:
+            return {}
+        tiles = known.get("known_tiles") or {}
+        position = str((self._world_state.tile_occupancy or {}).get(agent_ref) or "")
+        if not tiles or not position:
+            return {}
+        continent = self._tile_continent(position)
+        entries = {
+            str(tid): entry for tid, entry in tiles.items()
+            if isinstance(entry, dict)
+            and self._tile_continent(str(tid)) == continent
+        }
+        allowed = {str(tid) for tid in topology.get("allowed_tile_ids", [])}
+        if position not in allowed:
+            return {}
+        adjacency = {
+            str(record.get("tile_id")): [str(t) for t in record.get("adjacent", [])]
+            for record in topology.get("tiles", [])
+            if isinstance(record, dict) and record.get("tile_id")
+        }
+
+        # Breadth-first search counts real travel edges, never diagonal distance.
+        distances = {position: 0}
+        queue = [position]
+        cursor = 0
+        while cursor < len(queue):
+            current = queue[cursor]
+            cursor += 1
+            for neighbour in adjacency.get(current, []):
+                if neighbour not in allowed or neighbour in distances:
+                    continue
+                distances[neighbour] = distances[current] + 1
+                queue.append(neighbour)
+
+        best: dict = {}
+        for tid, entry in entries.items():
+            if tid == exclude_tile_id:
+                continue
+            if tid not in distances or "wood" not in (entry.get("observed_resources") or []):
+                continue
+            distance = distances[tid]
+            if not best or distance < best["distance"] or (
+                distance == best["distance"] and tid < best["tile_id"]
+            ):
+                best = {"tile_id": tid, "distance": int(distance)}
+        return best
+
+    def _forest_hint(self, agent_ref: str, exclude_tile_id: str = "") -> str:
+        """Name a forest the agent can reach over ground it personally knows."""
+        where = self._nearest_reachable_forest_for(agent_ref, exclude_tile_id)
         if not isinstance(where, dict) or not where.get("tile_id"):
             return ""
         pos = str((self._world_state.tile_occupancy or {}).get(agent_ref) or "")
         dist = int(where.get("distance", 0) or 0)
         bearing = _compass_offset(pos, str(where["tile_id"]), dist)
-        return (f" The nearest forest you know is {where['tile_id']}"
+        return (f" The nearest forest you know with a passable route is {where['tile_id']}"
                 f"{(' (' + bearing + ')') if bearing else ''}. Go there and "
                 f"hew_timber with an axe or knapped blade first, then come back "
                 f"and build.")
@@ -3254,7 +3318,9 @@ class FirstPairRuntime:
             ),
             observed_resource_rollup=self._rollup_for(agent_ref),
             nearest_known_water=self._nearest_known_water_for(agent_ref),
-            nearest_known_materials=self._nearest_known_materials_for(agent_ref),
+            nearest_known_materials=self._nearest_known_materials_for(
+                agent_ref, allowed_tile_ids=policy_allowed
+            ),
             nearest_known_shelter=self._nearest_known_shelter_for(agent_ref),
             nearest_known_food=self._nearest_known_food_for(agent_ref),
             tool_condition=self._tool_states_for(agent_ref),
@@ -4816,6 +4882,19 @@ class FirstPairRuntime:
         if not position:
             return {"status": "rejected", "reason": "No current position"}
 
+        tile_res = [
+            r for r in self._current_tile_resources.get(position, [])
+            if r.get("kind") in ("wood", "timber") and r.get("amount", 0) > 0
+        ]
+        if not tile_res:
+            return {
+                "status": "rejected",
+                "reason": (
+                    f"{position} has no wood resource to hew into timber."
+                    + self._forest_hint(agent_ref, exclude_tile_id=position)
+                ),
+            }
+
         inv = self._get_agent_inventory(agent_ref)
         has_axe = inv.get("stone_axe", 0) > 0 or inv.get("iron_axe", 0) > 0 or inv.get("axe", 0) > 0
         has_knife = inv.get("flint_knife", 0) > 0 or inv.get("knife", 0) > 0 or inv.get("knapped_flint", 0) > 0
@@ -4845,10 +4924,8 @@ class FirstPairRuntime:
                               "with 2 stone and 1 wood a blade can be knapped on the spot.",
                 }
 
-        tile_res = [r for r in self._current_tile_resources.get(position, []) if r.get("kind") in ("wood", "timber") and r.get("amount", 0) > 0]
-        if tile_res:
-            res = tile_res[0]
-            res["amount"] = max(0, res.get("amount", 0) - 1)
+        res = tile_res[0]
+        res["amount"] = max(0, res.get("amount", 0) - 1)
 
         timber_yield = 2 if has_axe else 1
         add_to_inventory(self._store, agent_ref, "timber", timber_yield)

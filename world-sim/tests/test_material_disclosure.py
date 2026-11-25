@@ -42,6 +42,15 @@ def _runtime(tmp_path: Path) -> FirstPairRuntime:
     return rt
 
 
+def _allow_only(rt: FirstPairRuntime, tile_ids: list[str]) -> None:
+    """Set the exact allowed-tile result shared with movement."""
+    topology = {
+        "allowed_tile_ids": list(tile_ids),
+        "tiles": [{"tile_id": tid, "adjacent": []} for tid in tile_ids],
+    }
+    rt._get_effective_topology = lambda: topology
+
+
 def _known_map(rt: FirstPairRuntime, agent_ref: str, tiles: dict) -> None:
     # `load_known_map` validates the full envelope, so the fixture must be a
     # real known map rather than a bare `known_tiles` dict.
@@ -58,6 +67,7 @@ def _known_map(rt: FirstPairRuntime, agent_ref: str, tiles: dict) -> None:
         "contact_evidence": [],
         "last_observation_tick": 1,
     }), encoding="utf-8")
+    _allow_only(rt, list(tiles))
 
 
 def _tile(resources):
@@ -104,6 +114,77 @@ def test_it_ignores_tiles_on_the_other_continent(tmp_path):
 def test_no_known_map_means_no_fact_and_no_crash(tmp_path):
     rt = _runtime(tmp_path)
     assert rt._nearest_known_materials_for("east_adam") == {}
+
+
+def test_material_fact_skips_a_known_travel_barrier(tmp_path):
+    rt = _runtime(tmp_path)
+    _known_map(rt, "east_adam", {
+        "cont_a_gen_0_-1": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+        },
+        "cont_a_gen_2_0": _tile(["wood"]),
+    })
+    _allow_only(rt, [HERE, "cont_a_gen_2_0"])
+    got = rt._nearest_known_materials_for("east_adam")
+    assert got["wood"]["tile_id"] == "cont_a_gen_2_0", got
+
+
+def test_material_fact_counts_cardinal_distance(tmp_path):
+    rt = _runtime(tmp_path)
+    _known_map(rt, "east_adam", {
+        "cont_a_gen_1_1": _tile(["wood"]),
+    })
+    got = rt._nearest_known_materials_for("east_adam")
+    assert got["wood"]["distance"] == 2, got
+
+
+def test_material_fact_respects_an_unlocked_barrier(tmp_path):
+    """Locked first, then bridge-opened: the allowed set causes the difference."""
+    from backend.world.first_pair_fog_adapter import derive_topology, load_known_map
+    rt = _runtime(tmp_path)
+    _known_map(rt, "east_adam", {
+        HERE: _tile([]),
+        "cont_a_gen_0_-1": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+        },
+    })
+    true_map = {
+        "tiles": [
+            {"tile_id": HERE, "coordinates": {"x": 0, "y": 0},
+             "biome": "grassland", "blocks_travel": False},
+            {"tile_id": "cont_a_gen_0_-1", "coordinates": {"x": 0, "y": -1},
+             "biome": "deep_ravine", "blocks_travel": True},
+        ],
+        "travel_edges": [],
+    }
+    rt._world_state.public_objects = {}
+    rt._get_effective_topology = lambda: derive_topology(
+        true_map, [load_known_map(rt._store.root, "east_adam")],
+        public_objects=list(rt._world_state.public_objects.values()),
+    )
+    assert rt._nearest_known_materials_for("east_adam") == {}
+    rt._world_state.public_objects["bridge-1"] = {
+        "object_id": "bridge-1", "object_type": "bridge", "tile_id": HERE,
+    }
+    got = rt._nearest_known_materials_for("east_adam")
+    assert got["wood"]["tile_id"] == "cont_a_gen_0_-1", got
+
+
+def test_material_fact_excludes_a_hazardless_blocked_tile(tmp_path):
+    rt = _runtime(tmp_path)
+    _known_map(rt, "east_adam", {
+        HERE: _tile([]),
+        "cont_a_gen_0_1": {
+            "observed_resources": ["stone"], "observed_terrain": "ocean",
+            "observed_hazards": [],
+        },
+        "cont_a_gen_2_0": _tile(["stone"]),
+    })
+    _allow_only(rt, [HERE, "cont_a_gen_2_0"])
+    got = rt._nearest_known_materials_for("east_adam")
+    assert got["stone"]["tile_id"] == "cont_a_gen_2_0", got
 
 
 # --- the prompt fact --------------------------------------------------------

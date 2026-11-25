@@ -140,6 +140,7 @@ def test_the_hew_timber_refusal_names_the_route(tmp_path):
     knapped on the spot" names the route in its own words. Pinned so it stays
     that way, and written semantically rather than against one phrasing."""
     rt = _runtime(tmp_path)
+    rt._current_tile_resources[TILE] = [{"kind": "wood", "amount": 2}]
     res = rt._execute_action("east_adam", {
         "action_type": "hew_timber", "reason": "need timber",
     }, 101)

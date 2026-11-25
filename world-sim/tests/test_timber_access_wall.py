@@ -191,6 +191,9 @@ def test_hew_timber_knaps_a_blade_when_none_is_held(tmp_path):
     held = load_inventory(rt._store)["east_adam"]
     assert held["stone"] == 3 and held["wood"] == 4
     assert held["timber"] == 1
+    assert rt._current_tile_resources["cont_a_gen_0_0"] == [
+        {"kind": "wood", "amount": 19}
+    ]
     assert "Knapped" in out["detail"]
 
 
@@ -219,4 +222,43 @@ def test_hew_timber_with_a_blade_skips_the_knap(tmp_path):
     assert out["timber_yield"] == 2
     held = load_inventory(rt._store)["east_adam"]
     assert held["stone"] == 5 and held["wood"] == 5
+    assert rt._current_tile_resources["cont_a_gen_0_0"] == [
+        {"kind": "wood", "amount": 19}
+    ]
     assert "Knapped" not in out["detail"]
+
+
+def test_hew_timber_requires_a_tree_and_never_invents_logs(tmp_path):
+    """A tool is not a tree: empty and exhausted tiles must yield no timber."""
+    for case, resources in enumerate((
+        [],
+        [{"kind": "stone", "amount": 3}],
+        [{"kind": "wood", "amount": 0}],
+    )):
+        rt = _runtime(tmp_path / str(case))
+        rt._current_tile_resources["cont_a_gen_0_0"] = resources
+        add_to_inventory(rt._store, "east_adam", "stone_axe", 1)
+        rt._register_tool("east_adam", "stone_axe")
+        condition_before = rt._tool_states_for("east_adam")
+        out = rt._execute_action("east_adam", {
+            "action_type": "hew_timber", "reason": "timber for shelter",
+        }, 100)
+        assert out["status"] == "rejected", (resources, out)
+        assert "no wood resource" in out["reason"].lower(), out["reason"]
+        assert load_inventory(rt._store)["east_adam"].get("timber", 0) == 0
+        assert rt._tool_states_for("east_adam") == condition_before
+
+
+def test_hew_timber_without_a_tree_does_not_consume_knapping_materials(tmp_path):
+    """The location check happens before the fallback blade is paid for."""
+    rt = _runtime(tmp_path)
+    rt._current_tile_resources["cont_a_gen_0_0"] = []
+    add_to_inventory(rt._store, "east_adam", "stone", 2)
+    add_to_inventory(rt._store, "east_adam", "wood", 1)
+    out = rt._execute_action("east_adam", {
+        "action_type": "hew_timber", "reason": "timber for shelter",
+    }, 100)
+    assert out["status"] == "rejected", out
+    held = load_inventory(rt._store)["east_adam"]
+    assert held["stone"] == 2 and held["wood"] == 1
+    assert held.get("timber", 0) == 0

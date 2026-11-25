@@ -122,6 +122,11 @@ def test_the_insufficient_timber_refusal_names_the_nearest_forest(tmp_path):
     assert ok["status"] == "success", ok
 
     rt._world_state.tile_occupancy["east_adam"] = "cont_a_gen_1_0"
+    _effective_topology(
+        rt, ["cont_a_gen_1_0", "cont_a_gen_2_0"],
+        [("cont_a_gen_1_0", "cont_a_gen_2_0"),
+         ("cont_a_gen_2_0", "cont_a_gen_1_0")],
+    )
     bad = _build(rt, "lean-to", {"stone": 1}, 101, "lt-forest-2", tile="cont_a_gen_1_0")
     assert bad["status"] == "rejected", bad
     assert "nearest forest" in bad["reason"], bad["reason"]
@@ -144,6 +149,231 @@ def test_the_forest_hint_is_silent_when_no_forest_is_known(tmp_path):
     bad = _build(rt, "lean-to", {"stone": 1}, 101, "lt-forest-4", tile="cont_a_gen_1_0")
     assert bad["status"] == "rejected"
     assert "nearest forest" not in bad["reason"], bad["reason"]
+
+
+def _forest_map(rt: FirstPairRuntime, tiles: dict) -> None:
+    from backend.world.first_pair_fog_adapter import persist_known_map
+    persist_known_map(rt._store.root, "east_adam", {
+        "schema_version": 1, "agent_id": "x", "known_tiles": tiles,
+        "known_landmarks": {}, "named_places": {}, "routes": [],
+        "hypotheses": [], "myths": [], "contact_evidence": [],
+        "last_observation_tick": 1,
+    })
+
+
+def test_forest_hint_skips_a_ravine_for_a_passable_wood_tile(tmp_path):
+    """Live hb16202 named a sheer-drop ravine as the forest to visit."""
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_0_-1": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+            "observed_terrain": "mountain",
+        },
+        "cont_a_gen_1_0": {"observed_resources": []},
+        "cont_a_gen_2_0": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(
+        rt, ["cont_a_gen_0_0", "cont_a_gen_1_0", "cont_a_gen_2_0"],
+        [("cont_a_gen_0_0", "cont_a_gen_1_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_0_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_2_0"),
+         ("cont_a_gen_2_0", "cont_a_gen_1_0")],
+    )
+    hint = rt._forest_hint("east_adam")
+    assert "cont_a_gen_2_0" in hint, hint
+    assert "cont_a_gen_0_-1" not in hint, hint
+    assert "2 tiles east" in hint, hint
+
+
+def test_forest_hint_counts_cardinal_steps_not_a_diagonal_shortcut(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_1_0": {"observed_resources": []},
+        "cont_a_gen_1_1": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(
+        rt, ["cont_a_gen_0_0", "cont_a_gen_1_0", "cont_a_gen_1_1"],
+        [("cont_a_gen_0_0", "cont_a_gen_1_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_0_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_1_1"),
+         ("cont_a_gen_1_1", "cont_a_gen_1_0")],
+    )
+    hint = rt._forest_hint("east_adam")
+    assert "cont_a_gen_1_1" in hint, hint
+    assert "2 tiles north-east" in hint, hint
+
+
+def test_forest_hint_is_silent_when_the_only_route_is_blocked(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_0_1": {
+            "observed_resources": [],
+            "observed_hazards": ["impenetrable_dark"],
+            "observed_terrain": "forest",
+        },
+        "cont_a_gen_0_2": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(rt, ["cont_a_gen_0_0"], [])
+    assert rt._forest_hint("east_adam") == ""
+
+
+def test_hew_without_a_tree_names_the_same_passable_route(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_0_-1": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+        },
+        "cont_a_gen_1_0": {"observed_resources": []},
+        "cont_a_gen_2_0": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(
+        rt, ["cont_a_gen_0_0", "cont_a_gen_1_0", "cont_a_gen_2_0"],
+        [("cont_a_gen_0_0", "cont_a_gen_1_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_0_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_2_0"),
+         ("cont_a_gen_2_0", "cont_a_gen_1_0")],
+    )
+    rt._current_tile_resources[TILE] = []
+    add_to_inventory(rt._store, "east_adam", "stone_axe", 1)
+    out = rt._execute_action("east_adam", {
+        "action_type": "hew_timber", "reason": "need timber",
+    }, 101)
+    assert out["status"] == "rejected", out
+    assert "no wood resource" in out["reason"], out["reason"]
+    assert "cont_a_gen_2_0" in out["reason"], out["reason"]
+    assert "cont_a_gen_0_-1" not in out["reason"], out["reason"]
+
+
+def test_no_tree_refusal_does_not_send_agent_back_to_exhausted_current_tile(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": ["wood"]},
+        "cont_a_gen_1_0": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(
+        rt, ["cont_a_gen_0_0", "cont_a_gen_1_0"],
+        [("cont_a_gen_0_0", "cont_a_gen_1_0"),
+         ("cont_a_gen_1_0", "cont_a_gen_0_0")],
+    )
+    rt._current_tile_resources[TILE] = []
+    add_to_inventory(rt._store, "east_adam", "stone_axe", 1)
+    out = rt._execute_action("east_adam", {
+        "action_type": "hew_timber", "reason": "need timber",
+    }, 101)
+    assert out["status"] == "rejected", out
+    assert "cont_a_gen_1_0" in out["reason"], out["reason"]
+    assert "(here)" not in out["reason"], out["reason"]
+
+
+def test_forest_hint_uses_a_bridge_unlocked_ravine(tmp_path):
+    """The guidance graph includes the same public-object unlocks as movement."""
+    from backend.world.first_pair_fog_adapter import derive_topology, load_known_map
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_0_-1": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+        },
+    })
+    true_map = {
+        "tiles": [
+            {"tile_id": "cont_a_gen_0_0", "coordinates": {"x": 0, "y": 0},
+             "biome": "grassland", "blocks_travel": False},
+            {"tile_id": "cont_a_gen_0_-1", "coordinates": {"x": 0, "y": -1},
+             "biome": "deep_ravine", "blocks_travel": True},
+        ],
+        "travel_edges": [],
+    }
+    rt._world_state.public_objects = {}
+    rt._get_effective_topology = lambda: derive_topology(
+        true_map, [load_known_map(rt._store.root, "east_adam")],
+        public_objects=list(rt._world_state.public_objects.values()),
+    )
+    assert rt._forest_hint("east_adam") == ""
+    rt._world_state.public_objects["bridge-1"] = {
+        "object_id": "bridge-1", "object_type": "bridge",
+        "tile_id": "cont_a_gen_0_0",
+    }
+    hint = rt._forest_hint("east_adam")
+    assert "cont_a_gen_0_-1" in hint, hint
+    assert "1 tile south" in hint, hint
+
+
+def _effective_topology(rt: FirstPairRuntime, allowed: list[str], edges: list[tuple[str, str]]) -> None:
+    """Inject the exact graph movement will use, with directed travel edges."""
+    adjacency = {tid: set() for tid in allowed}
+    for source, target in edges:
+        adjacency.setdefault(source, set()).add(target)
+    topology = {
+        "allowed_tile_ids": list(allowed),
+        "tiles": [
+            {"tile_id": tid, "adjacent": sorted(adjacency.get(tid, set()))}
+            for tid in allowed
+        ],
+    }
+    rt._get_effective_topology = lambda: topology
+
+
+def test_forest_hint_never_routes_through_a_hazardless_blocked_ocean(tmp_path):
+    """Generated open_sea has no hazards and blocks travel by missing edges."""
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_1_0": {
+            "observed_resources": [], "observed_terrain": "ocean",
+            "observed_hazards": [],
+        },
+        "cont_a_gen_2_0": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(rt, ["cont_a_gen_0_0"], [])
+    assert rt._forest_hint("east_adam") == ""
+
+
+def test_forest_hint_rejects_a_blocked_current_tile_even_with_wood(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {
+            "observed_resources": ["wood"],
+            "observed_hazards": ["sheer_drop"],
+        },
+    })
+    _effective_topology(rt, [], [])
+    assert rt._forest_hint("east_adam") == ""
+
+
+def test_forest_hint_requires_edges_even_when_every_node_is_allowed(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_1_0": {"observed_resources": []},
+        "cont_a_gen_2_0": {"observed_resources": ["wood"]},
+    })
+    _effective_topology(
+        rt, ["cont_a_gen_0_0", "cont_a_gen_1_0", "cont_a_gen_2_0"], []
+    )
+    assert rt._forest_hint("east_adam") == ""
+
+
+def test_forest_hint_obeys_directed_edges_in_both_directions(tmp_path):
+    rt = _runtime(tmp_path)
+    _forest_map(rt, {
+        "cont_a_gen_0_0": {"observed_resources": []},
+        "cont_a_gen_1_0": {"observed_resources": ["wood"]},
+    })
+    allowed = ["cont_a_gen_0_0", "cont_a_gen_1_0"]
+    _effective_topology(rt, allowed, [("cont_a_gen_1_0", "cont_a_gen_0_0")])
+    assert rt._forest_hint("east_adam") == ""
+    _effective_topology(rt, allowed, [("cont_a_gen_0_0", "cont_a_gen_1_0")])
+    hint = rt._forest_hint("east_adam")
+    assert "cont_a_gen_1_0" in hint, hint
+    assert "1 tile east" in hint, hint
 
 
 def test_a_compliant_declaration_still_advances(tmp_path):

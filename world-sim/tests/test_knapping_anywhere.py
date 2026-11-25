@@ -127,6 +127,7 @@ def test_a_real_surface_still_works_for_knapping(tmp_path):
 def test_the_hew_promise_and_the_craft_rule_now_agree(tmp_path):
     """The whole point: the sentence hew_timber prints must be executable."""
     rt = _runtime(tmp_path)
+    rt._current_tile_resources[TILE] = [{"kind": "wood", "amount": 2}]
     res = rt._execute_action("east_adam", {
         "action_type": "hew_timber", "reason": "need timber"}, 101)
     assert "knapped on the spot" in res["reason"]
