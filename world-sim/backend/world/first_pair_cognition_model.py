@@ -1696,6 +1696,49 @@ def _format_fauna_lines(obs_or_fauna_obs: dict) -> list[str]:
     return lines
 
 
+def _cap_objects_for_prompt(objects, current_tile_id, limit: int = 15) -> list:
+    """Bound world_public_objects for the prompt.
+
+    Drops test-marker spam (test-berry-* objects from the September experiment
+    matrix), prefers objects on the agent's current tile, then newest objects
+    by created_heartbeat. Without this the whole world dump (hundreds of
+    shelters/campfires/storage boxes) went into every heartbeat prompt, which
+    is how a live prompt reached 261k chars / 112k tokens.
+    """
+    items = [v for v in (objects or {}).values() if isinstance(v, dict)]
+    items = [
+        v for v in items
+        if not str(v.get("object_id", "")).startswith("test-berry-")
+    ]
+
+    def _sort_key(o):
+        return (
+            0 if o.get("tile_id") == current_tile_id else 1,
+            -(o.get("created_heartbeat") or 0),
+        )
+
+    items.sort(key=_sort_key)
+    return items[:limit]
+
+
+def _cap_list_for_prompt(items, limit: int = 10) -> list:
+    """Keep only the last `limit` entries of a prompt-bound list, preserving
+    order. Applied to messages, questions, and relationship events so history
+    cannot grow the prompt without bound."""
+    if not items:
+        return items if isinstance(items, list) else []
+    return items[-limit:]
+
+
+def _cap_own_anchors(own_objects, limit: int = 10) -> list:
+    """Newest N of the agent's own built things for the anchor section. Keeps
+    the anchor meaning (your own words come back to you) without letting the
+    section grow into a full building history."""
+    def _hb(o):
+        return o.get("created_heartbeat") or 0
+    return sorted(own_objects, key=_hb)[-limit:]
+
+
 def build_system_prompt(context: AgentContext) -> str:
     # Resolved at call time, not import time: first_pair_runtime imports this
     # module while loading, so a module-level call would be circular.
@@ -1705,20 +1748,20 @@ def build_system_prompt(context: AgentContext) -> str:
     _STRUCTURE_LADDER_DESC = _structure_ladder_description()
     goals_str = json.dumps(context.goals, indent=2) if context.goals else "[]"
     unanswered_str = (
-        json.dumps(context.unanswered_questions, indent=2)
+        json.dumps(_cap_list_for_prompt(context.unanswered_questions, 10), indent=2)
         if context.unanswered_questions
         else "[]"
     )
     objects_str = (
         json.dumps(
-            [v for v in context.world_public_objects.values() if isinstance(v, dict)],
+            _cap_objects_for_prompt(context.world_public_objects, context.position, 15),
             indent=2,
         )
         if context.world_public_objects
         else "[]"
     )
     answered_str = (
-        json.dumps(context.answered_questions, indent=2)
+        json.dumps(_cap_list_for_prompt(context.answered_questions, 10), indent=2)
         if context.answered_questions
         else "[]"
     )
@@ -1738,12 +1781,12 @@ def build_system_prompt(context: AgentContext) -> str:
         else "[]"
     )
     vis_msgs_str = (
-        json.dumps(context.visible_public_messages, indent=2)
+        json.dumps(_cap_list_for_prompt(context.visible_public_messages, 10), indent=2)
         if context.visible_public_messages
         else "[]"
     )
     ans_questions_str = (
-        json.dumps(context.relevant_human_answers, indent=2)
+        json.dumps(_cap_list_for_prompt(context.relevant_human_answers, 10), indent=2)
         if context.relevant_human_answers
         else "[]"
     )
@@ -1760,7 +1803,7 @@ def build_system_prompt(context: AgentContext) -> str:
         else "[]"
     )
     rel_events_str = (
-        json.dumps(context.public_relationship_events, indent=2)
+        json.dumps(_cap_list_for_prompt(context.public_relationship_events, 10), indent=2)
         if context.public_relationship_events
         else "[]"
     )
@@ -1833,7 +1876,9 @@ def build_system_prompt(context: AgentContext) -> str:
     # the charter does and consume no selection budget.
     own_objects = [
         o for o in (context.world_public_objects or {}).values()
-        if isinstance(o, dict) and o.get("creator_agent_id") == context.agent_id
+        if isinstance(o, dict)
+        and o.get("creator_agent_id") == context.agent_id
+        and not str(o.get("object_id", "")).startswith("test-berry-")
     ]
     _anchor_header = (
         "--- YOUR ANCHORS (things you built; your own words; shown verbatim at "
@@ -1843,7 +1888,7 @@ def build_system_prompt(context: AgentContext) -> str:
         f"- [{o.get('object_id', '?')}] on {o.get('tile_id', '?')} "
         f"(heartbeat {o.get('created_heartbeat', '?')}): "
         f"{(o.get('public_description') or '').strip()}"
-        for o in own_objects
+        for o in _cap_own_anchors(own_objects, 10)
         if (o.get("public_description") or "").strip()
     ]
     if _anchor_lines:
@@ -2321,7 +2366,15 @@ def build_system_prompt(context: AgentContext) -> str:
         parts = []
         for kind, remaining in sorted(tool_condition.items()):
             if isinstance(remaining, list) and remaining:
-                parts.append(f"{kind} {remaining}")
+                if len(remaining) > 6:
+                    # Collapse tool spam (300+ identical entries) into a count
+                    # plus durability range instead of dumping the whole list.
+                    parts.append(
+                        f"{kind} x{len(remaining)} "
+                        f"(min {min(remaining)}, latest {remaining[-1]})"
+                    )
+                else:
+                    parts.append(f"{kind} {remaining}")
         if parts:
             settlement_lines.append(
                 "Fact: tool condition (uses left per item): "
