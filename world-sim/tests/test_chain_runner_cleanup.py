@@ -67,3 +67,56 @@ def test_kill_swallows_taskkill_failures(tmp_path, monkeypatch):
     sp = _status(tmp_path, "x.json", "running", 555)
     killed = lc.kill_runner_pids([sp])
     assert killed == [], "a failed kill must not raise out of cleanup"
+
+
+def test_retry_kills_the_timed_out_runner_before_relaunch(tmp_path, monkeypatch):
+    """A timeout is not permission for two writers to share one heartbeat."""
+    store = tmp_path / "store"
+    store.mkdir()
+    state = store / "world_state.json"
+
+    def set_tick(tick: int) -> None:
+        state.write_text(json.dumps({"data": {
+            "tick": tick, "tile_occupancy": {},
+        }}), encoding="utf-8", newline="\n")
+
+    set_tick(4)
+    monkeypatch.setattr(lc, "STORES", {"east": store})
+    monkeypatch.setattr(lc, "PAIRS", ("east",))
+    monkeypatch.setattr(lc, "MAX_RETRIES", 2)
+    monkeypatch.setattr(lc, "RETRY_DELAY_S", 0)
+    monkeypatch.setattr(lc, "EVIDENCE_DIR", tmp_path / "evidence")
+    monkeypatch.setattr(lc, "RUNNER_STATUS_PATHS", [])
+    events = []
+    attempts = []
+
+    def fake_attempt(pair: str, hb: int) -> bool:
+        attempts.append(hb)
+        events.append(f"launch-{len(attempts)}")
+        if len(attempts) == 2:
+            set_tick(5)
+        return True
+
+    waits = iter((False, True))
+    monkeypatch.setattr(lc, "attempt_heartbeat", fake_attempt)
+
+    def fake_wait(pair: str, hb: int) -> bool:
+        result = next(waits)
+        events.append("wait-failed" if not result else "wait-exported")
+        return result
+
+    monkeypatch.setattr(lc, "wait_for_status", fake_wait)
+    kills = []
+
+    def fake_kill(paths):
+        kills.append(list(paths))
+        events.append("kill-old-writer")
+        return [111]
+
+    monkeypatch.setattr(lc, "kill_runner_pids", fake_kill)
+    assert lc.run_tick(5) is True
+    assert attempts == [5, 5]
+    assert kills == [[lc.status_path("east", 5)]]
+    assert events == [
+        "launch-1", "wait-failed", "kill-old-writer", "launch-2", "wait-exported",
+    ]

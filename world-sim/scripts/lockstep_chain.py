@@ -334,6 +334,19 @@ def run_tick(hb: int) -> bool:
                 print(f"HB{hb} {pair}: INVARIANT FAIL — count={count} tick={tick}", flush=True)
                 print("HARD STOP", flush=True)
                 return False
+            if attempt > 1:
+                # A timeout does not kill the detached runner. Kill it and its
+                # child loop BEFORE any retry, or both write the same heartbeat.
+                kill_runner_pids([status_path(pair, hb)])
+                # It may have persisted while the timeout was being harvested.
+                count, tick, _ = store_state(pair)
+                if count == hb and tick == hb:
+                    done[pair] = True
+                    continue
+                if count != hb - 1 or tick != hb - 1:
+                    print(f"HB{hb} {pair}: INVARIANT FAIL — count={count} tick={tick}", flush=True)
+                    print("HARD STOP", flush=True)
+                    return False
             launched[pair] = attempt_heartbeat(pair, hb)
         if all(done.values()):
             break
