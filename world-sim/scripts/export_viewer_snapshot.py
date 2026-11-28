@@ -26,16 +26,17 @@ import struct
 import sys
 import zlib
 from pathlib import Path
-from backend.world.first_pair_persistence import read_heartbeat_records  # noqa: E402
 
 WORLD_SIM = Path(__file__).resolve().parent.parent
+if str(WORLD_SIM) not in sys.path:
+    sys.path.insert(0, str(WORLD_SIM))
+
+from backend.world.first_pair_persistence import read_heartbeat_records  # noqa: E402
+
 RUNTIME_ROOT = WORLD_SIM / ".runtime"
 VIEWER_DIR = WORLD_SIM / "viewer"
 OUT_FILE = VIEWER_DIR / "viewer_data.js"
 BASE_PNG = VIEWER_DIR / "world_base.png"
-
-if str(WORLD_SIM) not in sys.path:
-    sys.path.insert(0, str(WORLD_SIM))
 
 PAIRS = [
     ("east", RUNTIME_ROOT / "first-pair"),

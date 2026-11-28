@@ -7,6 +7,7 @@ execute it cheaply.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +24,28 @@ def _script() -> str:
     scripts = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
     assert scripts, "prototype index.html must contain an inline script"
     return max(scripts, key=len)
+
+
+def test_snapshot_exporter_bootstraps_without_pythonpath(tmp_path):
+    """The scheduled publisher failed every half hour on this exact import."""
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    code = (
+        "import runpy, sys; "
+        "runpy.run_path(sys.argv[1], run_name='viewer_bootstrap_test'); "
+        "print('BOOTSTRAP_OK')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code,
+         str(WORLD_SIM / "scripts" / "export_viewer_snapshot.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "BOOTSTRAP_OK" in result.stdout
 
 
 def test_inline_script_parses():
